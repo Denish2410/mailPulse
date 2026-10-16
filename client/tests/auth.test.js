@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { getToken, setToken, clearToken, hasToken } from '../src/services/tokenStorage.js';
 import { apiClient, getErrorMessage } from '../src/lib/api.js';
 import { registerUser, loginUser, getCurrentUser } from '../src/api/auth.js';
+import { sanitizeRedirectPath } from '../src/utils/navigation.js';
 
 describe('Frontend Authentication Layer & Services', () => {
   beforeEach(() => {
@@ -71,13 +72,15 @@ describe('Frontend Authentication Layer & Services', () => {
       assert.equal(modifiedConfig.headers.Authorization, undefined);
     });
 
-    it('5. Skips token attachment when config.skipAuth is explicitly true', () => {
+    it('5. Skips token attachment when config.skipAuth is explicitly true and cleans skipAuth', () => {
       setToken('token-that-should-be-skipped');
       const interceptor = apiClient.interceptors.request.handlers[0].fulfilled;
       const initialConfig = { headers: {}, skipAuth: true };
       const modifiedConfig = interceptor(initialConfig);
 
       assert.equal(modifiedConfig.headers.Authorization, undefined);
+      // Ensures skipAuth does not leak into transport adapters
+      assert.equal(modifiedConfig.skipAuth, undefined);
     });
 
     it('6. Does not overwrite custom Authorization header if already supplied', () => {
@@ -360,6 +363,47 @@ describe('Frontend Authentication Layer & Services', () => {
       assert.equal(redirectDecision.redirect, true);
       assert.equal(redirectDecision.to, '/login');
       assert.equal(redirectDecision.state.from.pathname, attemptedPath);
+    });
+  });
+
+  describe('Open Redirect Prevention & Navigation Security', () => {
+    it('19. Accepts safe internal relative paths for post-login redirects', () => {
+      assert.equal(sanitizeRedirectPath('/dashboard'), '/dashboard');
+      assert.equal(sanitizeRedirectPath('/campaigns/new'), '/campaigns/new');
+      assert.equal(sanitizeRedirectPath('/contacts?list=active'), '/contacts?list=active');
+    });
+
+    it('20. Rejects external URLs and protocol-relative URLs with fallback to /dashboard', () => {
+      const maliciousDestinations = [
+        'https://attacker.evil.com/phish',
+        'http://malicious.com',
+        '//attacker.com',
+        '//malicious.site/dashboard',
+        '/\\attacker.com',
+        '/#malicious',
+        '/javascript:alert(1)',
+        'javascript:void(0)',
+        'data:text/html,<script>alert(1)</script>',
+        '',
+        '   ',
+        null,
+        undefined,
+      ];
+
+      for (const dest of maliciousDestinations) {
+        assert.equal(
+          sanitizeRedirectPath(dest),
+          '/dashboard',
+          `Failed for malicious destination: ${dest}`
+        );
+      }
+    });
+
+    it('21. Custom fallback path is respected when external URL is rejected', () => {
+      assert.equal(
+        sanitizeRedirectPath('https://evil.com', '/custom-fallback'),
+        '/custom-fallback'
+      );
     });
   });
 });

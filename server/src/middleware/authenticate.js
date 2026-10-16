@@ -51,9 +51,16 @@ export const authenticate = (req, res, next) => {
   try {
     const decoded = verifyAccessToken(token);
 
-    // 4. Attach verified minimal identity to req.auth
+    // 4. Validate presence of user identity claim and attach minimal identity to req.auth
+    const rawUserId = decoded.userId || decoded.sub;
+    if (!rawUserId || typeof rawUserId !== 'string' || !rawUserId.trim()) {
+      return next(
+        new AppError('Authentication required. Invalid or missing authorization token.', 401)
+      );
+    }
+
     req.auth = {
-      userId: decoded.userId || decoded.sub,
+      userId: rawUserId.trim(),
     };
 
     next();

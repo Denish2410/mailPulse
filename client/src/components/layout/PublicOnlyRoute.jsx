@@ -1,5 +1,6 @@
 import { Navigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
+import { sanitizeRedirectPath } from '../../utils/navigation.js';
 
 /**
  * Route guard component for public-only auth routes (e.g. /login and /register).
@@ -30,7 +31,8 @@ export const PublicOnlyRoute = () => {
   }
 
   if (isAuthenticated) {
-    const destination = location.state?.from?.pathname || '/dashboard';
+    const rawTarget = location.state?.from?.pathname || location.state?.from;
+    const destination = sanitizeRedirectPath(rawTarget, '/dashboard');
     return <Navigate to={destination} replace />;
   }
 

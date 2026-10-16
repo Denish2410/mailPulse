@@ -10,6 +10,8 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 
+import jwt from 'jsonwebtoken';
+
 import { authenticate } from '../src/middleware/authenticate.js';
 import { errorHandler } from '../src/middleware/errorHandler.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -163,5 +165,45 @@ describe('Authentication Middleware Foundation', () => {
     // Identity must come exclusively from verified token, ignoring query parameters
     assert.equal(data.auth?.userId, testUserId);
     assert.notEqual(data.auth?.userId, 'hacked_admin_id');
+  });
+
+  it('8. Tokens without user identity claim are rejected with HTTP 401', async () => {
+    const config = getAuthConfig();
+    const tokenWithoutIdentity = jwt.sign({ role: 'admin' }, config.secret, {
+      algorithm: 'HS256',
+      issuer: config.issuer,
+      audience: config.audience,
+    });
+
+    const res = await fetch(`${baseUrl}/protected`, {
+      headers: {
+        Authorization: `Bearer ${tokenWithoutIdentity}`,
+      },
+    });
+
+    const data = await res.json();
+    assert.equal(res.status, 401);
+    assert.equal(data.success, false);
+    assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
+  });
+
+  it('9. Tokens with whitespace-only user identity are rejected with HTTP 401', async () => {
+    const config = getAuthConfig();
+    const tokenWithWhitespaceIdentity = jwt.sign({ userId: '    ' }, config.secret, {
+      algorithm: 'HS256',
+      issuer: config.issuer,
+      audience: config.audience,
+    });
+
+    const res = await fetch(`${baseUrl}/protected`, {
+      headers: {
+        Authorization: `Bearer ${tokenWithWhitespaceIdentity}`,
+      },
+    });
+
+    const data = await res.json();
+    assert.equal(res.status, 401);
+    assert.equal(data.success, false);
+    assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
   });
 });

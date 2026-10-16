@@ -3,6 +3,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
 import { validateLoginForm } from '../../utils/validation.js';
 
+import { sanitizeRedirectPath } from '../../utils/navigation.js';
+
 export const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,8 +55,9 @@ export const LoginPage = () => {
         password: formData.password,
       });
 
-      // Redirect to the intended destination (if preserved) or dashboard
-      const destination = location.state?.from?.pathname || '/dashboard';
+      // Redirect to the sanitized destination (if preserved) or dashboard
+      const rawTarget = location.state?.from?.pathname || location.state?.from;
+      const destination = sanitizeRedirectPath(rawTarget, '/dashboard');
       navigate(destination, { replace: true });
     } catch (err) {
       // Do not log credentials

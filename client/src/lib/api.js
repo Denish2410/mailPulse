@@ -58,9 +58,17 @@ export const apiClient = axios.create({
 /**
  * Request Interceptor: Automatically attaches Bearer token to authenticated requests.
  * Explicitly skips token attachment when config.skipAuth is true (e.g. login/register/health).
+ * Cleans custom skipAuth property so it does not leak into outgoing request configuration.
  */
 apiClient.interceptors.request.use((config) => {
-  if (!config.skipAuth) {
+  const shouldSkipAuth = Boolean(config.skipAuth);
+
+  // Consume and remove custom option to prevent leaking into transport headers/adapters
+  if ('skipAuth' in config) {
+    delete config.skipAuth;
+  }
+
+  if (!shouldSkipAuth) {
     const token = getToken();
     if (token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`;

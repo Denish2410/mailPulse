@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
-import { register, login } from '../controllers/auth.controller.js';
+import { register, login, getMe } from '../controllers/auth.controller.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
 import { registerSchema, loginSchema } from '../validators/auth.validator.js';
 
@@ -16,7 +17,7 @@ const router = Router();
  */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'test' ? 1000 : (Number(process.env.AUTH_RATE_LIMIT_MAX) || 20),
+  max: () => (process.env.NODE_ENV === 'test' ? 1000 : (Number(process.env.AUTH_RATE_LIMIT_MAX) || 20)),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -39,4 +40,12 @@ router.post('/register', authLimiter, validate(registerSchema), register);
  */
 router.post('/login', authLimiter, validate(loginSchema), login);
 
+/**
+ * @route   GET /api/v1/auth/me
+ * @desc    Get currently authenticated user's safe profile
+ * @access  Protected (Bearer token)
+ */
+router.get('/me', authenticate, getMe);
+
 export default router;
+

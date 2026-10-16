@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { hashPassword, verifyPassword } from '../services/password.service.js';
 import { signAccessToken } from '../utils/token.js';
@@ -23,11 +24,12 @@ const DUMMY_ARGON2_HASH =
  * @returns {object} Safe user representation
  */
 const formatSafeUser = (user) => ({
-  id: user._id.toString(),
+  id: user._id ? user._id.toString() : user.id,
   name: user.name,
   email: user.email,
   status: user.status,
   createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
 });
 
 /**
@@ -128,7 +130,43 @@ export const login = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Retrieve the current authenticated user's profile.
+ *
+ * Route: GET /api/v1/auth/me
+ * Access: Protected (Bearer JWT)
+ */
+export const getMe = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+
+  // Validate that the request identity exists and is a valid MongoDB ObjectId
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  // Look up current user in MongoDB to enforce database state
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  // Account-state enforcement: reject suspended accounts
+  if (user.status === 'suspended') {
+    throw new AppError('Your account has been suspended. Please contact support.', 403);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Current user profile retrieved successfully',
+    data: {
+      user: formatSafeUser(user),
+    },
+  });
+});
+
 export default {
   register,
   login,
+  getMe,
 };
