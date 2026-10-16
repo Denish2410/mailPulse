@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getToken } from '../services/tokenStorage.js';
 
 /**
  * Resolves the backend API base URL from Vite environment variables.
@@ -54,4 +55,45 @@ export const apiClient = axios.create({
   },
 });
 
+/**
+ * Request Interceptor: Automatically attaches Bearer token to authenticated requests.
+ * Explicitly skips token attachment when config.skipAuth is true (e.g. login/register/health).
+ */
+apiClient.interceptors.request.use((config) => {
+  if (!config.skipAuth) {
+    const token = getToken();
+    if (token && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+/**
+ * Extracts a safe, user-friendly error message from Axios errors.
+ * Never leaks internal database traces, raw request bodies, or credentials.
+ *
+ * @param {any} error
+ * @param {string} [fallback='An unexpected error occurred. Please try again.']
+ * @returns {string} Sanitized display message
+ */
+export const getErrorMessage = (error, fallback = 'An unexpected error occurred. Please try again.') => {
+  if (!error) return fallback;
+
+  if (error.response?.data?.message && typeof error.response.data.message === 'string') {
+    return error.response.data.message;
+  }
+
+  if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+    return 'The request timed out. Please check your connection and try again.';
+  }
+
+  if (error.message === 'Network Error' || error.code === 'ERR_NETWORK') {
+    return 'Unable to reach the server. Please check your network connection.';
+  }
+
+  return fallback;
+};
+
 export default apiClient;
+
