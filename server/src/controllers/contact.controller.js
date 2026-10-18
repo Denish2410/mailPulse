@@ -68,7 +68,17 @@ export const createContact = asyncHandler(async (req, res) => {
 });
 
 /**
- * Retrieve all contacts belonging to the authenticated user (newest first).
+ * Escape regular expression special characters to ensure literal substring matching.
+ *
+ * @param {string} string - Raw string to escape
+ * @returns {string} Regex-escaped string
+ */
+export const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+/**
+ * Retrieve contacts belonging to the authenticated user with pagination, search, and domain filtering.
  *
  * Route: GET /api/v1/contacts
  * Access: Protected (Bearer JWT)
@@ -79,8 +89,46 @@ export const getContacts = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  // Scoped strictly to authenticated owner, sorted newest first by createdAt descending
-  const contacts = await Contact.find({ userId }).sort({ createdAt: -1 });
+  const { page = 1, limit = 20, search, emailDomain } = req.query;
+
+  // Build filter scoped strictly to the authenticated owner
+  const filter = { userId };
+  const conditions = [];
+
+  // 1. Optional case-insensitive search by name or email
+  if (search && typeof search === 'string' && search.trim().length > 0) {
+    const searchRegex = new RegExp(escapeRegex(search.trim()), 'i');
+    conditions.push({
+      $or: [{ name: searchRegex }, { email: searchRegex }],
+    });
+  }
+
+  // 2. Optional email-domain filter (exact domain match at end of email)
+  if (emailDomain && typeof emailDomain === 'string' && emailDomain.trim().length > 0) {
+    const domainRegex = new RegExp(`@${escapeRegex(emailDomain.trim().toLowerCase())}$`, 'i');
+    conditions.push({ email: domainRegex });
+  }
+
+  if (conditions.length === 1) {
+    Object.assign(filter, conditions[0]);
+  } else if (conditions.length > 1) {
+    filter.$and = conditions;
+  }
+
+  const skip = (page - 1) * limit;
+
+  // Execute query and document count concurrently using identical filter
+  const [contacts, total] = await Promise.all([
+    Contact.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit),
+    Contact.countDocuments(filter),
+  ]);
+
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1 && total > 0;
 
   res.status(200).json({
     success: true,
@@ -88,6 +136,20 @@ export const getContacts = asyncHandler(async (req, res) => {
     data: {
       contacts: contacts.map(formatSafeContact),
       count: contacts.length,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage,
+        hasPrevPage,
+      },
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage,
+      hasPrevPage,
     },
   });
 });

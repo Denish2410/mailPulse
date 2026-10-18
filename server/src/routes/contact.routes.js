@@ -11,6 +11,7 @@ import {
   createContactSchema,
   contactIdParamSchema,
   updateContactSchema,
+  getContactsSchema,
 } from '../validators/contact.validator.js';
 
 const router = Router();
@@ -30,10 +31,10 @@ router.post('/', validate(createContactSchema), createContact);
 
 /**
  * @route   GET /api/v1/contacts
- * @desc    List all contacts for the authenticated user (newest first)
+ * @desc    List all contacts for the authenticated user (with pagination, search & filters)
  * @access  Protected
  */
-router.get('/', getContacts);
+router.get('/', validate(getContactsSchema), getContacts);
 
 /**
  * @route   PATCH /api/v1/contacts/:id

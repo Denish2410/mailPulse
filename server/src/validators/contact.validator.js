@@ -79,8 +79,72 @@ export const updateContactSchema = z.object({
     }),
 });
 
+/**
+ * Schema for GET /api/v1/contacts (Pagination, Search, Filtering)
+ */
+export const getContactsSchema = z.object({
+  query: z
+    .object({
+      page: z
+        .preprocess((val) => {
+          if (val === undefined) return 1;
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+            return NaN;
+          }
+          if (typeof val === 'number') return val;
+          return NaN;
+        }, z.number({ invalid_type_error: 'Page must be a positive integer' })
+            .int('Page must be a positive integer')
+            .min(1, 'Page must be a positive integer'))
+        .default(1),
+      limit: z
+        .preprocess((val) => {
+          if (val === undefined) return 20;
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+            return NaN;
+          }
+          if (typeof val === 'number') return val;
+          return NaN;
+        }, z.number({ invalid_type_error: 'Limit must be a positive integer' })
+            .int('Limit must be a positive integer')
+            .min(1, 'Limit must be a positive integer')
+            .max(100, 'Limit cannot exceed 100'))
+        .default(20),
+      search: z
+        .preprocess((val) => {
+          if (val === undefined) return undefined;
+          if (typeof val === 'string' || typeof val === 'number') {
+            const str = String(val).trim();
+            return str.length > 0 ? str : undefined;
+          }
+          return val;
+        }, z.string({ invalid_type_error: 'Search must be a string' })
+            .max(100, 'Search term cannot exceed 100 characters')
+            .optional()),
+      emailDomain: z
+        .preprocess((val) => {
+          if (val === undefined) return undefined;
+          if (typeof val === 'string') {
+            return val.trim().toLowerCase();
+          }
+          return val;
+        }, z.string({ invalid_type_error: 'Email domain must be a string' })
+            .regex(
+              /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/,
+              'Invalid email domain format'
+            )
+            .optional()),
+    })
+    .strict(),
+});
+
 export default {
   contactIdParamSchema,
   createContactSchema,
   updateContactSchema,
+  getContactsSchema,
 };
