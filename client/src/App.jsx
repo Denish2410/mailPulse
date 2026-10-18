@@ -5,6 +5,7 @@ import PublicOnlyRoute from './components/layout/PublicOnlyRoute.jsx';
 import LoginPage from './pages/auth/LoginPage.jsx';
 import RegisterPage from './pages/auth/RegisterPage.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
+import ContactsPage from './pages/contacts/ContactsPage.jsx';
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
           {/* Protected routes: redirect to /login if unauthenticated */}
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/contacts" element={<ContactsPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}
