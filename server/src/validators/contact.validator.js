@@ -42,6 +42,7 @@ export const createContactSchema = z.object({
         .string({ required_error: 'Contact email is required' })
         .trim()
         .toLowerCase()
+        .max(254, 'Contact email cannot exceed 254 characters')
         .email('Please provide a valid email address'),
     })
     .strict(),
@@ -70,6 +71,7 @@ export const updateContactSchema = z.object({
         .string()
         .trim()
         .toLowerCase()
+        .max(254, 'Contact email cannot exceed 254 characters')
         .email('Please provide a valid email address')
         .optional(),
     })

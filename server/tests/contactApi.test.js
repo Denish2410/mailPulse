@@ -360,6 +360,58 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
       assert.equal(data.success, false);
       assert.match(data.message, /validation failed/i);
     });
+
+    it('Creation rejects whitespace-only name with HTTP 400 and creates no contact', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const uniqueEmail = `${testPrefix}-whitespace-create@example.com`;
+      const res = await fetch(`${baseUrl}/api/v1/contacts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          name: '     ',
+          email: uniqueEmail,
+        }),
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.message, /validation failed/i);
+      assert.ok(data.errors.some((e) => e.path.includes('name')));
+
+      // Verify no contact was persisted in the database
+      const persisted = await Contact.findOne({ email: uniqueEmail });
+      assert.equal(persisted, null);
+    });
+
+    it('API creation rejects email exceeding 254 characters with HTTP 400', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const longEmail = 'a'.repeat(64) + '@' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(60) + '.com';
+      assert.ok(longEmail.length > 254);
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          name: 'Long Email Tester',
+          email: longEmail,
+        }),
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.message, /validation failed/i);
+      assert.ok(data.errors.some((e) => e.path.includes('email')));
+    });
   });
 
   describe('3. GET /api/v1/contacts (List Contacts)', () => {
@@ -662,6 +714,176 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
       assert.equal(dataShortName.success, false);
       assert.ok(dataShortName.errors.some((e) => e.path.includes('name')));
       assert.equal(dataShortName.stack, undefined);
+    });
+
+    it('Updating contact with its existing email (exact and case/whitespace variations) succeeds with HTTP 200 without false-positive 409', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const selfEmail = `${testPrefix}-self-email@example.com`;
+      const contact = await Contact.create({
+        userId: userOne._id,
+        name: 'Self Update User',
+        email: selfEmail,
+      });
+
+      // 1. Update with exact existing email
+      const exactRes = await fetch(`${baseUrl}/api/v1/contacts/${contact._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          name: 'Self Update User Renamed',
+          email: selfEmail,
+        }),
+      });
+
+      assert.equal(exactRes.status, 200);
+      const exactData = await exactRes.json();
+      assert.equal(exactData.success, true);
+      assert.equal(exactData.data.contact.name, 'Self Update User Renamed');
+      assert.equal(exactData.data.contact.email, selfEmail);
+
+      // Verify DB persistence
+      const exactDb = await Contact.findById(contact._id);
+      assert.equal(exactDb.name, 'Self Update User Renamed');
+      assert.equal(exactDb.email, selfEmail);
+
+      // 2. Update with same email in uppercase and surrounded by whitespace
+      const variationEmail = `   ${selfEmail.toUpperCase()}   `;
+      const variationRes = await fetch(`${baseUrl}/api/v1/contacts/${contact._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          email: variationEmail,
+        }),
+      });
+
+      assert.equal(variationRes.status, 200);
+      const variationData = await variationRes.json();
+      assert.equal(variationData.success, true);
+      assert.equal(variationData.data.contact.email, selfEmail);
+
+      // Verify DB persistence remains normalized to lowercase
+      const variationDb = await Contact.findById(contact._id);
+      assert.equal(variationDb.email, selfEmail);
+    });
+
+    it('Update rejects whitespace-only name with HTTP 400 and preserves original contact', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const originalName = 'Unchanged Contact Name';
+      const contact = await Contact.create({
+        userId: userOne._id,
+        name: originalName,
+        email: `${testPrefix}-whitespace-patch@example.com`,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts/${contact._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          name: '     ',
+        }),
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.message, /validation failed/i);
+      assert.ok(data.errors.some((e) => e.path.includes('name')));
+
+      // Verify original contact was not modified
+      const preserved = await Contact.findById(contact._id);
+      assert.equal(preserved.name, originalName);
+    });
+
+    it('Duplicate email race condition safeguard on update (MongoDB code 11000 on save) translates to HTTP 409', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const existingEmail = `${testPrefix}-race-update-target@example.com`;
+
+      // Pre-insert the target collision contact
+      await Contact.create({
+        userId: userOne._id,
+        name: 'Target Existing Contact',
+        email: existingEmail,
+      });
+
+      // Create the contact to be updated
+      const contactToUpdate = await Contact.create({
+        userId: userOne._id,
+        name: 'Challenger Contact',
+        email: `${testPrefix}-race-update-src@example.com`,
+      });
+
+      // Selectively stub Contact.findOne to bypass the proactive duplicate check
+      // only for the duplicate-lookup query (_id: { $ne: id }), simulating a concurrent race
+      const originalFindOne = Contact.findOne;
+      Contact.findOne = function (filter, ...args) {
+        if (filter && filter._id && filter._id.$ne) {
+          return Promise.resolve(null);
+        }
+        return originalFindOne.call(this, filter, ...args);
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/contacts/${contactToUpdate._id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenOne}`,
+          },
+          body: JSON.stringify({
+            email: existingEmail,
+          }),
+        });
+
+        assert.equal(res.status, 409);
+        const data = await res.json();
+        assert.equal(data.success, false);
+        assert.match(data.message, /already exists/i);
+        assert.equal(data.stack, undefined);
+      } finally {
+        Contact.findOne = originalFindOne;
+      }
+    });
+
+    it('API update rejects email exceeding 254 characters with HTTP 400', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const contact = await Contact.create({
+        userId: userOne._id,
+        name: 'Length Test Target',
+        email: `${testPrefix}-update-length-test@example.com`,
+      });
+
+      const longEmail = 'a'.repeat(64) + '@' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(60) + '.com';
+      assert.ok(longEmail.length > 254);
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts/${contact._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          email: longEmail,
+        }),
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.message, /validation failed/i);
+      assert.ok(data.errors.some((e) => e.path.includes('email')));
     });
   });
 

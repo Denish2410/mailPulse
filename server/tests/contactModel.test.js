@@ -109,6 +109,29 @@ describe('Contact Model — Schema Validation (Unit / Offline)', () => {
     );
   });
 
+  it('Email length constraint is strictly enforced (max 254 characters)', async () => {
+    // 257 characters with valid email structure
+    const longEmail = 'a'.repeat(64) + '@' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(60) + '.com';
+    assert.ok(longEmail.length > 254);
+
+    const contact = new Contact({
+      userId: dummyUserId,
+      name: 'Valid Name',
+      email: longEmail,
+    });
+
+    await assert.rejects(
+      async () => {
+        await contact.validate();
+      },
+      (err) => {
+        assert.ok(err.errors.email);
+        assert.match(err.errors.email.message, /cannot exceed 254 characters/i);
+        return true;
+      }
+    );
+  });
+
   it('5. Name and email are trimmed, and email is normalized to lowercase', async () => {
     const contact = new Contact({
       userId: dummyUserId,
