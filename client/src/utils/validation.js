@@ -126,6 +126,69 @@ export const validateLoginForm = ({ email, password }) => {
   };
 };
 
+/**
+ * Validates a contact's full name.
+ * Requires trimmed length between 2 and 100 characters.
+ *
+ * @param {string} name
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateContactName = (name) => {
+  if (typeof name !== 'string' || !name.trim()) {
+    return 'Contact name is required.';
+  }
+  const trimmed = name.trim();
+  if (trimmed.length < 2) {
+    return 'Contact name must be at least 2 characters long.';
+  }
+  if (trimmed.length > 100) {
+    return 'Contact name cannot exceed 100 characters.';
+  }
+  return null;
+};
+
+/**
+ * Validates a contact's email address.
+ * Requires trimmed valid email format with maximum 254 characters.
+ *
+ * @param {string} email
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateContactEmail = (email) => {
+  if (typeof email !== 'string' || !email.trim()) {
+    return 'Contact email is required.';
+  }
+  const trimmed = email.trim();
+  if (trimmed.length > 254) {
+    return 'Contact email cannot exceed 254 characters.';
+  }
+  if (!EMAIL_REGEX.test(trimmed)) {
+    return 'Please enter a valid email address.';
+  }
+  return null;
+};
+
+/**
+ * Validates a contact form payload.
+ *
+ * @param {{ name?: string, email?: string }} data
+ * @returns {{ isValid: boolean, errors: Record<string, string> }}
+ */
+export const validateContactForm = ({ name, email } = {}) => {
+  const errors = {};
+
+  const nameError = validateContactName(name);
+  if (nameError) errors.name = nameError;
+
+  const emailError = validateContactEmail(email);
+  if (emailError) errors.email = emailError;
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  };
+};
+
 export default {
   validateName,
   validateEmail,
@@ -133,4 +196,7 @@ export default {
   validateConfirmPassword,
   validateRegisterForm,
   validateLoginForm,
+  validateContactName,
+  validateContactEmail,
+  validateContactForm,
 };
