@@ -21,6 +21,8 @@ import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
+import { getAuthConfig } from '../src/config/auth.js';
+import jwt from 'jsonwebtoken';
 import { hashPassword } from '../src/services/password.service.js';
 
 describe('Contact CRUD APIs (/api/v1/contacts)', () => {
@@ -125,6 +127,71 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
         headers: { Authorization: 'Bearer invalid.jwt.token' },
       });
       assert.equal(invalidTokenRes.status, 401);
+    });
+
+    it('Expired JWT access token on GET /api/v1/contacts returns HTTP 401', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const config = getAuthConfig();
+      const expiredToken = signAccessToken(userOne, { ...config, expiresIn: '1ms' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts`, {
+        headers: { Authorization: `Bearer ${expiredToken}` },
+      });
+
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
+      assert.equal(data.data, undefined);
+    });
+
+    it('Invalid JWT signature on GET /api/v1/contacts returns HTTP 401', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const tamperedSecret = 'wrong_secret_at_least_32_characters_long!';
+      const invalidSigToken = jwt.sign(
+        { userId: userOne._id.toString() },
+        tamperedSecret,
+        {
+          algorithm: 'HS256',
+          expiresIn: '15m',
+          issuer: 'mailpulse-auth',
+          audience: 'mailpulse-client',
+          subject: userOne._id.toString(),
+        }
+      );
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts`, {
+        headers: { Authorization: `Bearer ${invalidSigToken}` },
+      });
+
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
+      assert.equal(data.data, undefined);
+    });
+
+    it('Correctly signed token with non-ObjectId user identity returns HTTP 401 from controller guard', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const config = getAuthConfig();
+      const nonObjectIdUserId = 'not-a-valid-mongo-object-id';
+      const tokenWithMalformedId = signAccessToken(nonObjectIdUserId, config);
+
+      const res = await fetch(`${baseUrl}/api/v1/contacts`, {
+        headers: { Authorization: `Bearer ${tokenWithMalformedId}` },
+      });
+
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      // The authenticate middleware passes req.auth.userId = 'not-a-valid-mongo-object-id'
+      // The contact controller's guard checks !mongoose.isValidObjectId(userId) and throws 401
+      assert.equal(data.message, 'Authentication required. Invalid user identity.');
+      assert.equal(data.data, undefined);
     });
   });
 
@@ -885,6 +952,49 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
       assert.match(data.message, /validation failed/i);
       assert.ok(data.errors.some((e) => e.path.includes('email')));
     });
+
+    it("Updating a contact to an email already owned by another user succeeds (per-user email scope)", async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const sharedEmail = `${testPrefix}-charlie-shared@example.com`;
+
+      // User B has a contact with sharedEmail
+      const userTwoContact = await Contact.create({
+        userId: userTwo._id,
+        name: 'User Two Charlie',
+        email: sharedEmail,
+      });
+
+      // User A creates a contact with alice@initial.com
+      const userOneContact = await Contact.create({
+        userId: userOne._id,
+        name: 'User One Alice',
+        email: `${testPrefix}-alice-initial@example.com`,
+      });
+
+      // User A updates their contact to sharedEmail
+      const res = await fetch(`${baseUrl}/api/v1/contacts/${userOneContact._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenOne}`,
+        },
+        body: JSON.stringify({
+          email: sharedEmail,
+        }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.contact.email, sharedEmail);
+
+      // Verify User B's contact still exists and remains untouched
+      const preservedUserTwoContact = await Contact.findById(userTwoContact._id);
+      assert.ok(preservedUserTwoContact);
+      assert.equal(preservedUserTwoContact.email, sharedEmail);
+      assert.equal(preservedUserTwoContact.userId.toString(), userTwo._id.toString());
+    });
   });
 
   describe('5. DELETE /api/v1/contacts/:id (Delete Contact)', () => {
@@ -1366,6 +1476,59 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
       assert.equal(res.status, 401);
       const data = await res.json();
       assert.equal(data.success, false);
+    });
+
+    it('19. Cross-user pagination isolation: User A list and totals never include User B contacts or counts', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      // Clear seeded contacts for this test to establish exact known counts
+      await Contact.deleteMany({ email: new RegExp(`^${pPrefix}`) });
+
+      // Create exactly 3 contacts owned by User A
+      const userAContacts = await Contact.create([
+        { userId: userOne._id, name: 'User A One', email: `${pPrefix}-uA-1@example.com` },
+        { userId: userOne._id, name: 'User A Two', email: `${pPrefix}-uA-2@example.com` },
+        { userId: userOne._id, name: 'User A Three', email: `${pPrefix}-uA-3@example.com` },
+      ]);
+      const userAIds = new Set(userAContacts.map((c) => c._id.toString()));
+
+      // Create exactly 10 contacts owned by User B
+      const userBContactsData = Array.from({ length: 10 }, (_, i) => ({
+        userId: userTwo._id,
+        name: `User B Contact ${i + 1}`,
+        email: `${pPrefix}-uB-${i + 1}@example.com`,
+      }));
+      const userBContacts = await Contact.create(userBContactsData);
+      const userBIds = new Set(userBContacts.map((c) => c._id.toString()));
+
+      // User A requests GET /api/v1/contacts?limit=2
+      const res = await fetch(`${baseUrl}/api/v1/contacts?limit=2`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.message, 'Contacts retrieved successfully');
+
+      // Assert data.contacts contains exactly 2 contacts
+      assert.equal(data.data.contacts.length, 2);
+      assert.equal(data.data.count, 2);
+
+      // Assert pagination totals strictly reflect User A's 3 contacts (totalPages = ceil(3 / 2) = 2)
+      assert.equal(data.data.pagination.page, 1);
+      assert.equal(data.data.pagination.limit, 2);
+      assert.equal(data.data.pagination.total, 3);
+      assert.equal(data.data.pagination.totalPages, 2);
+      assert.equal(data.data.pagination.hasNextPage, true);
+      assert.equal(data.data.pagination.hasPrevPage, false);
+
+      // Assert all returned contacts belong exclusively to User A and never User B
+      for (const returnedContact of data.data.contacts) {
+        assert.ok(userAIds.has(returnedContact.id), `Expected contact ${returnedContact.id} to be User A contact`);
+        assert.ok(!userBIds.has(returnedContact.id), `Expected contact ${returnedContact.id} NOT to be User B contact`);
+        assert.ok(returnedContact.email.includes(`${pPrefix.toLowerCase()}-ua-`), 'Email must belong to User A prefix');
+      }
     });
   });
 });
