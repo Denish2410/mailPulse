@@ -5,6 +5,7 @@ import CampaignsTable from '../../components/campaigns/CampaignsTable.jsx';
 import CampaignsPagination from '../../components/campaigns/CampaignsPagination.jsx';
 import DeleteCampaignDialog from '../../components/campaigns/DeleteCampaignDialog.jsx';
 import CampaignFormDialog from '../../components/campaigns/CampaignFormDialog.jsx';
+import CampaignPreviewDialog from '../../components/campaigns/CampaignPreviewDialog.jsx';
 import {
   getCampaigns,
   getCampaignById,
@@ -52,6 +53,10 @@ export const CampaignsPage = () => {
   // Delete modal dialog state
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [activeCampaignForDelete, setActiveCampaignForDelete] = useState(null);
+
+  // Preview & Review modal dialog state
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [activeCampaignForPreview, setActiveCampaignForPreview] = useState(null);
 
   // Ref to track latest request ID to prevent stale out-of-order race conditions
   const requestIdRef = useRef(0);
@@ -231,6 +236,17 @@ export const CampaignsPage = () => {
     }
   };
 
+  // Preview & Review handlers
+  const handleOpenPreviewDialog = (campaign) => {
+    setActiveCampaignForPreview(campaign);
+    setIsPreviewOpen(true);
+  };
+
+  const handleClosePreviewDialog = () => {
+    setIsPreviewOpen(false);
+    setActiveCampaignForPreview(null);
+  };
+
   const hasActiveFilters = Boolean(searchInput.trim());
 
   return (
@@ -355,6 +371,7 @@ export const CampaignsPage = () => {
             hasActiveFilters={hasActiveFilters}
             onResetFilters={handleResetFilters}
             onNewCampaign={handleOpenCreateDialog}
+            onPreviewCampaign={handleOpenPreviewDialog}
             onEditCampaign={handleOpenEditDialog}
             onDeleteCampaign={handleOpenDeleteDialog}
           />
@@ -395,6 +412,20 @@ export const CampaignsPage = () => {
           campaign={activeCampaignForDelete}
           onClose={() => setIsDeleteDialogOpen(false)}
           onConfirm={handleDeleteConfirm}
+        />
+      )}
+
+      {/* Campaign Preview & Review Dialog */}
+      {isPreviewOpen && activeCampaignForPreview && (
+        <CampaignPreviewDialog
+          key={activeCampaignForPreview?.id || 'preview'}
+          isOpen={isPreviewOpen}
+          campaign={activeCampaignForPreview}
+          onClose={handleClosePreviewDialog}
+          onEdit={(campaignToEdit) => {
+            handleClosePreviewDialog();
+            handleOpenEditDialog(campaignToEdit);
+          }}
         />
       )}
     </div>

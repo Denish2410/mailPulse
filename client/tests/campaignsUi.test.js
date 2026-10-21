@@ -1,5 +1,11 @@
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import {
   formatCampaignDate,
@@ -18,6 +24,7 @@ import {
   getCampaigns,
   getCampaignById,
   deleteCampaign,
+  getCampaignReadiness,
   getErrorMessage,
 } from '../src/api/campaigns.js';
 import { getContacts } from '../src/api/contacts.js';
@@ -958,6 +965,246 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       assert.equal(campaign.id, campaignId);
       assert.equal(campaign.name, 'Spring Launch');
       assert.equal(campaign.recipientIds.length, 2);
+    });
+  });
+
+  // ==========================================
+  // Part 5: Campaign Preview & Review UI
+  // ==========================================
+  describe('Campaign Preview & Review UI & Security Logic', () => {
+    const previewComponentPath = path.resolve(
+      __dirname,
+      '../src/components/campaigns/CampaignPreviewDialog.jsx'
+    );
+    const tableComponentPath = path.resolve(
+      __dirname,
+      '../src/components/campaigns/CampaignsTable.jsx'
+    );
+    const pageComponentPath = path.resolve(
+      __dirname,
+      '../src/pages/campaigns/CampaignsPage.jsx'
+    );
+
+    const previewSource = fs.readFileSync(previewComponentPath, 'utf-8');
+    const tableSource = fs.readFileSync(tableComponentPath, 'utf-8');
+    const pageSource = fs.readFileSync(pageComponentPath, 'utf-8');
+
+    it('35. CampaignsTable provides accessible Preview & Review action button triggering onPreviewCampaign', () => {
+      // Verify prop and handler existence
+      assert.match(
+        tableSource,
+        /onPreviewCampaign/,
+        'CampaignsTable must accept onPreviewCampaign prop'
+      );
+      assert.match(
+        tableSource,
+        /title="Preview & Review"/,
+        'Action button must provide "Preview & Review" title'
+      );
+      assert.match(
+        tableSource,
+        /aria-label=\{`Preview & review campaign \$\{campaign\.name\}`\}/,
+        'Action button must have an accessible aria-label with campaign name'
+      );
+
+      // Verify CampaignsPage wires onPreviewCampaign to preview dialog
+      assert.match(
+        pageSource,
+        /import\s+CampaignPreviewDialog\s+from\s+['"]\.\.\/\.\.\/components\/campaigns\/CampaignPreviewDialog\.jsx['"]/,
+        'CampaignsPage must import CampaignPreviewDialog'
+      );
+      assert.match(
+        pageSource,
+        /onPreviewCampaign=\{handleOpenPreviewDialog\}/,
+        'CampaignsPage must pass handleOpenPreviewDialog to CampaignsTable'
+      );
+      assert.match(
+        pageSource,
+        /<CampaignPreviewDialog[\s\S]*?isOpen=\{isPreviewOpen\}[\s\S]*?\/>/,
+        'CampaignsPage must render CampaignPreviewDialog controlled by isPreviewOpen'
+      );
+    });
+
+    it('36. Safe HTML Preview Security: sandboxed iframe with sandbox="" and srcDoc, forbidding dangerouslySetInnerHTML', () => {
+      // Must NEVER use dangerouslySetInnerHTML
+      assert.doesNotMatch(
+        previewSource,
+        /dangerouslySetInnerHTML/,
+        'CRITICAL SECURITY: dangerouslySetInnerHTML is strictly forbidden in CampaignPreviewDialog'
+      );
+
+      // Must use iframe with empty sandbox="" attribute
+      assert.match(
+        previewSource,
+        /<iframe[\s\S]*?sandbox=""[\s\S]*?\/>/,
+        'HTML preview must use an iframe with restrictive empty sandbox="" attribute'
+      );
+
+      // Must NEVER grant allow-scripts or allow-same-origin
+      assert.doesNotMatch(
+        previewSource,
+        /allow-scripts/,
+        'CRITICAL SECURITY: allow-scripts must not be granted to preview iframe'
+      );
+      assert.doesNotMatch(
+        previewSource,
+        /allow-same-origin/,
+        'CRITICAL SECURITY: allow-same-origin must not be granted to preview iframe'
+      );
+
+      // Must pass content via srcDoc
+      assert.match(
+        previewSource,
+        /srcDoc=\{campaign\.htmlContent\}/,
+        'Preview iframe must bind campaign.htmlContent via srcDoc'
+      );
+    });
+
+    it('37. Accessible modal dialog attributes and Escape key dismissal', () => {
+      assert.match(
+        previewSource,
+        /role="dialog"/,
+        'Dialog container must have role="dialog"'
+      );
+      assert.match(
+        previewSource,
+        /aria-modal="true"/,
+        'Dialog container must have aria-modal="true"'
+      );
+      assert.match(
+        previewSource,
+        /aria-labelledby="campaign-preview-title"/,
+        'Dialog must be labeled by campaign-preview-title'
+      );
+      assert.match(
+        previewSource,
+        /aria-describedby="campaign-preview-desc"/,
+        'Dialog must be described by campaign-preview-desc'
+      );
+      assert.match(
+        previewSource,
+        /e\.key === 'Escape'/,
+        'Dialog must dismiss on Escape key'
+      );
+    });
+
+    it('38. Live readiness check forwards AbortSignal and loads readiness data', async () => {
+      const campaignId = '671234567890abcdef123456';
+      const controller = new AbortController();
+      let capturedSignal = null;
+
+      mock.method(apiClient, 'get', async (url, config) => {
+        assert.equal(url, `/campaigns/${campaignId}/readiness`);
+        capturedSignal = config?.signal;
+        return {
+          data: {
+            success: true,
+            data: {
+              isReady: true,
+              issues: [],
+              summary: {
+                totalRecipients: 3,
+                eligibleRecipientsCount: 3,
+                missingRecipientsCount: 0,
+                hasTextContent: true,
+                hasHtmlContent: true,
+                eligibleRecipients: [
+                  { id: 'c-1', name: 'Alice Smith', email: 'alice@example.com' },
+                  { id: 'c-2', name: 'Bob Jones', email: 'bob@example.com' },
+                  { id: 'c-3', name: 'Carol Danvers', email: 'carol@example.com' },
+                ],
+              },
+            },
+          },
+        };
+      });
+
+      const readinessPayload = await getCampaignReadiness(campaignId, { signal: controller.signal });
+      assert.equal(capturedSignal, controller.signal);
+      assert.equal(readinessPayload.isReady, true);
+      assert.equal(readinessPayload.summary.eligibleRecipientsCount, 3);
+      assert.equal(readinessPayload.summary.eligibleRecipients.length, 3);
+    });
+
+    it('39. Readiness visual state mapping: Ready for review vs Needs attention', () => {
+      // Ready state mapping
+      const readySummary = formatReadinessSummary({
+        isReady: true,
+        summary: { eligibleRecipientsCount: 2, hasTextContent: true, hasHtmlContent: false },
+      });
+      assert.equal(readySummary.isReady, true);
+      assert.equal(readySummary.badge.label, 'Ready to Send');
+      assert.ok(readySummary.badge.pillClass.includes('emerald'));
+
+      // Not ready state mapping
+      const notReadyIssues = [
+        'Campaign must have non-empty text content or HTML content.',
+        'Campaign must have at least one eligible recipient.',
+      ];
+      const notReadySummary = formatReadinessSummary({
+        isReady: false,
+        issues: notReadyIssues,
+        summary: { eligibleRecipientsCount: 0, hasTextContent: false, hasHtmlContent: false },
+      });
+      assert.equal(notReadySummary.isReady, false);
+      assert.equal(notReadySummary.badge.label, 'Not Ready');
+      assert.ok(notReadySummary.badge.pillClass.includes('amber'));
+
+      const formattedIssues = formatReadinessIssues(notReadyIssues);
+      assert.equal(formattedIssues.length, 2);
+      assert.equal(formattedIssues[0], 'Campaign must have non-empty text content or HTML content.');
+    });
+
+    it('40. Recipient metrics differentiate eligible, missing, and total counts', () => {
+      const summary = formatReadinessSummary({
+        totalRecipients: 5,
+        eligibleRecipientsCount: 3,
+        missingRecipientsCount: 2,
+      });
+
+      assert.equal(summary.totalRecipients, 5);
+      assert.equal(summary.eligibleRecipientsCount, 3);
+      assert.equal(summary.missingRecipientsCount, 2);
+      assert.equal(summary.recipientsLabel, '3 eligible recipients');
+      assert.equal(summary.missingLabel, '2 recipients unavailable');
+    });
+
+    it('41. Stale response protection prevents out-of-order readiness responses from overwriting active state', () => {
+      let activeRequestId = 0;
+      let displayedReadiness = null;
+
+      const handleResponse = (requestId, data) => {
+        if (requestId === activeRequestId) {
+          displayedReadiness = data;
+        }
+      };
+
+      // User opens Campaign A
+      const reqA = ++activeRequestId;
+      // User quickly switches to Campaign B
+      const reqB = ++activeRequestId;
+
+      // Campaign B resolves first
+      handleResponse(reqB, { campaign: 'B', isReady: true });
+      assert.equal(displayedReadiness.campaign, 'B');
+
+      // Campaign A resolves later (stale)
+      handleResponse(reqA, { campaign: 'A', isReady: false });
+      assert.equal(displayedReadiness.campaign, 'B'); // Remains B, stale A is ignored!
+    });
+
+    it('42. Read-only preview invariant: no email dispatch or sending buttons', () => {
+      // Must not contain sending triggers or SMTP send handlers
+      assert.doesNotMatch(
+        previewSource,
+        /sendCampaign|dispatchCampaign|handleSend/i,
+        'Preview dialog must not contain sending actions'
+      );
+      assert.match(
+        previewSource,
+        /Read-only preview\. Sending is not available in this phase\./,
+        'Preview dialog must display clear read-only disclaimer in footer'
+      );
     });
   });
 });
