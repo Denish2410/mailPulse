@@ -218,11 +218,12 @@ The following endpoints will be introduced in subsequent phases:
 - `POST /import`: Bulk import contacts via CSV
 
 ### Campaigns (`/api/v1/campaigns`)
-- `GET /`: List email campaigns
 - `POST /`: Create new campaign draft
-- `GET /:id`: Get campaign details
-- `PUT /:id`: Update campaign content and schedule
-- `POST /:id/send`: Dispatch or queue campaign
+- `GET /`: List email campaign drafts with pagination and search
+- `GET /:id`: Retrieve single campaign details
+- `PATCH /:id`: Update campaign draft
+- `DELETE /:id`: Delete campaign draft
+- `POST /:id/send`: Dispatch or queue campaign (Future Phase)
 
 ### Analytics (`/api/v1/analytics`)
 - `GET /overview`: High-level open, click, and bounce metrics

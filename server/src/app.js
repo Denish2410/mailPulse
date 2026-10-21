@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import contactRoutes from './routes/contact.routes.js';
+import campaignRoutes from './routes/campaign.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -79,6 +80,7 @@ app.use('/api', limiter);
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/contacts', contactRoutes);
+app.use('/api/v1/campaigns', campaignRoutes);
 
 // 7. Not-found middleware (unmatched routes)
 app.use(notFound);
