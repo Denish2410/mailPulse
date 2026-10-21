@@ -4,8 +4,12 @@ import CampaignFilters from '../../components/campaigns/CampaignFilters.jsx';
 import CampaignsTable from '../../components/campaigns/CampaignsTable.jsx';
 import CampaignsPagination from '../../components/campaigns/CampaignsPagination.jsx';
 import DeleteCampaignDialog from '../../components/campaigns/DeleteCampaignDialog.jsx';
+import CampaignFormDialog from '../../components/campaigns/CampaignFormDialog.jsx';
 import {
   getCampaigns,
+  getCampaignById,
+  createCampaign,
+  updateCampaign,
   deleteCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
@@ -15,7 +19,8 @@ import { computePageAfterDeletion } from '../../utils/campaignHelpers.js';
  * CampaignsPage Component
  *
  * Full campaigns management page coordinating server data fetching,
- * pagination, search, loading/error states, and deletion dialog.
+ * pagination, search, loading/error states, campaign creation/editing,
+ * and deletion dialog.
  */
 export const CampaignsPage = () => {
   // Query parameters state
@@ -39,12 +44,18 @@ export const CampaignsPage = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [notification, setNotification] = useState(null);
 
-  // Dialog state
+  // Form modal dialog states
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [activeCampaignForEdit, setActiveCampaignForEdit] = useState(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Delete modal dialog state
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [activeCampaignForDelete, setActiveCampaignForDelete] = useState(null);
 
   // Ref to track latest request ID to prevent stale out-of-order race conditions
   const requestIdRef = useRef(0);
+  const editDetailsRequestIdRef = useRef(0);
 
   // 1. Debounce Search Input (300ms)
   useEffect(() => {
@@ -133,7 +144,65 @@ export const CampaignsPage = () => {
     setIsLoading(true);
   };
 
-  // Action handlers
+  // Form creation / editing handlers
+  const handleOpenCreateDialog = () => {
+    setActiveCampaignForEdit(null);
+    setIsLoadingDetails(false);
+    setIsFormOpen(true);
+  };
+
+  const handleOpenEditDialog = async (campaign) => {
+    if (!campaign?.id) return;
+
+    // Immediately open dialog with known row data to prevent lag
+    setActiveCampaignForEdit(campaign);
+    setIsFormOpen(true);
+    setIsLoadingDetails(true);
+
+    const currentReqId = ++editDetailsRequestIdRef.current;
+
+    try {
+      const fullCampaign = await getCampaignById(campaign.id);
+      if (currentReqId === editDetailsRequestIdRef.current && fullCampaign) {
+        setActiveCampaignForEdit(fullCampaign);
+      }
+    } catch (err) {
+      // If fetching full campaign details fails, fallback gracefully to existing row data
+      if (currentReqId === editDetailsRequestIdRef.current) {
+        setNotification({
+          type: 'info',
+          message: 'Loaded cached campaign data. Refresh if needed.',
+        });
+      }
+    } finally {
+      if (currentReqId === editDetailsRequestIdRef.current) {
+        setIsLoadingDetails(false);
+      }
+    }
+  };
+
+  const handleFormSubmit = async (payload) => {
+    if (activeCampaignForEdit?.id) {
+      // Update existing campaign
+      const updated = await updateCampaign(activeCampaignForEdit.id, payload);
+      setNotification({
+        type: 'success',
+        message: `Campaign "${updated?.name || payload.name}" updated successfully.`,
+      });
+    } else {
+      // Create new campaign
+      const created = await createCampaign(payload);
+      setNotification({
+        type: 'success',
+        message: `Campaign "${created?.name || payload.name}" created successfully.`,
+      });
+    }
+
+    // Refresh list to show updated/created campaign
+    setRefreshTrigger((prev) => prev + 1);
+  };
+
+  // Deletion handlers
   const handleOpenDeleteDialog = (campaign) => {
     setActiveCampaignForDelete(campaign);
     setIsDeleteDialogOpen(true);
@@ -160,20 +229,6 @@ export const CampaignsPage = () => {
     } else {
       setRefreshTrigger((prev) => prev + 1);
     }
-  };
-
-  const handleNewCampaignPlaceholder = () => {
-    setNotification({
-      type: 'info',
-      message: 'Campaign creation and editing will be available in Phase 4.2.5.',
-    });
-  };
-
-  const handleEditCampaignPlaceholder = () => {
-    setNotification({
-      type: 'info',
-      message: 'Draft editing will be available in Phase 4.2.5.',
-    });
   };
 
   const hasActiveFilters = Boolean(searchInput.trim());
@@ -204,7 +259,7 @@ export const CampaignsPage = () => {
 
             <button
               type="button"
-              onClick={handleNewCampaignPlaceholder}
+              onClick={handleOpenCreateDialog}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -299,8 +354,8 @@ export const CampaignsPage = () => {
             isLoading={isLoading}
             hasActiveFilters={hasActiveFilters}
             onResetFilters={handleResetFilters}
-            onNewCampaign={handleNewCampaignPlaceholder}
-            onEditCampaign={handleEditCampaignPlaceholder}
+            onNewCampaign={handleOpenCreateDialog}
+            onEditCampaign={handleOpenEditDialog}
             onDeleteCampaign={handleOpenDeleteDialog}
           />
 
@@ -315,6 +370,22 @@ export const CampaignsPage = () => {
           )}
         </div>
       </main>
+
+      {/* Campaign Create/Edit Dialog */}
+      {isFormOpen && (
+        <CampaignFormDialog
+          key={activeCampaignForEdit?.id || 'create'}
+          isOpen={isFormOpen}
+          campaign={activeCampaignForEdit}
+          isLoadingDetails={isLoadingDetails}
+          onClose={() => {
+            setIsFormOpen(false);
+            setActiveCampaignForEdit(null);
+            setIsLoadingDetails(false);
+          }}
+          onSubmit={handleFormSubmit}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       {isDeleteDialogOpen && (

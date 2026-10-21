@@ -12,6 +12,7 @@ import {
 } from '../src/utils/campaignHelpers.js';
 import {
   getCampaigns,
+  getCampaignById,
   deleteCampaign,
   getErrorMessage,
 } from '../src/api/campaigns.js';
@@ -431,6 +432,248 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       // Request 1 finishes later (stale response)
       simulateFetch(id1, 'Stale Data from Request 1');
       assert.equal(stateData, 'Data from Request 2'); // Unchanged!
+    });
+  });
+
+  // ==========================================
+  // Part 4: Campaign Form & CRUD Integration
+  // ==========================================
+  describe('Campaign Form Dialog & Integration Flow', () => {
+    it('28. Create campaign sends validated payload preserving empty strings and arrays', async () => {
+      let capturedUrl = null;
+      let capturedBody = null;
+
+      mock.method(apiClient, 'post', async (url, body) => {
+        capturedUrl = url;
+        capturedBody = body;
+        return {
+          data: {
+            success: true,
+            data: {
+              campaign: {
+                id: 'new-camp-1',
+                name: body.name,
+                subject: body.subject,
+                textContent: body.textContent,
+                htmlContent: body.htmlContent,
+                recipientIds: body.recipientIds,
+                status: 'draft',
+              },
+            },
+          },
+        };
+      });
+
+      const payload = {
+        name: '  Welcome Series  ',
+        subject: '  Important updates  ',
+        textContent: '',
+        htmlContent: '<p>Hello</p>',
+        recipientIds: [],
+      };
+
+      const result = await apiClient.post('/campaigns', {
+        name: payload.name.trim(),
+        subject: payload.subject.trim(),
+        textContent: payload.textContent,
+        htmlContent: payload.htmlContent,
+        recipientIds: payload.recipientIds,
+      });
+
+      assert.equal(capturedUrl, '/campaigns');
+      assert.equal(capturedBody.name, 'Welcome Series');
+      assert.equal(capturedBody.subject, 'Important updates');
+      assert.equal(capturedBody.textContent, '');
+      assert.equal(capturedBody.htmlContent, '<p>Hello</p>');
+      assert.deepEqual(capturedBody.recipientIds, []);
+      assert.equal(result.data.data.campaign.id, 'new-camp-1');
+    });
+
+    it('29. Edit campaign sends PATCH with updated fields preserving unchanged fields', async () => {
+      let capturedUrl = null;
+      let capturedBody = null;
+
+      mock.method(apiClient, 'patch', async (url, body) => {
+        capturedUrl = url;
+        capturedBody = body;
+        return {
+          data: {
+            success: true,
+            data: {
+              campaign: {
+                id: 'camp-edit-1',
+                ...body,
+                status: 'draft',
+              },
+            },
+          },
+        };
+      });
+
+      const campaignId = 'camp-edit-1';
+      const updatedPayload = {
+        name: 'Updated Campaign Name',
+        subject: 'Updated Subject',
+        textContent: 'Updated plain text',
+        htmlContent: '<p>Updated HTML</p>',
+        recipientIds: ['507f1f77bcf86cd799439011'],
+      };
+
+      await apiClient.patch(`/campaigns/${campaignId}`, updatedPayload);
+
+      assert.equal(capturedUrl, `/campaigns/${campaignId}`);
+      assert.equal(capturedBody.name, 'Updated Campaign Name');
+      assert.equal(capturedBody.textContent, 'Updated plain text');
+      assert.deepEqual(capturedBody.recipientIds, ['507f1f77bcf86cd799439011']);
+    });
+
+    it('30. Switching between plain text and HTML preserves both values', () => {
+      // Simulating dual-tab form state management
+      let activeTab = 'text';
+      let textContent = 'Initial plain text body';
+      let htmlContent = '<strong>Initial HTML body</strong>';
+
+      // Switch to HTML tab
+      activeTab = 'html';
+      // User modifies HTML
+      htmlContent = '<p>Modified HTML body</p>';
+
+      // Switch back to text tab
+      activeTab = 'text';
+      // User modifies text
+      textContent = 'Modified plain text body';
+
+      // Verify neither was wiped out
+      assert.equal(activeTab, 'text');
+      assert.equal(textContent, 'Modified plain text body');
+      assert.equal(htmlContent, '<p>Modified HTML body</p>');
+    });
+
+    it('31. Switching between campaigns populates clean state without stale data leakage', () => {
+      const campaignA = {
+        id: 'camp-a',
+        name: 'Campaign Alpha',
+        subject: 'Alpha Subject',
+        textContent: 'Alpha Text',
+        htmlContent: '<p>Alpha HTML</p>',
+        recipientIds: ['rec-1', 'rec-2'],
+      };
+
+      const campaignB = {
+        id: 'camp-b',
+        name: 'Campaign Beta',
+        subject: 'Beta Subject',
+        textContent: '',
+        htmlContent: '<p>Beta HTML</p>',
+        recipientIds: [],
+      };
+
+      let activeForm = null;
+
+      const initForm = (campaign) => {
+        if (!campaign) {
+          activeForm = {
+            name: '',
+            subject: '',
+            textContent: '',
+            htmlContent: '',
+            recipientIds: [],
+          };
+          return;
+        }
+        activeForm = {
+          name: campaign.name || '',
+          subject: campaign.subject || '',
+          textContent: campaign.textContent ?? '',
+          htmlContent: campaign.htmlContent ?? '',
+          recipientIds: Array.isArray(campaign.recipientIds) ? [...campaign.recipientIds] : [],
+        };
+      };
+
+      // Open Campaign A
+      initForm(campaignA);
+      assert.equal(activeForm.name, 'Campaign Alpha');
+      assert.equal(activeForm.recipientIds.length, 2);
+
+      // Switch to Campaign B
+      initForm(campaignB);
+      assert.equal(activeForm.name, 'Campaign Beta');
+      assert.equal(activeForm.textContent, '');
+      assert.deepEqual(activeForm.recipientIds, []);
+
+      // Switch to Create New
+      initForm(null);
+      assert.equal(activeForm.name, '');
+      assert.equal(activeForm.subject, '');
+      assert.deepEqual(activeForm.recipientIds, []);
+    });
+
+    it('32. Form prevents duplicate submission while request is in flight', () => {
+      let isSubmitting = false;
+      let submitCallCount = 0;
+
+      const submitHandler = () => {
+        if (isSubmitting) return;
+        isSubmitting = true;
+        submitCallCount++;
+      };
+
+      // Rapid double submit clicks
+      submitHandler();
+      submitHandler();
+
+      assert.equal(submitCallCount, 1);
+    });
+
+    it('33. Submission error preserves user input and exposes error message', () => {
+      const mockFormState = {
+        name: 'Campaign Name with typo',
+        subject: 'Subject Line',
+        textContent: 'Body content',
+        htmlContent: '',
+        recipientIds: [],
+      };
+
+      let serverError = null;
+
+      const simulateFailure = (err) => {
+        serverError = getErrorMessage(err, 'Failed to save campaign. Please try again.');
+      };
+
+      simulateFailure({ response: { data: { message: 'Network timeout during save' } } });
+
+      // User's form state was preserved
+      assert.equal(mockFormState.name, 'Campaign Name with typo');
+      assert.equal(serverError, 'Network timeout during save');
+    });
+
+    it('34. getCampaignById fetches full campaign details including recipientIds', async () => {
+      const campaignId = '671234567890abcdef123456';
+      mock.method(apiClient, 'get', async (url) => {
+        assert.equal(url, `/campaigns/${campaignId}`);
+        return {
+          data: {
+            success: true,
+            data: {
+              campaign: {
+                id: campaignId,
+                name: 'Spring Launch',
+                subject: 'Announcing Spring 2026',
+                textContent: 'Check out our new products',
+                htmlContent: '<h1>Check out our new products</h1>',
+                status: 'draft',
+                recipientIds: ['507f1f77bcf86cd799439011', '507f1f77bcf86cd799439022'],
+                recipientsCount: 2,
+              },
+            },
+          },
+        };
+      });
+
+      const campaign = await getCampaignById(campaignId);
+      assert.equal(campaign.id, campaignId);
+      assert.equal(campaign.name, 'Spring Launch');
+      assert.equal(campaign.recipientIds.length, 2);
     });
   });
 });

@@ -172,12 +172,12 @@ export const CampaignsTable = ({
                 {/* Row Actions */}
                 <td className="py-3.5 pl-4 pr-4 sm:pr-6 text-right whitespace-nowrap">
                   <div className="inline-flex items-center gap-1.5">
-                    {/* Edit Action: deferred to Phase 4.2.5 */}
+                    {/* Edit Action */}
                     <button
                       type="button"
                       onClick={() => onEditCampaign && onEditCampaign(campaign)}
                       aria-label={`Edit campaign ${campaign.name}`}
-                      title="Editing will be available in Phase 4.2.5"
+                      title="Edit campaign"
                       className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer"
                     >
                       <svg
