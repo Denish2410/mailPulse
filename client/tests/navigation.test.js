@@ -22,7 +22,15 @@ describe('Navigation & Route Setup', () => {
       );
     });
 
-    it('2. Registers /contacts route strictly within the ProtectedRoute element wrapper', () => {
+    it('2. Imports CampaignsPage from ./pages/campaigns/CampaignsPage.jsx', () => {
+      assert.match(
+        appSource,
+        /import\s+CampaignsPage\s+from\s+['"]\.\/pages\/campaigns\/CampaignsPage\.jsx['"]/,
+        'App.jsx must import CampaignsPage'
+      );
+    });
+
+    it('3. Registers /contacts and /campaigns routes strictly within the ProtectedRoute element wrapper', () => {
       // Locate the ProtectedRoute block
       const protectedBlockMatch = appSource.match(
         /<Route\s+element=\{<ProtectedRoute\s*\/>\}>([\s\S]*?)<\/Route>/
@@ -38,6 +46,13 @@ describe('Navigation & Route Setup', () => {
         '/contacts must be nested inside the ProtectedRoute element'
       );
 
+      // Verify /campaigns is inside the ProtectedRoute block
+      assert.match(
+        protectedRoutesContent,
+        /<Route\s+path=["']\/campaigns["']\s+element=\{<CampaignsPage\s*\/>\}\s*\/>/,
+        '/campaigns must be nested inside the ProtectedRoute element'
+      );
+
       // Verify /dashboard remains inside the ProtectedRoute block
       assert.match(
         protectedRoutesContent,
@@ -46,7 +61,7 @@ describe('Navigation & Route Setup', () => {
       );
     });
 
-    it('3. Preserves PublicOnlyRoute block with /login and /register routes', () => {
+    it('4. Preserves PublicOnlyRoute block with /login and /register routes', () => {
       const publicBlockMatch = appSource.match(
         /<Route\s+element=\{<PublicOnlyRoute\s*\/>\}>([\s\S]*?)<\/Route>/
       );
@@ -57,7 +72,7 @@ describe('Navigation & Route Setup', () => {
       assert.match(publicRoutesContent, /path=["']\/register["']/);
     });
 
-    it('4. Preserves default and catch-all redirects to /dashboard', () => {
+    it('5. Preserves default and catch-all redirects to /dashboard', () => {
       assert.match(
         appSource,
         /<Route\s+path=["']\/["']\s+element=\{<Navigate\s+to=["']\/dashboard["']\s+replace\s*\/>\}\s*\/>/,
@@ -71,8 +86,29 @@ describe('Navigation & Route Setup', () => {
     });
   });
 
-  describe('ProtectedRoute Decision Logic with /contacts', () => {
-    it('5. Unauthenticated user accessing /contacts is redirected to /login with preserved location state', () => {
+  describe('CampaignsPage Shell Component', () => {
+    const campaignsPageFilePath = path.resolve(
+      __dirname,
+      '../src/pages/campaigns/CampaignsPage.jsx'
+    );
+    const campaignsPageSource = fs.readFileSync(campaignsPageFilePath, 'utf-8');
+
+    it('6. Renders Campaigns heading and imports Navbar', () => {
+      assert.match(
+        campaignsPageSource,
+        /import\s+Navbar\s+from\s+['"]\.\.\/\.\.\/components\/layout\/Navbar\.jsx['"]/,
+        'CampaignsPage must import Navbar'
+      );
+      assert.match(
+        campaignsPageSource,
+        /<h1[^>]*>[\s\S]*?Campaigns[\s\S]*?<\/h1>/,
+        'CampaignsPage must render a heading with "Campaigns"'
+      );
+    });
+  });
+
+  describe('ProtectedRoute Decision Logic with /contacts & /campaigns', () => {
+    it('7. Unauthenticated user accessing /contacts is redirected to /login with preserved location state', () => {
       const attemptedPath = '/contacts';
       const isAuthenticated = false;
       const location = { pathname: attemptedPath };
@@ -86,7 +122,30 @@ describe('Navigation & Route Setup', () => {
       assert.equal(redirectDecision.state.from.pathname, '/contacts');
     });
 
-    it('6. Authenticated user accessing /contacts is permitted to proceed', () => {
+    it('8. Authenticated user accessing /contacts is permitted to proceed', () => {
+      const isAuthenticated = true;
+      const redirectDecision = !isAuthenticated
+        ? { redirect: true, to: '/login' }
+        : { redirect: false };
+
+      assert.equal(redirectDecision.redirect, false);
+    });
+
+    it('9. Unauthenticated user accessing /campaigns is redirected to /login with preserved location state', () => {
+      const attemptedPath = '/campaigns';
+      const isAuthenticated = false;
+      const location = { pathname: attemptedPath };
+
+      const redirectDecision = !isAuthenticated
+        ? { redirect: true, to: '/login', state: { from: location } }
+        : { redirect: false };
+
+      assert.equal(redirectDecision.redirect, true);
+      assert.equal(redirectDecision.to, '/login');
+      assert.equal(redirectDecision.state.from.pathname, '/campaigns');
+    });
+
+    it('10. Authenticated user accessing /campaigns is permitted to proceed', () => {
       const isAuthenticated = true;
       const redirectDecision = !isAuthenticated
         ? { redirect: true, to: '/login' }
@@ -96,8 +155,8 @@ describe('Navigation & Route Setup', () => {
     });
   });
 
-  describe('Open Redirect & Navigation Security for /contacts', () => {
-    it('7. Accepts /contacts as a safe internal destination path', () => {
+  describe('Open Redirect & Navigation Security for /contacts & /campaigns', () => {
+    it('11. Accepts /contacts as a safe internal destination path', () => {
       assert.equal(sanitizeRedirectPath('/contacts'), '/contacts');
       assert.equal(
         sanitizeRedirectPath('/contacts?page=2&search=acme'),
@@ -105,13 +164,32 @@ describe('Navigation & Route Setup', () => {
       );
     });
 
-    it('8. Rejects external phishing attempts targeting /contacts', () => {
+    it('12. Rejects external phishing attempts targeting /contacts', () => {
       assert.equal(
         sanitizeRedirectPath('https://attacker.com/contacts'),
         '/dashboard'
       );
       assert.equal(
         sanitizeRedirectPath('//attacker.com/contacts'),
+        '/dashboard'
+      );
+    });
+
+    it('13. Accepts /campaigns as a safe internal destination path', () => {
+      assert.equal(sanitizeRedirectPath('/campaigns'), '/campaigns');
+      assert.equal(
+        sanitizeRedirectPath('/campaigns?page=2&search=spring'),
+        '/campaigns?page=2&search=spring'
+      );
+    });
+
+    it('14. Rejects external phishing attempts targeting /campaigns', () => {
+      assert.equal(
+        sanitizeRedirectPath('https://attacker.com/campaigns'),
+        '/dashboard'
+      );
+      assert.equal(
+        sanitizeRedirectPath('//attacker.com/campaigns'),
         '/dashboard'
       );
     });
@@ -124,7 +202,7 @@ describe('Navigation & Route Setup', () => {
     );
     const navbarSource = fs.readFileSync(navbarFilePath, 'utf-8');
 
-    it('9. Implements NavLink for both /dashboard and /contacts', () => {
+    it('15. Implements NavLink for /dashboard, /contacts, and /campaigns', () => {
       assert.match(
         navbarSource,
         /<NavLink\s+to=["']\/dashboard["']/,
@@ -135,9 +213,14 @@ describe('Navigation & Route Setup', () => {
         /<NavLink\s+to=["']\/contacts["']/,
         'Navbar must include NavLink to /contacts'
       );
+      assert.match(
+        navbarSource,
+        /<NavLink\s+to=["']\/campaigns["']/,
+        'Navbar must include NavLink to /campaigns'
+      );
     });
 
-    it('10. Uses useAuth hook for user state and logout without duplicating auth state', () => {
+    it('16. Uses useAuth hook for user state and logout without duplicating auth state', () => {
       assert.match(
         navbarSource,
         /import\s+\{\s*useAuth\s*\}\s+from\s+['"]\.\.\/\.\.\/hooks\/useAuth\.js['"]/,
@@ -150,7 +233,7 @@ describe('Navigation & Route Setup', () => {
       );
     });
 
-    it('11. Provides an accessible Sign out button with type="button" and click handler', () => {
+    it('17. Provides an accessible Sign out button with type="button" and click handler', () => {
       assert.match(
         navbarSource,
         /<button[\s\S]*?type=["']button["'][\s\S]*?onClick=\{handleLogout\}[\s\S]*?>/,

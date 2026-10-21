@@ -6,6 +6,7 @@ import LoginPage from './pages/auth/LoginPage.jsx';
 import RegisterPage from './pages/auth/RegisterPage.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import ContactsPage from './pages/contacts/ContactsPage.jsx';
+import CampaignsPage from './pages/campaigns/CampaignsPage.jsx';
 
 export function App() {
   return (
@@ -22,6 +23,7 @@ export function App() {
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/campaigns" element={<CampaignsPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}
