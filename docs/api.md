@@ -221,9 +221,41 @@ The following endpoints will be introduced in subsequent phases:
 - `POST /`: Create new campaign draft
 - `GET /`: List email campaign drafts with pagination and search
 - `GET /:id`: Retrieve single campaign details
+- `GET /:id/readiness`: Evaluate send-readiness, blocking issues, and resolved recipients
 - `PATCH /:id`: Update campaign draft
 - `DELETE /:id`: Delete campaign draft
 - `POST /:id/send`: Dispatch or queue campaign (Future Phase)
+
+#### Campaign Readiness Contract (`GET /api/v1/campaigns/:id/readiness`)
+- **Access**: Protected (Bearer JWT)
+- **Rules**:
+  - `name`: Must be between 2 and 120 characters long.
+  - `subject`: Must be between 1 and 200 characters long.
+  - `content`: At least one of `textContent` or `htmlContent` must have non-whitespace content.
+  - `status`: Must be `'draft'`.
+  - `recipients`: At least 1 recipient must resolve to an existing, verified contact owned by the authenticated user.
+- **Response Shape (HTTP 200)**:
+```json
+{
+  "success": true,
+  "message": "Campaign is ready for sending",
+  "data": {
+    "isReady": true,
+    "issues": [],
+    "summary": {
+      "totalRecipients": 2,
+      "eligibleRecipients": [
+        { "id": "671234567890abcdef123456", "name": "Alice Smith", "email": "alice@example.com" }
+      ],
+      "eligibleRecipientsCount": 1,
+      "missingRecipientsCount": 1,
+      "hasTextContent": true,
+      "hasHtmlContent": false,
+      "status": "draft"
+    }
+  }
+}
+```
 
 ### Analytics (`/api/v1/analytics`)
 - `GET /overview`: High-level open, click, and bounce metrics

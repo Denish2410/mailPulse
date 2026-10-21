@@ -292,12 +292,122 @@ export const deleteCampaign = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Evaluate the send-readiness of a campaign draft belonging to the authenticated user.
+ *
+ * Route: GET /api/v1/campaigns/:id/readiness
+ * Access: Protected (Bearer JWT)
+ */
+export const getCampaignReadiness = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+
+  // Retrieve campaign strictly scoped to the authenticated owner
+  const campaign = await Campaign.findOne({ _id: id, userId });
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  const issues = [];
+
+  // 1. Evaluate name constraints
+  const trimmedName = typeof campaign.name === 'string' ? campaign.name.trim() : '';
+  if (!trimmedName || trimmedName.length < 2) {
+    issues.push('Campaign name must be at least 2 characters long.');
+  } else if (trimmedName.length > 120) {
+    issues.push('Campaign name cannot exceed 120 characters.');
+  }
+
+  // 2. Evaluate subject constraints
+  const trimmedSubject = typeof campaign.subject === 'string' ? campaign.subject.trim() : '';
+  if (!trimmedSubject || trimmedSubject.length < 1) {
+    issues.push('Email subject cannot be empty.');
+  } else if (trimmedSubject.length > 200) {
+    issues.push('Email subject cannot exceed 200 characters.');
+  }
+
+  // 3. Evaluate content presence (at least one of textContent or htmlContent must have non-whitespace content)
+  const hasTextContent =
+    typeof campaign.textContent === 'string' && campaign.textContent.trim().length > 0;
+  const hasHtmlContent =
+    typeof campaign.htmlContent === 'string' && campaign.htmlContent.trim().length > 0;
+
+  if (!hasTextContent && !hasHtmlContent) {
+    issues.push('Campaign must have non-empty text content or HTML content.');
+  }
+
+  // 4. Evaluate status (must be draft)
+  if (campaign.status !== 'draft') {
+    issues.push('Only draft campaigns can be evaluated for readiness.');
+  }
+
+  // 5. Evaluate recipients
+  // Deduplicate stored recipient IDs to compute exact unique IDs evaluated
+  const rawRecipientIds = Array.isArray(campaign.recipientIds) ? campaign.recipientIds : [];
+  const uniqueRecipientIds = [
+    ...new Set(
+      rawRecipientIds
+        .map((rId) => (rId._id || rId).toString())
+        .filter((rId) => mongoose.isValidObjectId(rId))
+    ),
+  ];
+
+  const totalRecipients = uniqueRecipientIds.length;
+
+  let eligibleRecipients = [];
+  if (totalRecipients > 0) {
+    // Query contacts strictly belonging to the authenticated owner
+    const contacts = await Contact.find({
+      _id: { $in: uniqueRecipientIds },
+      userId,
+    }).sort({ createdAt: -1, _id: -1 });
+
+    eligibleRecipients = contacts.map((contact) => ({
+      id: contact._id.toString(),
+      name: contact.name,
+      email: contact.email,
+    }));
+  }
+
+  const eligibleRecipientsCount = eligibleRecipients.length;
+  const missingRecipientsCount = Math.max(0, totalRecipients - eligibleRecipientsCount);
+
+  if (eligibleRecipientsCount === 0) {
+    issues.push('Campaign must have at least one eligible recipient.');
+  }
+
+  const isReady = issues.length === 0;
+
+  res.status(200).json({
+    success: true,
+    message: isReady ? 'Campaign is ready for sending' : 'Campaign is not ready for sending',
+    data: {
+      isReady,
+      issues,
+      summary: {
+        totalRecipients,
+        eligibleRecipients,
+        eligibleRecipientsCount,
+        missingRecipientsCount,
+        hasTextContent,
+        hasHtmlContent,
+        status: campaign.status,
+      },
+    },
+  });
+});
+
 export default {
   createCampaign,
   getCampaigns,
   getCampaignById,
   updateCampaign,
   deleteCampaign,
+  getCampaignReadiness,
   formatSafeCampaign,
   validateAndDeduplicateRecipients,
 };

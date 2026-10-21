@@ -1086,4 +1086,257 @@ describe('Campaign CRUD APIs (/api/v1/campaigns)', () => {
       assert.equal(inDb.recipientIds[0].toString(), tempContact._id.toString());
     });
   });
+
+  // ==========================================
+  // Campaign Send-Readiness API (GET /:id/readiness)
+  // ==========================================
+  describe('GET /api/v1/campaigns/:id/readiness (Campaign Send-Readiness Evaluation)', () => {
+    it('1. Returns isReady: true for a valid draft with non-empty content and an owned contact', async () => {
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Ready Campaign',
+        subject: 'Product Announcement',
+        textContent: 'Hello, here is your product announcement.',
+        htmlContent: '<p>Hello, here is your product announcement.</p>',
+        status: 'draft',
+        recipientIds: [contactOneA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.isReady, true);
+      assert.deepEqual(data.data.issues, []);
+
+      const summary = data.data.summary;
+      assert.equal(summary.totalRecipients, 1);
+      assert.equal(summary.eligibleRecipientsCount, 1);
+      assert.equal(summary.missingRecipientsCount, 0);
+      assert.equal(summary.hasTextContent, true);
+      assert.equal(summary.hasHtmlContent, true);
+      assert.equal(summary.status, 'draft');
+      assert.equal(summary.eligibleRecipients[0].id, contactOneA._id.toString());
+      assert.equal(summary.eligibleRecipients[0].name, contactOneA.name);
+      assert.equal(summary.eligibleRecipients[0].email, contactOneA.email);
+    });
+
+    it('2. Returns isReady: false when both textContent and htmlContent are empty', async () => {
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Empty Content Campaign',
+        subject: 'No Content Here',
+        textContent: '',
+        htmlContent: '',
+        status: 'draft',
+        recipientIds: [contactOneA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.isReady, false);
+      assert.ok(data.data.issues.includes('Campaign must have non-empty text content or HTML content.'));
+      assert.equal(data.data.summary.hasTextContent, false);
+      assert.equal(data.data.summary.hasHtmlContent, false);
+    });
+
+    it('3. Treats whitespace-only content as empty and returns isReady: false', async () => {
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Whitespace Content Campaign',
+        subject: 'Whitespace Only',
+        textContent: '   \n\t  ',
+        htmlContent: '   ',
+        status: 'draft',
+        recipientIds: [contactOneA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.isReady, false);
+      assert.ok(data.data.issues.includes('Campaign must have non-empty text content or HTML content.'));
+      assert.equal(data.data.summary.hasTextContent, false);
+      assert.equal(data.data.summary.hasHtmlContent, false);
+    });
+
+    it('4. Returns isReady: false when recipientIds is empty', async () => {
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'No Recipients Campaign',
+        subject: 'Subject Line',
+        textContent: 'Valid text content',
+        status: 'draft',
+        recipientIds: [],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.isReady, false);
+      assert.ok(data.data.issues.includes('Campaign must have at least one eligible recipient.'));
+      assert.equal(data.data.summary.totalRecipients, 0);
+      assert.equal(data.data.summary.eligibleRecipientsCount, 0);
+      assert.equal(data.data.summary.missingRecipientsCount, 0);
+      assert.deepEqual(data.data.summary.eligibleRecipients, []);
+    });
+
+    it('5. Counts deleted selected contact as missing and does not return as eligible', async () => {
+      // Create contact and campaign, then delete contact
+      const tempContact = await Contact.create({
+        userId: userOne._id,
+        name: 'Soon Deleted',
+        email: `${testPrefix}-readiness-del@example.com`,
+      });
+
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Deleted Recipient Campaign',
+        subject: 'Subject Line',
+        textContent: 'Valid text content',
+        status: 'draft',
+        recipientIds: [tempContact._id, contactOneA._id],
+      });
+
+      await Contact.deleteOne({ _id: tempContact._id });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      // Because contactOneA is still eligible, isReady is true
+      assert.equal(data.data.isReady, true);
+      assert.equal(data.data.summary.totalRecipients, 2);
+      assert.equal(data.data.summary.eligibleRecipientsCount, 1);
+      assert.equal(data.data.summary.missingRecipientsCount, 1);
+      assert.equal(data.data.summary.eligibleRecipients[0].id, contactOneA._id.toString());
+    });
+
+    it('6. Does not return cross-tenant contact ID as eligible and prevents data disclosure', async () => {
+      // User Two owns contactTwoA; User One creates campaign referencing contactTwoA directly in DB
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Cross Tenant Recipient Campaign',
+        subject: 'Subject Line',
+        textContent: 'Valid text content',
+        status: 'draft',
+        recipientIds: [contactTwoA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.isReady, false);
+      assert.ok(data.data.issues.includes('Campaign must have at least one eligible recipient.'));
+      assert.equal(data.data.summary.totalRecipients, 1);
+      assert.equal(data.data.summary.eligibleRecipientsCount, 0);
+      assert.equal(data.data.summary.missingRecipientsCount, 1);
+      // ContactTwoA info must NEVER be disclosed in eligibleRecipients
+      assert.deepEqual(data.data.summary.eligibleRecipients, []);
+    });
+
+    it('7. Returns 404 when attempting to access another user’s campaign', async () => {
+      // User One creates campaign; User Two attempts to check readiness
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'User One Campaign',
+        subject: 'Private Subject',
+        textContent: 'Private text',
+        status: 'draft',
+        recipientIds: [contactOneA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenTwo}` },
+      });
+
+      assert.equal(res.status, 404);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.message, 'Campaign not found.');
+    });
+
+    it('8. Returns 401 when request is unauthenticated', async () => {
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'Auth Test Campaign',
+        subject: 'Subject Line',
+        textContent: 'Valid text',
+        recipientIds: [contactOneA._id],
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`);
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.equal(data.success, false);
+    });
+
+    it('9. Returns 400 when campaign ID format is invalid', async () => {
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/not-a-valid-objectid/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.ok(data.errors);
+    });
+
+    it('10. Does not mutate the stored campaign document or its recipientIds', async () => {
+      const tempContact = await Contact.create({
+        userId: userOne._id,
+        name: 'Temp Before Mutate Check',
+        email: `${testPrefix}-readiness-no-mut@example.com`,
+      });
+
+      const campaign = await Campaign.create({
+        userId: userOne._id,
+        name: 'No Mutation Campaign',
+        subject: 'Subject Line',
+        textContent: 'Valid text',
+        status: 'draft',
+        recipientIds: [tempContact._id],
+      });
+
+      // Delete contact to trigger missing recipient in readiness check
+      await Contact.deleteOne({ _id: tempContact._id });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns/${campaign._id}/readiness`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+
+      assert.equal(res.status, 200);
+
+      // Verify the campaign document in MongoDB was NOT changed/pruned
+      const unchangedCampaign = await Campaign.findById(campaign._id);
+      assert.ok(unchangedCampaign);
+      assert.equal(unchangedCampaign.name, 'No Mutation Campaign');
+      assert.equal(unchangedCampaign.recipientIds.length, 1);
+      assert.equal(unchangedCampaign.recipientIds[0].toString(), tempContact._id.toString());
+      assert.equal(unchangedCampaign.status, 'draft');
+    });
+  });
 });

@@ -5,6 +5,7 @@ import {
   getCampaignById,
   updateCampaign,
   deleteCampaign,
+  getCampaignReadiness,
 } from '../controllers/campaign.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
@@ -36,6 +37,13 @@ router.post('/', validate(createCampaignSchema), createCampaign);
  * @access  Protected
  */
 router.get('/', validate(getCampaignsQuerySchema), getCampaigns);
+
+/**
+ * @route   GET /api/v1/campaigns/:id/readiness
+ * @desc    Evaluate send-readiness of a campaign draft belonging to the authenticated user
+ * @access  Protected
+ */
+router.get('/:id/readiness', validate(campaignIdParamSchema), getCampaignReadiness);
 
 /**
  * @route   GET /api/v1/campaigns/:id
