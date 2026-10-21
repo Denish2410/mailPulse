@@ -97,9 +97,79 @@ export const computePageAfterDeletion = ({ currentPage = 1, totalCount = 0, limi
   return safePage;
 };
 
+/**
+ * Toggles a contact ID in an array of selected contact IDs.
+ * Returns a new array without mutating the original.
+ * Ensures the resulting array contains unique ID strings.
+ *
+ * @param {Array<string>} selectedIds - Current selected IDs
+ * @param {string} idToToggle - ID to add or remove
+ * @returns {Array<string>} New selected IDs array
+ */
+export const toggleRecipientId = (selectedIds = [], idToToggle) => {
+  if (!idToToggle || typeof idToToggle !== 'string') {
+    return Array.isArray(selectedIds) ? [...selectedIds] : [];
+  }
+
+  const current = Array.isArray(selectedIds) ? selectedIds : [];
+  const exists = current.includes(idToToggle);
+
+  if (exists) {
+    return current.filter((id) => id !== idToToggle);
+  }
+
+  return [...new Set([...current, idToToggle])];
+};
+
+/**
+ * Removes a specific contact ID from an array of selected contact IDs.
+ * Returns a new array without mutating the original.
+ *
+ * @param {Array<string>} selectedIds - Current selected IDs
+ * @param {string} idToRemove - ID to remove
+ * @returns {Array<string>} New selected IDs array
+ */
+export const removeRecipientId = (selectedIds = [], idToRemove) => {
+  if (!Array.isArray(selectedIds)) return [];
+  if (!idToRemove || typeof idToRemove !== 'string') return [...selectedIds];
+  return selectedIds.filter((id) => id !== idToRemove);
+};
+
+/**
+ * Toggles selection for an entire page of contacts.
+ * If all selectable contacts on the page are already selected, deselects them.
+ * Otherwise, selects all contacts on the page while maintaining uniqueness.
+ *
+ * @param {Array<string>} currentSelectedIds - Current selected IDs
+ * @param {Array<{ id: string }>} pageContacts - Contacts on the current page
+ * @returns {Array<string>} New selected IDs array
+ */
+export const togglePageRecipients = (currentSelectedIds = [], pageContacts = []) => {
+  const current = Array.isArray(currentSelectedIds) ? currentSelectedIds : [];
+  const pageIds = Array.isArray(pageContacts)
+    ? pageContacts.map((c) => c?.id).filter((id) => typeof id === 'string' && id.length > 0)
+    : [];
+
+  if (pageIds.length === 0) {
+    return [...current];
+  }
+
+  const allPageSelected = pageIds.every((id) => current.includes(id));
+
+  if (allPageSelected) {
+    const pageIdSet = new Set(pageIds);
+    return current.filter((id) => !pageIdSet.has(id));
+  }
+
+  return [...new Set([...current, ...pageIds])];
+};
+
 export default {
   formatCampaignDate,
   getCampaignStatusBadge,
   normalizeSearchQuery,
   computePageAfterDeletion,
+  toggleRecipientId,
+  removeRecipientId,
+  togglePageRecipients,
 };
