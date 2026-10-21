@@ -189,6 +189,241 @@ export const validateContactForm = ({ name, email } = {}) => {
   };
 };
 
+const OBJECT_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+
+/**
+ * Validates a campaign's name.
+ * Requires trimmed length between 2 and 120 characters.
+ *
+ * @param {string} name
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateCampaignName = (name) => {
+  if (typeof name !== 'string' || !name.trim()) {
+    return 'Campaign name is required.';
+  }
+  const trimmed = name.trim();
+  if (trimmed.length < 2) {
+    return 'Campaign name must be at least 2 characters long.';
+  }
+  if (trimmed.length > 120) {
+    return 'Campaign name cannot exceed 120 characters.';
+  }
+  return null;
+};
+
+/**
+ * Validates a campaign's email subject line.
+ * Requires trimmed length between 1 and 200 characters.
+ *
+ * @param {string} subject
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateCampaignSubject = (subject) => {
+  if (typeof subject !== 'string' || !subject.trim()) {
+    return 'Email subject is required.';
+  }
+  const trimmed = subject.trim();
+  if (trimmed.length < 1) {
+    return 'Email subject is required.';
+  }
+  if (trimmed.length > 200) {
+    return 'Email subject cannot exceed 200 characters.';
+  }
+  return null;
+};
+
+/**
+ * Validates plain text content length (max 100,000 characters).
+ * Empty strings are explicitly valid for draft saving.
+ *
+ * @param {string} textContent
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateCampaignTextContent = (textContent) => {
+  if (textContent === undefined || textContent === null || textContent === '') {
+    return null;
+  }
+  if (typeof textContent !== 'string') {
+    return 'Plain text content must be a string.';
+  }
+  if (textContent.length > 100000) {
+    return 'Plain text content cannot exceed 100,000 characters.';
+  }
+  return null;
+};
+
+/**
+ * Validates HTML content length (max 500,000 characters).
+ * Empty strings are explicitly valid for draft saving.
+ *
+ * @param {string} htmlContent
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateCampaignHtmlContent = (htmlContent) => {
+  if (htmlContent === undefined || htmlContent === null || htmlContent === '') {
+    return null;
+  }
+  if (typeof htmlContent !== 'string') {
+    return 'HTML content must be a string.';
+  }
+  if (htmlContent.length > 500000) {
+    return 'HTML content cannot exceed 500,000 characters.';
+  }
+  return null;
+};
+
+/**
+ * Validates campaign content (plain text and/or HTML).
+ * Supports both an object parameter { textContent, htmlContent } or two string arguments.
+ *
+ * @param {{ textContent?: string, htmlContent?: string }|string} contentOrText
+ * @param {string} [maybeHtml]
+ * @returns {{ isValid: boolean, errors: Record<string, string> }}
+ */
+export const validateCampaignContent = (contentOrText = {}, maybeHtml) => {
+  let text;
+  let html;
+
+  if (typeof contentOrText === 'object' && contentOrText !== null && !Array.isArray(contentOrText)) {
+    text = contentOrText.textContent;
+    html = contentOrText.htmlContent;
+  } else {
+    text = contentOrText;
+    html = maybeHtml;
+  }
+
+  const errors = {};
+
+  if (text !== undefined) {
+    const textError = validateCampaignTextContent(text);
+    if (textError) errors.textContent = textError;
+  }
+
+  if (html !== undefined) {
+    const htmlError = validateCampaignHtmlContent(html);
+    if (htmlError) errors.htmlContent = htmlError;
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  };
+};
+
+/**
+ * Validates an array of recipient contact IDs.
+ * Each recipient ID must be a valid 24-character hexadecimal MongoDB ObjectId string.
+ * Empty array is valid (drafts do not require recipients).
+ *
+ * @param {string[]} recipientIds
+ * @returns {string|null} Error message or null if valid
+ */
+export const validateCampaignRecipients = (recipientIds) => {
+  if (recipientIds === undefined || recipientIds === null) {
+    return null;
+  }
+
+  if (!Array.isArray(recipientIds)) {
+    return 'Recipients must be an array of contact IDs.';
+  }
+
+  for (let i = 0; i < recipientIds.length; i++) {
+    const id = recipientIds[i];
+    if (typeof id !== 'string' || !OBJECT_ID_REGEX.test(id.trim())) {
+      return 'One or more recipient IDs are invalid.';
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Helper to deduplicate an array of recipient IDs while preserving order.
+ *
+ * @param {string[]} [ids=[]]
+ * @returns {string[]}
+ */
+export const deduplicateRecipientIds = (ids) => {
+  if (!Array.isArray(ids)) return [];
+  return [...new Set(ids.map((id) => (typeof id === 'string' ? id.trim() : id)))];
+};
+
+/**
+ * Validates a campaign form payload.
+ * Enforces client constraints matching backend campaign.validator.js.
+ * Disallows protected fields (status, userId, _id, createdAt, updatedAt, recipientsCount).
+ *
+ * @param {object} [data={}]
+ * @param {object} [options={}]
+ * @param {boolean} [options.isUpdate=false]
+ * @returns {{ isValid: boolean, errors: Record<string, string> }}
+ */
+export const validateCampaignForm = (data = {}, { isUpdate = false } = {}) => {
+  const errors = {};
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return {
+      isValid: false,
+      errors: { _form: 'Invalid form data.' },
+    };
+  }
+
+  // 1. Reject protected fields
+  const PROTECTED_FIELDS = ['status', 'userId', '_id', 'id', 'createdAt', 'updatedAt', 'recipientsCount'];
+  for (const field of PROTECTED_FIELDS) {
+    if (field in data) {
+      errors[field] = `${field} is a protected field and cannot be set.`;
+    }
+  }
+
+  // 2. Validate Name
+  if (!isUpdate || data.name !== undefined) {
+    const nameError = validateCampaignName(data.name);
+    if (nameError) errors.name = nameError;
+  }
+
+  // 3. Validate Subject
+  if (!isUpdate || data.subject !== undefined) {
+    const subjectError = validateCampaignSubject(data.subject);
+    if (subjectError) errors.subject = subjectError;
+  }
+
+  // 4. Validate Content
+  const contentResult = validateCampaignContent({
+    textContent: data.textContent,
+    htmlContent: data.htmlContent,
+  });
+  if (!contentResult.isValid) {
+    Object.assign(errors, contentResult.errors);
+  }
+
+  // 5. Validate Recipient IDs
+  if (data.recipientIds !== undefined) {
+    const recipientError = validateCampaignRecipients(data.recipientIds);
+    if (recipientError) errors.recipientIds = recipientError;
+  }
+
+  // 6. For update: ensure at least one editable field is provided
+  if (isUpdate && Object.keys(errors).length === 0) {
+    const hasAtLeastOneField =
+      data.name !== undefined ||
+      data.subject !== undefined ||
+      data.textContent !== undefined ||
+      data.htmlContent !== undefined ||
+      data.recipientIds !== undefined;
+
+    if (!hasAtLeastOneField) {
+      errors._form = 'At least one field must be provided for update.';
+    }
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  };
+};
+
 export default {
   validateName,
   validateEmail,
@@ -199,4 +434,12 @@ export default {
   validateContactName,
   validateContactEmail,
   validateContactForm,
+  validateCampaignName,
+  validateCampaignSubject,
+  validateCampaignTextContent,
+  validateCampaignHtmlContent,
+  validateCampaignContent,
+  validateCampaignRecipients,
+  deduplicateRecipientIds,
+  validateCampaignForm,
 };

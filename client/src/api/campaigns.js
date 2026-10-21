@@ -1,0 +1,178 @@
+import apiClient, { getErrorMessage } from '../lib/api.js';
+
+/**
+ * Campaigns API Service
+ *
+ * Communicates with MailPulse backend campaign management endpoints:
+ * - GET    /campaigns: List campaigns with pagination, search, and status filtering
+ * - GET    /campaigns/:id: Retrieve single campaign by ID
+ * - POST   /campaigns: Create a new campaign draft
+ * - PATCH  /campaigns/:id: Update an existing campaign draft
+ * - DELETE /campaigns/:id: Delete a campaign draft
+ */
+
+/**
+ * Retrieve campaign drafts belonging to the authenticated user with optional pagination and filters.
+ *
+ * @param {object} [params={}]
+ * @param {number|string} [params.page] - Page number (positive integer)
+ * @param {number|string} [params.limit] - Page limit (1-100)
+ * @param {string} [params.search] - Search query for campaign name or subject
+ * @param {string} [params.status] - Filter by campaign status (e.g. 'draft')
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaigns: Array<object>, count: number, pagination: object }>}
+ */
+export const getCampaigns = async (params = {}, config = {}) => {
+  const queryParams = {};
+
+  // 1. Page: positive integer
+  if (params.page !== undefined && params.page !== null) {
+    const pageNum = Number(params.page);
+    if (Number.isInteger(pageNum) && pageNum >= 1) {
+      queryParams.page = pageNum;
+    }
+  }
+
+  // 2. Limit: positive integer between 1 and 100
+  if (params.limit !== undefined && params.limit !== null) {
+    const limitNum = Number(params.limit);
+    if (Number.isInteger(limitNum) && limitNum >= 1 && limitNum <= 100) {
+      queryParams.limit = limitNum;
+    }
+  }
+
+  // 3. Search: non-empty trimmed string
+  if (typeof params.search === 'string') {
+    const trimmed = params.search.trim();
+    if (trimmed.length > 0) {
+      queryParams.search = trimmed;
+    }
+  }
+
+  // 4. Status: non-empty trimmed string
+  if (typeof params.status === 'string') {
+    const trimmed = params.status.trim();
+    if (trimmed.length > 0) {
+      queryParams.status = trimmed;
+    }
+  }
+
+  const response = await apiClient.get('/campaigns', {
+    params: queryParams,
+    ...config,
+  });
+
+  return response.data?.data;
+};
+
+/**
+ * Retrieve a single campaign by ID.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} Safe campaign object
+ */
+export const getCampaignById = async (id, config = {}) => {
+  const response = await apiClient.get(`/campaigns/${id}`, config);
+  return response.data?.data?.campaign;
+};
+
+/**
+ * Create a new campaign draft.
+ * Sends only supported fields: name, subject, textContent, htmlContent, recipientIds.
+ * Does NOT send protected fields (userId, status, createdAt, updatedAt, recipientsCount).
+ *
+ * @param {object} payload
+ * @param {string} payload.name
+ * @param {string} payload.subject
+ * @param {string} [payload.textContent]
+ * @param {string} [payload.htmlContent]
+ * @param {string[]} [payload.recipientIds]
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} Safe campaign object
+ */
+export const createCampaign = async (payload = {}, config = {}) => {
+  const body = {
+    name: typeof payload.name === 'string' ? payload.name.trim() : payload.name,
+    subject: typeof payload.subject === 'string' ? payload.subject.trim() : payload.subject,
+  };
+
+  if (payload.textContent !== undefined) {
+    body.textContent = payload.textContent;
+  }
+  if (payload.htmlContent !== undefined) {
+    body.htmlContent = payload.htmlContent;
+  }
+  if (payload.recipientIds !== undefined) {
+    body.recipientIds = Array.isArray(payload.recipientIds)
+      ? [...new Set(payload.recipientIds)]
+      : payload.recipientIds;
+  }
+
+  const response = await apiClient.post('/campaigns', body, config);
+  return response.data?.data?.campaign;
+};
+
+/**
+ * Update an existing campaign draft.
+ * Preserves PATCH semantics: omitted properties remain omitted.
+ * Explicit empty values (textContent: '', htmlContent: '', recipientIds: []) are preserved.
+ * Protected fields are stripped.
+ *
+ * @param {string} id - Campaign ID
+ * @param {object} payload
+ * @param {string} [payload.name]
+ * @param {string} [payload.subject]
+ * @param {string} [payload.textContent]
+ * @param {string} [payload.htmlContent]
+ * @param {string[]} [payload.recipientIds]
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} Safe campaign object
+ */
+export const updateCampaign = async (id, payload = {}, config = {}) => {
+  const body = {};
+
+  if (payload.name !== undefined) {
+    body.name = typeof payload.name === 'string' ? payload.name.trim() : payload.name;
+  }
+  if (payload.subject !== undefined) {
+    body.subject = typeof payload.subject === 'string' ? payload.subject.trim() : payload.subject;
+  }
+  if (payload.textContent !== undefined) {
+    body.textContent = payload.textContent;
+  }
+  if (payload.htmlContent !== undefined) {
+    body.htmlContent = payload.htmlContent;
+  }
+  if (payload.recipientIds !== undefined) {
+    body.recipientIds = Array.isArray(payload.recipientIds)
+      ? [...new Set(payload.recipientIds)]
+      : payload.recipientIds;
+  }
+
+  const response = await apiClient.patch(`/campaigns/${id}`, body, config);
+  return response.data?.data?.campaign;
+};
+
+/**
+ * Delete a campaign draft by ID.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} Deletion response payload
+ */
+export const deleteCampaign = async (id, config = {}) => {
+  const response = await apiClient.delete(`/campaigns/${id}`, config);
+  return response.data;
+};
+
+export { getErrorMessage };
+
+export default {
+  getCampaigns,
+  getCampaignById,
+  createCampaign,
+  updateCampaign,
+  deleteCampaign,
+  getErrorMessage,
+};
