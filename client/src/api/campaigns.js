@@ -166,6 +166,20 @@ export const deleteCampaign = async (id, config = {}) => {
   return response.data;
 };
 
+/**
+ * Retrieve campaign readiness evaluation by ID.
+ * Evaluates whether a draft campaign is ready for sending,
+ * returning blocking issues and recipient summary.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ isReady: boolean, issues: string[], summary: object }>}
+ */
+export const getCampaignReadiness = async (id, config = {}) => {
+  const response = await apiClient.get(`/campaigns/${id}/readiness`, config);
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -174,5 +188,6 @@ export default {
   createCampaign,
   updateCampaign,
   deleteCampaign,
+  getCampaignReadiness,
   getErrorMessage,
 };

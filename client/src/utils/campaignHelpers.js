@@ -164,6 +164,246 @@ export const togglePageRecipients = (currentSelectedIds = [], pageContacts = [])
   return [...new Set([...current, ...pageIds])];
 };
 
+/**
+ * Safely extracts and normalizes campaign readiness data from either
+ * an Axios response, backend API response envelope, or raw payload.
+ *
+ * Strictly adheres to backend authoritative isReady value.
+ * Never invents or fabricates contacts, counts, or readiness status.
+ *
+ * @param {object|null|undefined} responseOrPayload - Response or readiness payload
+ * @returns {{
+ *   isReady: boolean,
+ *   issues: string[],
+ *   summary: {
+ *     totalRecipients: number,
+ *     eligibleRecipients: Array<{ id: string, name: string, email: string }>,
+ *     eligibleRecipientsCount: number,
+ *     missingRecipientsCount: number,
+ *     hasTextContent: boolean,
+ *     hasHtmlContent: boolean,
+ *     status: string
+ *   }
+ * }}
+ */
+export const extractReadinessData = (responseOrPayload) => {
+  if (!responseOrPayload || typeof responseOrPayload !== 'object') {
+    return {
+      isReady: false,
+      issues: [],
+      summary: {
+        totalRecipients: 0,
+        eligibleRecipients: [],
+        eligibleRecipientsCount: 0,
+        missingRecipientsCount: 0,
+        hasTextContent: false,
+        hasHtmlContent: false,
+        status: '',
+      },
+    };
+  }
+
+  // Unpack Axios response or backend envelope if wrapped
+  let raw = responseOrPayload;
+  if (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) {
+    if (raw.data.data && typeof raw.data.data === 'object' && !Array.isArray(raw.data.data)) {
+      raw = raw.data.data;
+    } else if ('isReady' in raw.data || 'issues' in raw.data || 'summary' in raw.data) {
+      raw = raw.data;
+    }
+  }
+
+  // Authoritative isReady: strictly true only if backend explicitly set isReady === true
+  const isReady = raw.isReady === true;
+
+  // Extract issues array safely (trimmed, non-empty strings)
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues
+        .filter((issue) => typeof issue === 'string' && issue.trim().length > 0)
+        .map((issue) => issue.trim())
+    : [];
+
+  // Extract summary safely
+  const rawSummary =
+    raw.summary && typeof raw.summary === 'object' && !Array.isArray(raw.summary)
+      ? raw.summary
+      : {};
+
+  const totalRecipients = Math.max(0, Number(rawSummary.totalRecipients) || 0);
+  const eligibleRecipientsCount = Math.max(0, Number(rawSummary.eligibleRecipientsCount) || 0);
+  const missingRecipientsCount = Math.max(0, Number(rawSummary.missingRecipientsCount) || 0);
+  const hasTextContent = Boolean(rawSummary.hasTextContent);
+  const hasHtmlContent = Boolean(rawSummary.hasHtmlContent);
+  const status = typeof rawSummary.status === 'string' ? rawSummary.status.trim() : '';
+
+  const eligibleRecipients = Array.isArray(rawSummary.eligibleRecipients)
+    ? rawSummary.eligibleRecipients
+        .filter((recipient) => recipient && typeof recipient === 'object' && !Array.isArray(recipient))
+        .map((recipient) => ({
+          id: String(recipient.id || recipient._id || ''),
+          name: typeof recipient.name === 'string' ? recipient.name : '',
+          email: typeof recipient.email === 'string' ? recipient.email : '',
+        }))
+        .filter((recipient) => recipient.id.length > 0 || recipient.email.length > 0)
+    : [];
+
+  return {
+    isReady,
+    issues,
+    summary: {
+      totalRecipients,
+      eligibleRecipients,
+      eligibleRecipientsCount,
+      missingRecipientsCount,
+      hasTextContent,
+      hasHtmlContent,
+      status,
+    },
+  };
+};
+
+/**
+ * Formats backend-provided blocking issues for display.
+ * Accepts an array of issue strings or an object containing an issues array.
+ * Filters out empty or non-string entries and returns clean, trimmed strings.
+ *
+ * @param {Array<string>|object|null|undefined} issuesOrPayload - Issues array or readiness payload
+ * @returns {Array<string>} Formatted array of issue strings
+ */
+export const formatReadinessIssues = (issuesOrPayload) => {
+  if (!issuesOrPayload) {
+    return [];
+  }
+
+  let rawIssues = issuesOrPayload;
+  if (Array.isArray(issuesOrPayload)) {
+    rawIssues = issuesOrPayload;
+  } else if (typeof issuesOrPayload === 'object') {
+    if (Array.isArray(issuesOrPayload.issues)) {
+      rawIssues = issuesOrPayload.issues;
+    } else if (issuesOrPayload.data && Array.isArray(issuesOrPayload.data.issues)) {
+      rawIssues = issuesOrPayload.data.issues;
+    } else {
+      return [];
+    }
+  } else {
+    return [];
+  }
+
+  return rawIssues
+    .filter((issue) => typeof issue === 'string' && issue.trim().length > 0)
+    .map((issue) => issue.trim());
+};
+
+/**
+ * Maps readiness boolean to human-readable label and Tailwind badge classes.
+ *
+ * @param {boolean} isReady
+ * @returns {{ label: string, pillClass: string }}
+ */
+export const getReadinessBadge = (isReady) => {
+  if (isReady === true) {
+    return {
+      label: 'Ready to Send',
+      pillClass: 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20',
+    };
+  }
+  return {
+    label: 'Not Ready',
+    pillClass: 'bg-amber-500/10 text-amber-300 border border-amber-500/20',
+  };
+};
+
+/**
+ * Creates a presentation summary from validated readiness response data
+ * for use in preview UI components.
+ *
+ * Formats:
+ * - Recipient count label ("X eligible recipients", "1 eligible recipient", "0 eligible recipients")
+ * - Missing recipients label ("X recipients unavailable", "1 recipient unavailable", "")
+ * - Content availability label ("Plain Text & HTML", "Plain Text", "HTML", "No content")
+ * - Safe numeric counts and boolean flags
+ *
+ * @param {object|null|undefined} summaryOrPayload - Readiness summary or full payload
+ * @returns {{
+ *   recipientsLabel: string,
+ *   missingLabel: string,
+ *   contentLabel: string,
+ *   eligibleRecipientsCount: number,
+ *   totalRecipients: number,
+ *   missingRecipientsCount: number,
+ *   hasTextContent: boolean,
+ *   hasHtmlContent: boolean,
+ *   hasContent: boolean,
+ *   isReady: boolean,
+ *   badge: { label: string, pillClass: string }
+ * }}
+ */
+export const formatReadinessSummary = (summaryOrPayload) => {
+  // Normalize payload or summary input
+  let summary = {};
+  let isReady = false;
+
+  if (summaryOrPayload && typeof summaryOrPayload === 'object') {
+    if (summaryOrPayload.summary && typeof summaryOrPayload.summary === 'object') {
+      summary = summaryOrPayload.summary;
+      isReady = summaryOrPayload.isReady === true;
+    } else if (summaryOrPayload.data?.summary && typeof summaryOrPayload.data.summary === 'object') {
+      summary = summaryOrPayload.data.summary;
+      isReady = summaryOrPayload.data.isReady === true;
+    } else {
+      summary = summaryOrPayload;
+      if ('isReady' in summaryOrPayload) {
+        isReady = summaryOrPayload.isReady === true;
+      }
+    }
+  }
+
+  const eligibleCount = Math.max(0, Number(summary.eligibleRecipientsCount) || 0);
+  const totalCount = Math.max(0, Number(summary.totalRecipients) || 0);
+  const missingCount = Math.max(0, Number(summary.missingRecipientsCount) || 0);
+  const hasText = Boolean(summary.hasTextContent);
+  const hasHtml = Boolean(summary.hasHtmlContent);
+
+  // Recipient label
+  let recipientsLabel = `${eligibleCount} eligible recipients`;
+  if (eligibleCount === 1) {
+    recipientsLabel = '1 eligible recipient';
+  }
+
+  // Missing label
+  let missingLabel = '';
+  if (missingCount === 1) {
+    missingLabel = '1 recipient unavailable';
+  } else if (missingCount > 1) {
+    missingLabel = `${missingCount} recipients unavailable`;
+  }
+
+  // Content type label
+  let contentLabel = 'No content';
+  if (hasText && hasHtml) {
+    contentLabel = 'Plain Text & HTML';
+  } else if (hasText) {
+    contentLabel = 'Plain Text';
+  } else if (hasHtml) {
+    contentLabel = 'HTML';
+  }
+
+  return {
+    recipientsLabel,
+    missingLabel,
+    contentLabel,
+    eligibleRecipientsCount: eligibleCount,
+    totalRecipients: totalCount,
+    missingRecipientsCount: missingCount,
+    hasTextContent: hasText,
+    hasHtmlContent: hasHtml,
+    hasContent: hasText || hasHtml,
+    isReady,
+    badge: getReadinessBadge(isReady),
+  };
+};
+
 export default {
   formatCampaignDate,
   getCampaignStatusBadge,
@@ -172,4 +412,8 @@ export default {
   toggleRecipientId,
   removeRecipientId,
   togglePageRecipients,
+  extractReadinessData,
+  formatReadinessIssues,
+  getReadinessBadge,
+  formatReadinessSummary,
 };

@@ -9,6 +9,10 @@ import {
   toggleRecipientId,
   removeRecipientId,
   togglePageRecipients,
+  extractReadinessData,
+  formatReadinessIssues,
+  getReadinessBadge,
+  formatReadinessSummary,
 } from '../src/utils/campaignHelpers.js';
 import {
   getCampaigns,
@@ -239,6 +243,286 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       handleToggle('c-2');
       assert.equal(called, false);
       assert.deepEqual(selectedIds, ['c-1']);
+    });
+  });
+
+  // ==========================================
+  // Part 2: Campaign Readiness Pure Helpers
+  // ==========================================
+  describe('Campaign Readiness Pure Helpers', () => {
+    describe('extractReadinessData', () => {
+      it('21. Retains isReady: true when response data indicates campaign is ready', () => {
+        const payload = {
+          isReady: true,
+          issues: [],
+          summary: {
+            totalRecipients: 2,
+            eligibleRecipients: [
+              { id: 'c-1', name: 'Alice', email: 'alice@example.com' },
+              { id: 'c-2', name: 'Bob', email: 'bob@example.com' },
+            ],
+            eligibleRecipientsCount: 2,
+            missingRecipientsCount: 0,
+            hasTextContent: true,
+            hasHtmlContent: false,
+            status: 'draft',
+          },
+        };
+
+        const extracted = extractReadinessData(payload);
+        assert.equal(extracted.isReady, true);
+        assert.deepEqual(extracted.issues, []);
+        assert.equal(extracted.summary.totalRecipients, 2);
+        assert.equal(extracted.summary.eligibleRecipientsCount, 2);
+        assert.equal(extracted.summary.missingRecipientsCount, 0);
+        assert.equal(extracted.summary.hasTextContent, true);
+        assert.equal(extracted.summary.hasHtmlContent, false);
+        assert.equal(extracted.summary.status, 'draft');
+        assert.equal(extracted.summary.eligibleRecipients.length, 2);
+      });
+
+      it('22. Retains isReady: false and issues when campaign is not ready', () => {
+        const payload = {
+          isReady: false,
+          issues: [
+            'Campaign must have non-empty text content or HTML content.',
+            'Campaign must have at least one eligible recipient.',
+          ],
+          summary: {
+            totalRecipients: 0,
+            eligibleRecipients: [],
+            eligibleRecipientsCount: 0,
+            missingRecipientsCount: 0,
+            hasTextContent: false,
+            hasHtmlContent: false,
+            status: 'draft',
+          },
+        };
+
+        const extracted = extractReadinessData(payload);
+        assert.equal(extracted.isReady, false);
+        assert.equal(extracted.issues.length, 2);
+        assert.ok(extracted.issues.includes('Campaign must have non-empty text content or HTML content.'));
+        assert.ok(extracted.issues.includes('Campaign must have at least one eligible recipient.'));
+      });
+
+      it('23. Handles Axios response and API envelope nesting levels seamlessly', () => {
+        // Backend envelope inside Axios response:
+        const axiosResponse = {
+          data: {
+            success: true,
+            message: 'Campaign is ready for sending',
+            data: {
+              isReady: true,
+              issues: [],
+              summary: { eligibleRecipientsCount: 1, totalRecipients: 1 },
+            },
+          },
+        };
+
+        const fromAxios = extractReadinessData(axiosResponse);
+        assert.equal(fromAxios.isReady, true);
+        assert.equal(fromAxios.summary.eligibleRecipientsCount, 1);
+
+        // Direct backend envelope:
+        const apiEnvelope = {
+          success: true,
+          data: {
+            isReady: true,
+            issues: [],
+            summary: { eligibleRecipientsCount: 3, totalRecipients: 3 },
+          },
+        };
+
+        const fromEnvelope = extractReadinessData(apiEnvelope);
+        assert.equal(fromEnvelope.isReady, true);
+        assert.equal(fromEnvelope.summary.eligibleRecipientsCount, 3);
+      });
+
+      it('24. Handles missing, null, or malformed payloads defensively without throwing', () => {
+        const emptyResult = extractReadinessData(null);
+        assert.equal(emptyResult.isReady, false);
+        assert.deepEqual(emptyResult.issues, []);
+        assert.equal(emptyResult.summary.eligibleRecipientsCount, 0);
+        assert.equal(emptyResult.summary.totalRecipients, 0);
+        assert.equal(emptyResult.summary.hasTextContent, false);
+        assert.equal(emptyResult.summary.hasHtmlContent, false);
+
+        const undefResult = extractReadinessData(undefined);
+        assert.equal(undefResult.isReady, false);
+
+        const malformed = extractReadinessData('invalid string payload');
+        assert.equal(malformed.isReady, false);
+        assert.deepEqual(malformed.issues, []);
+
+        const emptyObject = extractReadinessData({});
+        assert.equal(emptyObject.isReady, false);
+        assert.deepEqual(emptyObject.issues, []);
+      });
+
+      it('25. Does not fabricate contacts or counts when data is absent', () => {
+        const payloadWithoutContacts = {
+          isReady: false,
+          issues: ['No recipients'],
+          summary: {},
+        };
+
+        const extracted = extractReadinessData(payloadWithoutContacts);
+        assert.deepEqual(extracted.summary.eligibleRecipients, []);
+        assert.equal(extracted.summary.eligibleRecipientsCount, 0);
+        assert.equal(extracted.summary.totalRecipients, 0);
+        assert.equal(extracted.summary.missingRecipientsCount, 0);
+      });
+    });
+
+    describe('formatReadinessIssues', () => {
+      it('26. Returns cleaned and trimmed issue strings from an array of issues', () => {
+        const raw = [
+          '  Campaign must have non-empty text content or HTML content.  ',
+          'Campaign must have at least one eligible recipient.',
+        ];
+        const formatted = formatReadinessIssues(raw);
+        assert.deepEqual(formatted, [
+          'Campaign must have non-empty text content or HTML content.',
+          'Campaign must have at least one eligible recipient.',
+        ]);
+      });
+
+      it('27. Extracts issues from readiness payload or response envelope', () => {
+        const payload = {
+          issues: ['Draft status required.'],
+        };
+        assert.deepEqual(formatReadinessIssues(payload), ['Draft status required.']);
+
+        const envelope = {
+          data: { issues: ['Name required.'] },
+        };
+        assert.deepEqual(formatReadinessIssues(envelope), ['Name required.']);
+      });
+
+      it('28. Empty issue arrays remain empty', () => {
+        assert.deepEqual(formatReadinessIssues([]), []);
+        assert.deepEqual(formatReadinessIssues({ issues: [] }), []);
+      });
+
+      it('29. Handles null, undefined, whitespace-only, and non-string elements safely', () => {
+        assert.deepEqual(formatReadinessIssues(null), []);
+        assert.deepEqual(formatReadinessIssues(undefined), []);
+        assert.deepEqual(formatReadinessIssues({}), []);
+        assert.deepEqual(formatReadinessIssues(['   ', '', null, undefined, 42, 'Valid issue']), [
+          'Valid issue',
+        ]);
+      });
+    });
+
+    describe('getReadinessBadge', () => {
+      it('30. Returns Ready to Send badge with emerald pillClass for isReady: true', () => {
+        const badge = getReadinessBadge(true);
+        assert.equal(badge.label, 'Ready to Send');
+        assert.ok(badge.pillClass.includes('emerald'));
+      });
+
+      it('31. Returns Not Ready badge with amber pillClass for isReady: false or non-boolean', () => {
+        const notReady = getReadinessBadge(false);
+        assert.equal(notReady.label, 'Not Ready');
+        assert.ok(notReady.pillClass.includes('amber'));
+
+        const falsy = getReadinessBadge(null);
+        assert.equal(falsy.label, 'Not Ready');
+
+        const truthyNonBool = getReadinessBadge('true');
+        assert.equal(truthyNonBool.label, 'Not Ready');
+      });
+    });
+
+    describe('formatReadinessSummary', () => {
+      it('32. Formats singular, plural, and zero recipient counts correctly', () => {
+        const single = formatReadinessSummary({ eligibleRecipientsCount: 1 });
+        assert.equal(single.recipientsLabel, '1 eligible recipient');
+        assert.equal(single.eligibleRecipientsCount, 1);
+
+        const plural = formatReadinessSummary({ eligibleRecipientsCount: 5 });
+        assert.equal(plural.recipientsLabel, '5 eligible recipients');
+        assert.equal(plural.eligibleRecipientsCount, 5);
+
+        const zero = formatReadinessSummary({ eligibleRecipientsCount: 0 });
+        assert.equal(zero.recipientsLabel, '0 eligible recipients');
+        assert.equal(zero.eligibleRecipientsCount, 0);
+      });
+
+      it('33. Formats missing-recipient count labels accurately', () => {
+        const singleMissing = formatReadinessSummary({ missingRecipientsCount: 1 });
+        assert.equal(singleMissing.missingLabel, '1 recipient unavailable');
+        assert.equal(singleMissing.missingRecipientsCount, 1);
+
+        const pluralMissing = formatReadinessSummary({ missingRecipientsCount: 3 });
+        assert.equal(pluralMissing.missingLabel, '3 recipients unavailable');
+        assert.equal(pluralMissing.missingRecipientsCount, 3);
+
+        const noneMissing = formatReadinessSummary({ missingRecipientsCount: 0 });
+        assert.equal(noneMissing.missingLabel, '');
+        assert.equal(noneMissing.missingRecipientsCount, 0);
+      });
+
+      it('34. Formats content presence labels (Plain Text & HTML, Plain Text, HTML, No content)', () => {
+        const both = formatReadinessSummary({ hasTextContent: true, hasHtmlContent: true });
+        assert.equal(both.contentLabel, 'Plain Text & HTML');
+        assert.equal(both.hasContent, true);
+
+        const textOnly = formatReadinessSummary({ hasTextContent: true, hasHtmlContent: false });
+        assert.equal(textOnly.contentLabel, 'Plain Text');
+        assert.equal(textOnly.hasContent, true);
+
+        const htmlOnly = formatReadinessSummary({ hasTextContent: false, hasHtmlContent: true });
+        assert.equal(htmlOnly.contentLabel, 'HTML');
+        assert.equal(htmlOnly.hasContent, true);
+
+        const none = formatReadinessSummary({ hasTextContent: false, hasHtmlContent: false });
+        assert.equal(none.contentLabel, 'No content');
+        assert.equal(none.hasContent, false);
+      });
+
+      it('35. Missing optional fields default safely without throwing runtime errors', () => {
+        const empty = formatReadinessSummary(null);
+        assert.equal(empty.recipientsLabel, '0 eligible recipients');
+        assert.equal(empty.missingLabel, '');
+        assert.equal(empty.contentLabel, 'No content');
+        assert.equal(empty.eligibleRecipientsCount, 0);
+        assert.equal(empty.missingRecipientsCount, 0);
+        assert.equal(empty.totalRecipients, 0);
+        assert.equal(empty.hasTextContent, false);
+        assert.equal(empty.hasHtmlContent, false);
+        assert.equal(empty.hasContent, false);
+        assert.equal(empty.isReady, false);
+        assert.equal(empty.badge.label, 'Not Ready');
+      });
+
+      it('36. Keeps authoritative isReady flag intact without rederiving it from client fields', () => {
+        // Even if eligibleRecipientsCount > 0 and hasContent is true, isReady remains authoritative
+        const notReadyPayload = {
+          isReady: false,
+          summary: {
+            eligibleRecipientsCount: 10,
+            hasTextContent: true,
+            hasHtmlContent: true,
+          },
+        };
+        const summaryNotReady = formatReadinessSummary(notReadyPayload);
+        assert.equal(summaryNotReady.isReady, false);
+        assert.equal(summaryNotReady.badge.label, 'Not Ready');
+
+        const readyPayload = {
+          isReady: true,
+          summary: {
+            eligibleRecipientsCount: 1,
+            hasTextContent: true,
+            hasHtmlContent: false,
+          },
+        };
+        const summaryReady = formatReadinessSummary(readyPayload);
+        assert.equal(summaryReady.isReady, true);
+        assert.equal(summaryReady.badge.label, 'Ready to Send');
+      });
     });
   });
 

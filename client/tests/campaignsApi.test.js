@@ -8,6 +8,7 @@ import {
   createCampaign,
   updateCampaign,
   deleteCampaign,
+  getCampaignReadiness,
 } from '../src/api/campaigns.js';
 import {
   validateCampaignName,
@@ -339,8 +340,104 @@ describe('Campaigns API Client & Campaign Validation', () => {
       });
     });
 
+    describe('getCampaignReadiness', () => {
+      it('10. Calls GET /campaigns/:id/readiness and returns readiness data payload', async () => {
+        const campaignId = '671234567890abcdef123456';
+        const mockReadinessData = {
+          isReady: true,
+          issues: [],
+          summary: {
+            totalRecipients: 2,
+            eligibleRecipients: [
+              { id: '671234567890abcdef123457', name: 'Alice Smith', email: 'alice@example.com' },
+              { id: '671234567890abcdef123458', name: 'Bob Jones', email: 'bob@example.com' },
+            ],
+            eligibleRecipientsCount: 2,
+            missingRecipientsCount: 0,
+            hasTextContent: true,
+            hasHtmlContent: false,
+            status: 'draft',
+          },
+        };
+
+        let capturedUrl = null;
+        let capturedConfig = null;
+
+        mock.method(apiClient, 'get', async (url, config) => {
+          capturedUrl = url;
+          capturedConfig = config;
+          return {
+            data: {
+              success: true,
+              message: 'Campaign is ready for sending',
+              data: mockReadinessData,
+            },
+          };
+        });
+
+        const result = await getCampaignReadiness(campaignId);
+
+        assert.equal(capturedUrl, `/campaigns/${campaignId}/readiness`);
+        assert.deepEqual(capturedConfig, {});
+        assert.deepEqual(result, mockReadinessData);
+        assert.equal(result.isReady, true);
+        assert.equal(result.summary.eligibleRecipientsCount, 2);
+      });
+
+      it('11. Forwards optional Axios request configuration (AbortSignal, headers) without mutating config', async () => {
+        const controller = new AbortController();
+        const customConfig = {
+          signal: controller.signal,
+          headers: { 'X-Custom-Header': 'ReadinessCheck' },
+        };
+        const configCopy = { ...customConfig, headers: { ...customConfig.headers } };
+
+        let capturedConfig = null;
+
+        mock.method(apiClient, 'get', async (url, config) => {
+          capturedConfig = config;
+          return {
+            data: {
+              success: true,
+              data: { isReady: false, issues: ['Draft only'], summary: {} },
+            },
+          };
+        });
+
+        const result = await getCampaignReadiness('camp-123', customConfig);
+
+        assert.equal(capturedConfig.signal, controller.signal);
+        assert.equal(capturedConfig.headers['X-Custom-Header'], 'ReadinessCheck');
+        assert.deepEqual(customConfig, configCopy);
+        assert.equal(result.isReady, false);
+      });
+
+      it('12. Propagates rejected API errors (e.g. 404, 401, 500) to the caller', async () => {
+        const mockError = new Error('Campaign not found.');
+        mockError.response = {
+          status: 404,
+          data: { success: false, message: 'Campaign not found.' },
+        };
+
+        mock.method(apiClient, 'get', async () => {
+          throw mockError;
+        });
+
+        await assert.rejects(
+          async () => {
+            await getCampaignReadiness('missing-camp-id');
+          },
+          (err) => {
+            assert.equal(err.response?.status, 404);
+            assert.equal(getErrorMessage(err), 'Campaign not found.');
+            return true;
+          }
+        );
+      });
+    });
+
     describe('Error Propagation', () => {
-      it('10. Propagates API errors (e.g. 404, 400) without swallowing them', async () => {
+      it('13. Propagates API errors (e.g. 404, 400) without swallowing them', async () => {
         const mock404Error = new Error('Not Found');
         mock404Error.response = {
           status: 404,
