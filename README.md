@@ -107,6 +107,18 @@ MailPulse/
 
 ---
 
+## Campaign Management & Preview
+
+MailPulse provides a complete campaign drafting, recipient assignment, readiness validation, and review workflow:
+
+- **Campaign CRUD & Recipient Selection**: Create, search, paginate, edit, and delete campaign drafts. Attach recipients selected from the authenticated user's contact list.
+- **Backend Readiness Validation**: The `GET /api/v1/campaigns/:id/readiness` endpoint verifies draft status, name and subject constraints, non-empty content (HTML or plain text), and confirms at least one selected recipient resolves to an existing owned contact.
+- **Preview & Review UI**: A dedicated modal dialog providing live readiness checks, safe plain-text viewing, and an isolated sandboxed `<iframe>` (`sandbox=""`, `srcDoc`) for email HTML rendering without script execution or DOM injection risks.
+- **Recipient Metrics**: Clear metric breakdowns distinguishing total selected recipients, verified eligible recipients, and missing or unavailable contacts.
+- **Sending Status**: Live email transmission and delivery queues are not implemented yet; current capabilities focus on drafting, validation, and safe previewing.
+
+---
+
 ## Quick-Start Guide
 
 ### 1. Prerequisites
