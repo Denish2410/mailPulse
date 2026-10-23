@@ -262,7 +262,7 @@ npm run build:client
   - Ensure the backend is running (`npm run dev:server`).
   - Verify `CLIENT_URL` in `server/.env` matches the frontend URL (`http://localhost:5173`).
   - Verify `VITE_API_BASE_URL` in `client/.env` matches the backend host and port (`http://localhost:5000/api/v1`).
-  - Use the in-app **"Re-check"** button in `ConnectivityCheck` to verify once resolved.
+  - Use the in-app **"Re-check"** button in `ConnectivityCheck` to verify once resolved
 
 ---
 
