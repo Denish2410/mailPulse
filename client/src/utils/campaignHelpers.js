@@ -404,6 +404,111 @@ export const formatReadinessSummary = (summaryOrPayload) => {
   };
 };
 
+/**
+ * Determines whether a "Send test email" action can be offered for a campaign.
+ *
+ * Mirrors the server's test-email preconditions so the UI never offers an action that is
+ * guaranteed to fail. Recipients are intentionally NOT required: test emails only go to the
+ * signed-in user's own address.
+ *
+ * @param {object|null|undefined} campaign
+ * @param {object} [options]
+ * @param {boolean} [options.isSending=false] - Whether a test email request is in flight
+ * @returns {{ canSend: boolean, reason: string }} reason explains why sending is unavailable
+ */
+export const getTestEmailAvailability = (campaign, { isSending = false } = {}) => {
+  if (!campaign || typeof campaign !== 'object' || !campaign.id) {
+    return { canSend: false, reason: 'Campaign is not available.' };
+  }
+  if (isSending) {
+    return { canSend: false, reason: 'A test email is already being sent.' };
+  }
+  if (campaign.status !== 'draft') {
+    return { canSend: false, reason: 'Test emails can only be sent for draft campaigns.' };
+  }
+
+  const subject = typeof campaign.subject === 'string' ? campaign.subject.trim() : '';
+  if (!subject) {
+    return { canSend: false, reason: 'Add an email subject before sending a test email.' };
+  }
+
+  const hasText = typeof campaign.textContent === 'string' && campaign.textContent.trim().length > 0;
+  const hasHtml = typeof campaign.htmlContent === 'string' && campaign.htmlContent.trim().length > 0;
+  if (!hasText && !hasHtml) {
+    return { canSend: false, reason: 'Add text or HTML content before sending a test email.' };
+  }
+
+  return { canSend: true, reason: '' };
+};
+
+/**
+ * Builds the user-facing success message after a test email request succeeds.
+ * Uses "sent ... check your inbox" wording without promising inbox delivery.
+ *
+ * @param {object|null|undefined} data - Response data from sendCampaignTestEmail
+ * @returns {string}
+ */
+export const formatTestEmailSuccess = (data) => {
+  const destination =
+    data && typeof data.destination === 'string' && data.destination.trim()
+      ? data.destination.trim()
+      : 'your account email';
+  return `Test email sent to ${destination}. It may take a minute to arrive; check your spam folder if you don't see it.`;
+};
+
+/**
+ * Maps a failed test email request to a clear, user-facing message.
+ * Never surfaces raw provider or server internals: it relies on the server's sanitized
+ * messages and status codes.
+ *
+ * @param {unknown} error - Axios error (or any thrown value)
+ * @returns {string}
+ */
+export const getTestEmailErrorMessage = (error) => {
+  const status = error?.response?.status;
+  const body = error?.response?.data;
+
+  switch (status) {
+    case 401:
+      return 'Your session has expired. Please sign in again.';
+    case 403:
+      return 'Your account is not permitted to send test emails.';
+    case 404:
+      return 'This campaign no longer exists. Refresh the list and try again.';
+    case 422: {
+      const details = Array.isArray(body?.errors)
+        ? body.errors
+            .map((issue) => (typeof issue?.message === 'string' ? issue.message.trim() : ''))
+            .filter(Boolean)
+        : [];
+      return details.length > 0
+        ? `This campaign can't be sent as a test yet: ${details.join(' ')}`
+        : "This campaign can't be sent as a test yet. Check its subject and content.";
+    }
+    case 429:
+      return "You've sent several test emails recently. Please wait a few minutes and try again.";
+    case 502:
+      return 'The email provider could not send the test email. Please try again shortly.';
+    case 503:
+      return 'Email sending is not configured on the server yet. Ask an administrator to set up SMTP.';
+    default:
+      break;
+  }
+
+  if (typeof body?.message === 'string' && body.message.trim() && status >= 400 && status < 500) {
+    return body.message.trim();
+  }
+
+  if (error?.code === 'ECONNABORTED' || error?.message?.includes?.('timeout')) {
+    return 'The request timed out. Please check your connection and try again.';
+  }
+  if (error?.message === 'Network Error' || error?.code === 'ERR_NETWORK') {
+    return 'Unable to reach the server. Please check your network connection.';
+  }
+
+  return 'Failed to send the test email. Please try again.';
+};
+
 export default {
   formatCampaignDate,
   getCampaignStatusBadge,
@@ -416,4 +521,7 @@ export default {
   formatReadinessIssues,
   getReadinessBadge,
   formatReadinessSummary,
+  getTestEmailAvailability,
+  formatTestEmailSuccess,
+  getTestEmailErrorMessage,
 };

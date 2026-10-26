@@ -180,6 +180,25 @@ export const getCampaignReadiness = async (id, config = {}) => {
   return response.data?.data;
 };
 
+/**
+ * Send a single "[TEST]" copy of a campaign to the authenticated user's own account email.
+ *
+ * The request body is intentionally empty: the server always resolves the destination from
+ * the signed-in account, and never contacts the campaign's recipients. No destination,
+ * recipient, cc, or bcc fields are ever sent from the client.
+ *
+ * Note: success means the email was accepted for delivery ("dispatched"), not that it has
+ * reached the inbox.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ destination: string, subject: string, messageId: string, sentAt: string }>}
+ */
+export const sendCampaignTestEmail = async (id, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/test-email`, {}, config);
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -189,5 +208,6 @@ export default {
   updateCampaign,
   deleteCampaign,
   getCampaignReadiness,
+  sendCampaignTestEmail,
   getErrorMessage,
 };

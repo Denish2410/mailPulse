@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { getCampaignReadiness, getErrorMessage } from '../../api/campaigns.js';
+import {
+  getCampaignReadiness,
+  sendCampaignTestEmail,
+  getErrorMessage,
+} from '../../api/campaigns.js';
 import {
   extractReadinessData,
   formatReadinessIssues,
@@ -7,6 +11,9 @@ import {
   formatReadinessSummary,
   getCampaignStatusBadge,
   formatCampaignDate,
+  getTestEmailAvailability,
+  formatTestEmailSuccess,
+  getTestEmailErrorMessage,
 } from '../../utils/campaignHelpers.js';
 
 /**
@@ -24,7 +31,10 @@ import {
  *   with an empty sandbox attribute (sandbox="") and srcDoc.
  *   Direct DOM injection is NEVER used.
  * - Keyboard navigation (Escape key dismissal) and focus styling.
- * - Read-only safeguards: does not send emails or initiate sending workflows.
+ * - "Send test email" (Phase 4.4): sends one [TEST] copy to the signed-in user's OWN
+ *   account email via POST /campaigns/:id/test-email. Never contacts campaign recipients,
+ *   prevents duplicate submissions, and ignores responses that arrive after the dialog
+ *   closes or switches campaigns. Bulk campaign sending is NOT available here.
  *
  * @param {object} props
  * @param {boolean} [props.isOpen=false] - Dialog visibility
@@ -49,6 +59,49 @@ export const CampaignPreviewDialog = ({
 
   // Track latest request to guard against stale out-of-order responses
   const requestIdRef = useRef(0);
+
+  // Test email state: status is 'idle' | 'sending' | 'success' | 'error'
+  const [testEmail, setTestEmail] = useState({ status: 'idle', message: '' });
+  // Incremented whenever the dialog closes or switches campaign, invalidating in-flight results
+  const testEmailRequestIdRef = useRef(0);
+
+  // Reset test email feedback when the dialog opens, closes, or switches campaign.
+  // Uses React's "adjust state while rendering" pattern instead of setState inside an effect.
+  const testEmailSessionKey = isOpen && campaign?.id ? campaign.id : null;
+  const [prevTestEmailSessionKey, setPrevTestEmailSessionKey] = useState(testEmailSessionKey);
+  if (testEmailSessionKey !== prevTestEmailSessionKey) {
+    setPrevTestEmailSessionKey(testEmailSessionKey);
+    setTestEmail({ status: 'idle', message: '' });
+  }
+
+  // Invalidate any in-flight test email request when the session changes
+  useEffect(() => {
+    testEmailRequestIdRef.current += 1;
+  }, [isOpen, campaign?.id]);
+
+  /**
+   * Sends one test email to the signed-in user's own address.
+   * The request is not aborted on close (aborting would not undo a send already accepted
+   * by the server); stale results are simply ignored via the request-id guard.
+   */
+  const handleTestEmailClick = async () => {
+    const availability = getTestEmailAvailability(campaign, {
+      isSending: testEmail.status === 'sending',
+    });
+    if (!availability.canSend) return;
+
+    const currentRequestId = ++testEmailRequestIdRef.current;
+    setTestEmail({ status: 'sending', message: '' });
+
+    try {
+      const data = await sendCampaignTestEmail(campaign.id);
+      if (currentRequestId !== testEmailRequestIdRef.current) return;
+      setTestEmail({ status: 'success', message: formatTestEmailSuccess(data) });
+    } catch (err) {
+      if (currentRequestId !== testEmailRequestIdRef.current) return;
+      setTestEmail({ status: 'error', message: getTestEmailErrorMessage(err) });
+    }
+  };
 
   // Synchronize tab preference based on available campaign content
   useEffect(() => {
@@ -140,6 +193,12 @@ export const CampaignPreviewDialog = ({
     : campaign.recipientsCount || 0;
   const eligibleCount = summary.eligibleRecipientsCount;
   const missingCount = summary.missingRecipientsCount;
+
+  // Test email availability (recipients are not required: it only goes to the signed-in user)
+  const isSendingTestEmail = testEmail.status === 'sending';
+  const testEmailAvailability = getTestEmailAvailability(campaign, {
+    isSending: isSendingTestEmail,
+  });
 
   return (
     <div
@@ -555,16 +614,68 @@ export const CampaignPreviewDialog = ({
           </div>
         </div>
 
+        {/* Test Email Feedback (always visible above the footer, announced to screen readers) */}
+        <div aria-live="polite" className="shrink-0">
+          {testEmail.status === 'success' && (
+            <div
+              role="status"
+              className="mx-6 my-3 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-start gap-2"
+            >
+              <svg className="w-4 h-4 text-emerald-400 shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>{testEmail.message}</span>
+            </div>
+          )}
+          {testEmail.status === 'error' && (
+            <div
+              role="alert"
+              className="mx-6 my-3 px-4 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-start gap-2"
+            >
+              <svg className="w-4 h-4 text-rose-400 shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{testEmail.message}</span>
+            </div>
+          )}
+        </div>
+
         {/* Dialog Footer */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 px-6 py-4 border-t border-slate-800 bg-slate-900/90 shrink-0">
           <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>Read-only preview. Sending is not available in this phase.</span>
+            <span>
+              {testEmailAvailability.canSend || isSendingTestEmail
+                ? 'Test emails go only to your own account email. Campaign sending is not available yet.'
+                : testEmailAvailability.reason}
+            </span>
           </span>
 
-          <div className="flex items-center justify-end gap-2.5">
+          <div className="flex items-center justify-end gap-2.5 flex-wrap">
+            <button
+              type="button"
+              onClick={handleTestEmailClick}
+              disabled={!testEmailAvailability.canSend}
+              aria-busy={isSendingTestEmail}
+              aria-label="Send a test email of this campaign to your own account email"
+              title={
+                testEmailAvailability.canSend
+                  ? 'Send a [TEST] copy to your own account email'
+                  : testEmailAvailability.reason
+              }
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-500/10"
+            >
+              {isSendingTestEmail ? (
+                <span className="w-3.5 h-3.5 border-2 border-indigo-300 border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              )}
+              <span>{isSendingTestEmail ? 'Sending test…' : 'Send test email'}</span>
+            </button>
             {onEdit && (
               <button
                 type="button"

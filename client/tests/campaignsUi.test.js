@@ -1193,17 +1193,23 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       assert.equal(displayedReadiness.campaign, 'B'); // Remains B, stale A is ignored!
     });
 
-    it('42. Read-only preview invariant: no email dispatch or sending buttons', () => {
-      // Must not contain sending triggers or SMTP send handlers
+    it('42. Preview sending invariant: no bulk campaign dispatch; only a self-addressed test email', () => {
+      // Bulk sending / dispatch must not exist in the preview dialog (Phase 4.4 adds test emails only)
       assert.doesNotMatch(
         previewSource,
-        /sendCampaign|dispatchCampaign|handleSend/i,
-        'Preview dialog must not contain sending actions'
+        /sendCampaign(?!TestEmail)|dispatchCampaign|\/send['"`]/i,
+        'Preview dialog must not contain bulk campaign sending actions'
+      );
+      // The only email action is the self-addressed test email
+      assert.match(
+        previewSource,
+        /sendCampaignTestEmail\(campaign\.id\)/,
+        'Preview dialog may only call the test email endpoint, with no destination override'
       );
       assert.match(
         previewSource,
-        /Read-only preview\. Sending is not available in this phase\./,
-        'Preview dialog must display clear read-only disclaimer in footer'
+        /Test emails go only to your own account email\. Campaign sending is not available yet\./,
+        'Preview dialog must clearly state that only self-addressed test emails are available'
       );
     });
   });
