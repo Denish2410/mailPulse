@@ -122,6 +122,39 @@ export const updateCampaignSchema = z.object({
 });
 
 /**
+ * Schema for POST /api/v1/campaigns/:id/test-email (Send Campaign Test Email)
+ *
+ * - The destination is always the authenticated user's own account email, resolved server-side.
+ * - An optional `to` may be supplied for explicitness, but the controller rejects it unless it
+ *   matches the account email (case-insensitive).
+ * - Strict: unknown keys such as `recipients`, `recipientIds`, `cc`, or `bcc` are rejected so
+ *   callers cannot attempt to redirect or expand delivery.
+ * - An omitted or empty body is accepted.
+ */
+export const sendTestEmailSchema = z.object({
+  params: z
+    .object({
+      id: z
+        .string({ required_error: 'Campaign ID is required' })
+        .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
+    })
+    .strict(),
+  body: z
+    .object({
+      to: z
+        .string({ invalid_type_error: 'Destination email must be a string' })
+        .trim()
+        .min(1, 'Destination email cannot be empty')
+        .max(254, 'Destination email cannot exceed 254 characters')
+        .email('Invalid destination email address format')
+        .optional(),
+    })
+    .strict()
+    .optional()
+    .default({}),
+});
+
+/**
  * Schema for GET /api/v1/campaigns (Pagination, Search, Filtering)
  */
 export const getCampaignsQuerySchema = z.object({

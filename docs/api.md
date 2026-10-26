@@ -224,6 +224,7 @@ The following endpoints will be introduced in subsequent phases:
 - `GET /:id/readiness`: Evaluate send-readiness, blocking issues, and resolved recipients
 - `PATCH /:id`: Update campaign draft
 - `DELETE /:id`: Delete campaign draft
+- `POST /:id/test-email`: Send a `[TEST]` copy of the campaign to the authenticated user's own email
 - `POST /:id/send`: Dispatch or queue campaign (Future Phase)
 
 #### Campaign Readiness Contract (`GET /api/v1/campaigns/:id/readiness`)
@@ -256,6 +257,61 @@ The following endpoints will be introduced in subsequent phases:
   }
 }
 ```
+
+#### Campaign Test Email Contract (`POST /api/v1/campaigns/:id/test-email`)
+- **Access**: Protected (Bearer JWT) plus a dedicated per-user rate limit, in addition to the global IP limit.
+  - Default: 5 requests per 15 minutes per user, configurable via `TEST_EMAIL_RATE_LIMIT_WINDOW_MS` and `TEST_EMAIL_RATE_LIMIT_MAX`.
+  - Every attempt counts toward the quota, including requests that fail validation.
+- **Destination**: Always the authenticated user's own account email, loaded from the database.
+  - Campaign recipients and contacts are never contacted.
+  - Arbitrary destinations are not accepted.
+- **Request Body** (optional, strict):
+  - `to` (optional): If supplied, it must match the account email (case-insensitive). Any other address returns `400`.
+  - Unknown keys (for example `recipients`, `recipientIds`, `cc`, `bcc`) return `400`.
+```json
+{ "to": "you@example.com" }
+```
+- **Rules**:
+  - The campaign must be owned by the authenticated user.
+  - `status` must be `'draft'`.
+  - `name` and `subject` must satisfy the campaign length rules.
+  - At least one of `textContent` / `htmlContent` must be non-whitespace.
+  - Recipients are **not** required.
+- **Message**:
+  - Subject is `"[TEST] " + subject`, truncated so it never exceeds 200 characters.
+  - The stored text and HTML bodies are sent unchanged.
+- **Side Effects**: None.
+  - The campaign's status, recipients and timestamps are not modified.
+  - No delivery records are created.
+- **Response Shape (HTTP 200)**:
+```json
+{
+  "success": true,
+  "message": "Test email dispatched",
+  "data": {
+    "destination": "you@example.com",
+    "subject": "[TEST] October Newsletter",
+    "messageId": "<abc123@mailpulse.local>",
+    "sentAt": "2026-10-26T04:20:00.000Z"
+  }
+}
+```
+- **Dispatched vs. delivered**:
+  - A `200` means the message was accepted by the email transport (SMTP handoff).
+  - It does **not** confirm inbox delivery, because bounces can occur asynchronously.
+- **Status Codes**:
+
+| Code | Meaning |
+| :--- | :--- |
+| 200 | Test email dispatched to the account email |
+| 400 | Invalid campaign ID, unknown body key, malformed `to`, or `to` not matching the account email |
+| 401 | Missing or invalid token |
+| 403 | Account is not active (e.g. suspended) |
+| 404 | Campaign not found or not owned by the user (identical response for both) |
+| 422 | Campaign content not sendable; `errors` lists the issues |
+| 429 | Per-user test email rate limit exceeded |
+| 502 | Email transport failed (provider details are never exposed) |
+| 503 | Email sending is not configured (SMTP is opt-in and fails closed) |
 
 ### Analytics (`/api/v1/analytics`)
 - `GET /overview`: High-level open, click, and bounce metrics

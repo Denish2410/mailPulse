@@ -2,13 +2,19 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 
 /**
  * Custom application error class for operational errors with explicit HTTP status codes.
+ *
+ * `options.expose` (default false) explicitly opts a 5xx error into returning its message to
+ * the client. Use it ONLY with static, pre-sanitized messages (for example,
+ * "Email sending is not configured."). 4xx messages are always returned, as before, and
+ * unexpected or non-exposed 5xx errors are still replaced with "Internal Server Error".
  */
 export class AppError extends Error {
-  constructor(message, statusCode = 500, errors = null) {
+  constructor(message, statusCode = 500, errors = null, { expose = false } = {}) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
     this.isOperational = true;
+    this.expose = expose === true;
     if (errors) {
       this.errors = errors;
     }
@@ -57,9 +63,15 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   // 4. Sanitize message: do not expose internal exception details or stack traces to clients
+  // Server errors stay generic unless an AppError explicitly opted in with a sanitized message.
+  const isExposedServerError =
+    !isClientError && err instanceof AppError && err.expose === true && Boolean(err.message);
+
   let clientMessage = isClientError
     ? err.message || 'Client error'
-    : 'Internal Server Error';
+    : isExposedServerError
+      ? err.message
+      : 'Internal Server Error';
 
   // Handle common client parsing errors safely
   if (err.type === 'entity.parse.failed') {

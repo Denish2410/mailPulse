@@ -1,8 +1,15 @@
 import mongoose from 'mongoose';
 import Campaign from '../models/Campaign.js';
 import Contact from '../models/Contact.js';
+import User from '../models/User.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import {
+  createEmailService,
+  InvalidMessageError,
+  EmailConfigurationError,
+  EmailTransportError,
+} from '../services/email.service.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -401,6 +408,200 @@ export const getCampaignReadiness = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Subject prefix applied to every campaign test email.
+ */
+export const TEST_EMAIL_SUBJECT_PREFIX = '[TEST] ';
+
+/**
+ * Maximum subject length accepted by the email service (mirrors Campaign.subject).
+ */
+const MAX_EMAIL_SUBJECT_LENGTH = 200;
+
+/**
+ * Builds the test email subject by prefixing "[TEST] " and truncating the original
+ * subject so the result never exceeds the email service's 200-character limit.
+ *
+ * @param {string} subject - Stored campaign subject
+ * @returns {string}
+ */
+export const buildTestEmailSubject = (subject) => {
+  const base = typeof subject === 'string' ? subject.trim() : '';
+  const available = MAX_EMAIL_SUBJECT_LENGTH - TEST_EMAIL_SUBJECT_PREFIX.length;
+  return `${TEST_EMAIL_SUBJECT_PREFIX}${base.slice(0, available).trimEnd()}`;
+};
+
+/**
+ * Evaluates whether a campaign has the content required to send a test email.
+ * Unlike send-readiness, recipients are intentionally NOT required: test emails only
+ * ever go to the authenticated user's own account address.
+ *
+ * @param {object} campaign - Plain campaign object
+ * @returns {Array<{ path: string, message: string }>} Structured issues (empty when sendable)
+ */
+export const getTestEmailContentIssues = (campaign) => {
+  const issues = [];
+
+  const name = typeof campaign.name === 'string' ? campaign.name.trim() : '';
+  if (name.length < 2 || name.length > 120) {
+    issues.push({
+      path: 'campaign.name',
+      message: 'Campaign name must be between 2 and 120 characters long.',
+    });
+  }
+
+  const subject = typeof campaign.subject === 'string' ? campaign.subject.trim() : '';
+  if (subject.length < 1 || subject.length > MAX_EMAIL_SUBJECT_LENGTH) {
+    issues.push({
+      path: 'campaign.subject',
+      message: 'Email subject must be between 1 and 200 characters long.',
+    });
+  }
+
+  const hasText = typeof campaign.textContent === 'string' && campaign.textContent.trim().length > 0;
+  const hasHtml = typeof campaign.htmlContent === 'string' && campaign.htmlContent.trim().length > 0;
+  if (!hasText && !hasHtml) {
+    issues.push({
+      path: 'campaign.content',
+      message: 'Campaign must have non-empty text content or HTML content.',
+    });
+  }
+
+  if (campaign.status !== 'draft') {
+    issues.push({
+      path: 'campaign.status',
+      message: 'Test emails can only be sent for draft campaigns.',
+    });
+  }
+
+  return issues;
+};
+
+/**
+ * Lazily created production email service (SMTP resolved from env on first send).
+ * Shared across requests so an SMTP transport, once created, is reused.
+ */
+let defaultEmailService = null;
+
+/**
+ * Resolves the email service for a request.
+ * Tests (and future composition roots) inject a service via `app.locals.emailService`;
+ * otherwise a fail-closed default service configured from environment variables is used.
+ *
+ * @param {import('express').Request} req
+ * @returns {{ sendEmail: (message: object) => Promise<object> }}
+ */
+export const resolveEmailService = (req) => {
+  const injected = req.app?.locals?.emailService;
+  if (injected && typeof injected.sendEmail === 'function') {
+    return injected;
+  }
+  if (!defaultEmailService) {
+    defaultEmailService = createEmailService();
+  }
+  return defaultEmailService;
+};
+
+/**
+ * Send a single test copy of a campaign to the authenticated user's own account email.
+ *
+ * Guarantees:
+ * - Destination is ALWAYS the account email loaded from the database; never the campaign's
+ *   recipients, contacts, or an arbitrary caller-supplied address.
+ * - Ownership is enforced by querying { _id, userId }; foreign and missing campaigns both
+ *   return the same 404 so campaign existence is never disclosed.
+ * - Read-only: the campaign is loaded with .lean() and never saved, so no status, recipient,
+ *   or timestamp changes occur, and no delivery records are created.
+ * - Errors are mapped to sanitized responses; SMTP details and raw provider errors never leak.
+ * - Success is reported as "dispatched" (accepted by the transport), not "delivered".
+ *
+ * Route: POST /api/v1/campaigns/:id/test-email
+ * Access: Protected (Bearer JWT) + per-user test email rate limit
+ */
+export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+  const requestedTo = req.body?.to;
+
+  // 1. Load campaign strictly scoped to the authenticated owner (read-only)
+  const campaign = await Campaign.findOne({ _id: id, userId })
+    .select('name subject textContent htmlContent status')
+    .lean();
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  // 2. Resolve the destination from the authenticated account, never from the request
+  const user = await User.findById(userId).select('email status').lean();
+  if (!user || typeof user.email !== 'string' || !user.email.trim()) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+  if (user.status && user.status !== 'active') {
+    throw new AppError('Your account is not permitted to send test emails.', 403);
+  }
+
+  const destination = user.email.trim().toLowerCase();
+
+  if (requestedTo !== undefined && requestedTo.trim().toLowerCase() !== destination) {
+    throw new AppError('Validation failed', 400, [
+      {
+        path: 'body.to',
+        message: 'Test emails can only be sent to your own account email address.',
+      },
+    ]);
+  }
+
+  // 3. Ensure the campaign has sendable content (recipients are not required for tests)
+  const issues = getTestEmailContentIssues(campaign);
+  if (issues.length > 0) {
+    throw new AppError('Campaign is not ready for a test email.', 422, issues);
+  }
+
+  // 4. Dispatch exactly one message to the account email
+  const emailService = resolveEmailService(req);
+  let result;
+  try {
+    result = await emailService.sendEmail({
+      to: destination,
+      subject: buildTestEmailSubject(campaign.subject),
+      text: campaign.textContent ?? '',
+      html: campaign.htmlContent ?? '',
+    });
+  } catch (error) {
+    if (error instanceof InvalidMessageError) {
+      // Validation messages from the service are safe, static strings
+      throw new AppError('Campaign content cannot be sent as a test email.', 400, [
+        { path: 'message', message: error.message },
+      ]);
+    }
+    if (error instanceof EmailConfigurationError) {
+      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
+    }
+    if (error instanceof EmailTransportError) {
+      throw new AppError('Failed to send test email. Please try again later.', 502, null, {
+        expose: true,
+      });
+    }
+    // Unknown failures fall through to the centralized handler as a sanitized 500
+    throw error;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Test email dispatched',
+    data: {
+      destination: result.destination,
+      subject: result.subject,
+      messageId: result.messageId,
+      sentAt: result.sentAt,
+    },
+  });
+});
+
 export default {
   createCampaign,
   getCampaigns,
@@ -408,6 +609,7 @@ export default {
   updateCampaign,
   deleteCampaign,
   getCampaignReadiness,
+  sendCampaignTestEmail,
   formatSafeCampaign,
   validateAndDeduplicateRecipients,
 };

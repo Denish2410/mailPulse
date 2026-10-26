@@ -6,14 +6,17 @@ import {
   updateCampaign,
   deleteCampaign,
   getCampaignReadiness,
+  sendCampaignTestEmail,
 } from '../controllers/campaign.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
+import { testEmailRateLimiter } from '../middleware/testEmailRateLimiter.js';
 import { validate } from '../validators/validate.js';
 import {
   createCampaignSchema,
   campaignIdParamSchema,
   updateCampaignSchema,
   getCampaignsQuerySchema,
+  sendTestEmailSchema,
 } from '../validators/campaign.validator.js';
 
 const router = Router();
@@ -44,6 +47,20 @@ router.get('/', validate(getCampaignsQuerySchema), getCampaigns);
  * @access  Protected
  */
 router.get('/:id/readiness', validate(campaignIdParamSchema), getCampaignReadiness);
+
+/**
+ * @route   POST /api/v1/campaigns/:id/test-email
+ * @desc    Send a single "[TEST]" copy of a campaign to the authenticated user's own account email.
+ *          Never contacts campaign recipients and never modifies the campaign.
+ * @access  Protected, plus a dedicated per-user rate limit (applied before validation so
+ *          every attempt counts toward the quota)
+ */
+router.post(
+  '/:id/test-email',
+  testEmailRateLimiter,
+  validate(sendTestEmailSchema),
+  sendCampaignTestEmail
+);
 
 /**
  * @route   GET /api/v1/campaigns/:id

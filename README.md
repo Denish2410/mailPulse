@@ -115,7 +115,8 @@ MailPulse provides a complete campaign drafting, recipient assignment, readiness
 - **Backend Readiness Validation**: The `GET /api/v1/campaigns/:id/readiness` endpoint verifies draft status, name and subject constraints, non-empty content (HTML or plain text), and confirms at least one selected recipient resolves to an existing owned contact.
 - **Preview & Review UI**: A dedicated modal dialog providing live readiness checks, safe plain-text viewing, and an isolated sandboxed `<iframe>` (`sandbox=""`, `srcDoc`) for email HTML rendering without script execution or DOM injection risks.
 - **Recipient Metrics**: Clear metric breakdowns distinguishing total selected recipients, verified eligible recipients, and missing or unavailable contacts.
-- **Sending Status**: Live email transmission and delivery queues are not implemented yet; current capabilities focus on drafting, validation, and safe previewing.
+- **Test Emails**: `POST /api/v1/campaigns/:id/test-email` sends a single `[TEST]` copy of a draft to the signed-in user's own account email only. It never contacts campaign recipients, never modifies the campaign, is rate limited per user, and fails closed (HTTP 503) when SMTP is not configured.
+- **Sending Status**: Bulk campaign transmission and delivery queues are not implemented yet; current capabilities focus on drafting, validation, safe previewing, and self-addressed test emails.
 
 ---
 
