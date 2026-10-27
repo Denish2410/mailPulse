@@ -426,6 +426,7 @@ export const CampaignsPage = () => {
             handleClosePreviewDialog();
             handleOpenEditDialog(campaignToEdit);
           }}
+          onCampaignUpdated={() => setRefreshTrigger((prev) => prev + 1)}
         />
       )}
     </div>

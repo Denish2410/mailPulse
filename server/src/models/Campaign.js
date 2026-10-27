@@ -23,9 +23,24 @@ import mongoose from 'mongoose';
  * - Deleted contact IDs are intentionally retained in draft documents without cascade deletion;
  *   downstream dispatch/preview operations re-validate and prune inactive contacts.
  *
- * Status Lifecycle:
- * - Defaults to 'draft'. For Phase 4 draft authoring, 'draft' is the primary active state.
+ * Status Lifecycle (Phase 5):
+ * - 'draft'   : Editable authoring state (default).
+ * - 'sending' : Locked. A dispatch has been accepted and per-recipient Delivery records are
+ *               being processed. Entered only through an atomic draft -> sending transition so a
+ *               campaign can never be dispatched twice.
+ * - 'sent'    : Dispatch finished and at least one recipient was accepted by the transport.
+ * - 'failed'  : Dispatch finished and no recipient was accepted by the transport.
+ * Only drafts may be edited, deleted, test-emailed, or sent.
+ *
+ * Delivery Statistics:
+ * - `stats` is a denormalized summary of the campaign's Delivery records, written by the
+ *   dispatcher. Delivery documents remain the source of truth.
  */
+/**
+ * Supported campaign lifecycle states.
+ */
+export const CAMPAIGN_STATUSES = ['draft', 'sending', 'sent', 'failed'];
+
 const campaignSchema = new mongoose.Schema(
   {
     userId: {
@@ -60,8 +75,8 @@ const campaignSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: {
-        values: ['draft'],
-        message: 'Status must be draft',
+        values: CAMPAIGN_STATUSES,
+        message: 'Status must be one of draft, sending, sent, or failed',
       },
       default: 'draft',
     },
@@ -74,6 +89,19 @@ const campaignSchema = new mongoose.Schema(
       ],
       default: () => [],
     },
+    sendStartedAt: {
+      type: Date,
+      default: null,
+    },
+    sendCompletedAt: {
+      type: Date,
+      default: null,
+    },
+    stats: {
+      total: { type: Number, default: 0, min: 0 },
+      sent: { type: Number, default: 0, min: 0 },
+      failed: { type: Number, default: 0, min: 0 },
+    },
   },
   {
     timestamps: true,
@@ -85,6 +113,11 @@ const campaignSchema = new mongoose.Schema(
  * Optimizes listing campaigns scoped to the authenticated owner sorted newest-first.
  */
 campaignSchema.index({ userId: 1, createdAt: -1 });
+
+/**
+ * Status index: lets the dispatcher find campaigns left in 'sending' after a restart.
+ */
+campaignSchema.index({ status: 1 });
 
 // Prevent model overwrite in development watch and test runners
 const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', campaignSchema);

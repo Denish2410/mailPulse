@@ -346,7 +346,7 @@ export const createMockTransport = (options = {}) => {
  * @param {object} [options.transport] - Custom transport (e.g. from createMockTransport())
  * @param {string} [options.from] - Sender address override
  * @param {object} [options.env=process.env] - Environment dictionary for config resolution
- * @returns {{ getTransport: () => object|null, sendEmail: (message: object) => Promise<object> }}
+ * @returns {{ getTransport: () => object|null, assertConfigured: () => true, sendEmail: (message: object) => Promise<object> }}
  */
 export const createEmailService = ({ transport, from, env = process.env } = {}) => {
   let activeTransport = transport || null;
@@ -354,6 +354,32 @@ export const createEmailService = ({ transport, from, env = process.env } = {}) 
   return {
     getTransport() {
       return activeTransport;
+    },
+    /**
+     * Verifies that a transport is available (or can be created) without sending anything.
+     * Used before bulk dispatch so a campaign is never locked into 'sending' when no message
+     * could possibly be delivered.
+     *
+     * @returns {true}
+     * @throws {EmailConfigurationError}
+     */
+    assertConfigured() {
+      if (activeTransport) {
+        return true;
+      }
+      if (env.NODE_ENV === 'test') {
+        throw new EmailConfigurationError(
+          'Email service in test environment requires an explicitly injected mock transport.'
+        );
+      }
+      if (!isSmtpConfigured(env)) {
+        throw new EmailConfigurationError(
+          'Email transport is not configured. Missing required SMTP configuration.'
+        );
+      }
+      // Throws EmailConfigurationError for an invalid port, sender, or credential pair
+      getSmtpConfig(env);
+      return true;
     },
     async sendEmail(message = {}) {
       // 1. Validate message parameters strictly
@@ -417,6 +443,25 @@ export const createEmailService = ({ transport, from, env = process.env } = {}) 
 };
 
 /**
+ * Process-wide default email service, configured from environment variables on first send.
+ * Shared so an SMTP transport, once created, is reused by request handlers and the campaign
+ * dispatcher alike.
+ */
+let defaultEmailService = null;
+
+/**
+ * Returns the lazily created, fail-closed default email service.
+ *
+ * @returns {ReturnType<typeof createEmailService>}
+ */
+export const getDefaultEmailService = () => {
+  if (!defaultEmailService) {
+    defaultEmailService = createEmailService();
+  }
+  return defaultEmailService;
+};
+
+/**
  * Top-level convenience helper to send an email using an ephemeral or configured service.
  *
  * @param {object} message
@@ -430,6 +475,7 @@ export const sendEmail = async (message, options = {}) => {
 
 export default {
   createEmailService,
+  getDefaultEmailService,
   createMockTransport,
   createSmtpTransport,
   getSmtpConfig,

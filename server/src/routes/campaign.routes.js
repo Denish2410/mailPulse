@@ -7,9 +7,12 @@ import {
   deleteCampaign,
   getCampaignReadiness,
   sendCampaignTestEmail,
+  sendCampaign,
+  getCampaignDeliveries,
 } from '../controllers/campaign.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { testEmailRateLimiter } from '../middleware/testEmailRateLimiter.js';
+import { campaignSendRateLimiter } from '../middleware/campaignSendRateLimiter.js';
 import { validate } from '../validators/validate.js';
 import {
   createCampaignSchema,
@@ -17,6 +20,8 @@ import {
   updateCampaignSchema,
   getCampaignsQuerySchema,
   sendTestEmailSchema,
+  sendCampaignSchema,
+  getCampaignDeliveriesSchema,
 } from '../validators/campaign.validator.js';
 
 const router = Router();
@@ -61,6 +66,21 @@ router.post(
   validate(sendTestEmailSchema),
   sendCampaignTestEmail
 );
+
+/**
+ * @route   POST /api/v1/campaigns/:id/send
+ * @desc    Send a ready draft to all of its eligible recipients. Requires { "confirm": true }.
+ *          Responds 202 once deliveries are queued; dispatch continues in the background.
+ * @access  Protected, plus a dedicated per-user send rate limit
+ */
+router.post('/:id/send', campaignSendRateLimiter, validate(sendCampaignSchema), sendCampaign);
+
+/**
+ * @route   GET /api/v1/campaigns/:id/deliveries
+ * @desc    Per-recipient delivery log with status summary and pagination
+ * @access  Protected
+ */
+router.get('/:id/deliveries', validate(getCampaignDeliveriesSchema), getCampaignDeliveries);
 
 /**
  * @route   GET /api/v1/campaigns/:id

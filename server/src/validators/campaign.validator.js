@@ -10,6 +10,8 @@ import mongoose from 'mongoose';
  *   Strictly disallows protected fields (_id, userId, status, timestamps).
  * - updateCampaignSchema: Validates optional fields for partial update and requires at least one field.
  * - getCampaignsQuerySchema: Validates pagination parameters (page, limit), optional search, and status.
+ * - sendCampaignSchema: Requires explicit confirmation to send a campaign (Phase 5).
+ * - getCampaignDeliveriesSchema: Validates delivery log pagination and status filter (Phase 5).
  */
 
 // Helper to validate MongoDB ObjectId format
@@ -194,8 +196,77 @@ export const getCampaignsQuerySchema = z.object({
         .max(100, 'Search query cannot exceed 100 characters')
         .optional(),
       status: z
-        .enum(['draft'], {
-          errorMap: () => ({ message: 'Status must be draft' }),
+        .enum(['draft', 'sending', 'sent', 'failed'], {
+          errorMap: () => ({ message: 'Status must be one of draft, sending, sent, or failed' }),
+        })
+        .optional(),
+    })
+    .strict(),
+});
+
+/**
+ * Schema for POST /api/v1/campaigns/:id/send (Send Campaign to Recipients)
+ *
+ * - Requires an explicit `{ "confirm": true }` body so a campaign is never sent by an
+ *   accidental or replayed bare POST.
+ * - Strict: recipients, addresses, or content cannot be supplied here; the server always sends
+ *   the stored draft to its stored, owner-verified recipients.
+ */
+export const sendCampaignSchema = z.object({
+  params: z
+    .object({
+      id: z
+        .string({ required_error: 'Campaign ID is required' })
+        .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
+    })
+    .strict(),
+  body: z
+    .object({
+      confirm: z.literal(true, {
+        errorMap: () => ({ message: 'Sending must be explicitly confirmed with confirm: true' }),
+      }),
+    })
+    .strict(),
+});
+
+/**
+ * Parses a positive integer query parameter, applying a default when omitted.
+ */
+const positiveIntQuery = (fallback, label, max = Number.MAX_SAFE_INTEGER) =>
+  z.preprocess((val) => {
+    if (val === undefined) return fallback;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+      return NaN;
+    }
+    if (typeof val === 'number') return val;
+    return NaN;
+  }, z.number({ invalid_type_error: `${label} must be a positive integer` })
+    .int(`${label} must be an integer`)
+    .min(1, `${label} must be at least 1`)
+    .max(max, `${label} cannot exceed ${max}`));
+
+/**
+ * Schema for GET /api/v1/campaigns/:id/deliveries (Delivery Log)
+ */
+export const getCampaignDeliveriesSchema = z.object({
+  params: z
+    .object({
+      id: z
+        .string({ required_error: 'Campaign ID is required' })
+        .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
+    })
+    .strict(),
+  query: z
+    .object({
+      page: positiveIntQuery(1, 'Page'),
+      limit: positiveIntQuery(20, 'Limit', 100),
+      status: z
+        .enum(['pending', 'processing', 'sent', 'failed'], {
+          errorMap: () => ({
+            message: 'Status must be one of pending, processing, sent, or failed',
+          }),
         })
         .optional(),
     })

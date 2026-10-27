@@ -1,4 +1,4 @@
-import { formatCampaignDate, getCampaignStatusBadge } from '../../utils/campaignHelpers.js';
+import { formatCampaignDate, getCampaignStatusBadge, isCampaignEditable } from '../../utils/campaignHelpers.js';
 
 /**
  * CampaignsTable Component
@@ -202,6 +202,9 @@ export const CampaignsTable = ({
                       </svg>
                     </button>
 
+                    {/* Edit & Delete are only offered for drafts; sent campaigns are locked */}
+                    {isCampaignEditable(campaign) && (
+                    <>
                     {/* Edit Action */}
                     <button
                       type="button"
@@ -248,6 +251,8 @@ export const CampaignsTable = ({
                         />
                       </svg>
                     </button>
+                    </>
+                    )}
                   </div>
                 </td>
               </tr>

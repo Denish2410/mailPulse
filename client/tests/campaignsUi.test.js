@@ -1193,14 +1193,22 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       assert.equal(displayedReadiness.campaign, 'B'); // Remains B, stale A is ignored!
     });
 
-    it('42. Preview sending invariant: no bulk campaign dispatch; only a self-addressed test email', () => {
-      // Bulk sending / dispatch must not exist in the preview dialog (Phase 4.4 adds test emails only)
+    it('42. Preview sending invariant: campaign send only via sendCampaign(campaign.id) after explicit confirmation', () => {
+      // Phase 5: the only bulk dispatch path is the server endpoint, with no client-supplied recipients
+      assert.match(
+        previewSource,
+        /sendCampaign\(campaign\.id\)/,
+        'Preview dialog must send via sendCampaign(campaign.id) with no recipient overrides'
+      );
       assert.doesNotMatch(
         previewSource,
-        /sendCampaign(?!TestEmail)|dispatchCampaign|\/send['"`]/i,
-        'Preview dialog must not contain bulk campaign sending actions'
+        /dispatchCampaign|\/send['"`]/i,
+        'Preview dialog must not build send URLs or dispatch directly'
       );
-      // The only email action is the self-addressed test email
+      // Sending requires a confirmation step before the request is made
+      assert.match(previewSource, /status: 'confirming'/);
+      assert.match(previewSource, /onClick=\{handleConfirmSend\}/);
+      // The self-addressed test email remains available for drafts
       assert.match(
         previewSource,
         /sendCampaignTestEmail\(campaign\.id\)/,
@@ -1208,8 +1216,8 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       );
       assert.match(
         previewSource,
-        /Test emails go only to your own account email\. Campaign sending is not available yet\./,
-        'Preview dialog must clearly state that only self-addressed test emails are available'
+        /Test emails go only to your own account email\./,
+        'Preview dialog must clearly state that test emails are self-addressed'
       );
     });
   });

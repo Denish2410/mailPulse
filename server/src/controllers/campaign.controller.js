@@ -2,14 +2,20 @@ import mongoose from 'mongoose';
 import Campaign from '../models/Campaign.js';
 import Contact from '../models/Contact.js';
 import User from '../models/User.js';
+import Delivery from '../models/Delivery.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
-  createEmailService,
+  getDefaultEmailService,
   InvalidMessageError,
   EmailConfigurationError,
   EmailTransportError,
 } from '../services/email.service.js';
+import { evaluateCampaignReadiness } from '../services/campaignReadiness.service.js';
+import {
+  startCampaignDispatch,
+  getDeliveryCounts,
+} from '../services/campaignDispatch.service.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -34,6 +40,13 @@ export const formatSafeCampaign = (campaign) => {
     status: doc.status,
     recipientIds,
     recipientsCount: recipientIds.length,
+    sendStartedAt: doc.sendStartedAt ?? null,
+    sendCompletedAt: doc.sendCompletedAt ?? null,
+    stats: {
+      total: doc.stats?.total ?? 0,
+      sent: doc.stats?.sent ?? 0,
+      failed: doc.stats?.failed ?? 0,
+    },
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -235,6 +248,11 @@ export const updateCampaign = asyncHandler(async (req, res) => {
     throw new AppError('Campaign not found.', 404);
   }
 
+  // Campaigns are locked once a send has started
+  if (campaign.status !== 'draft') {
+    throw new AppError('Only draft campaigns can be edited.', 409);
+  }
+
   // Update name if provided
   if (name !== undefined) {
     campaign.name = name.trim();
@@ -287,9 +305,14 @@ export const deleteCampaign = asyncHandler(async (req, res) => {
 
   const { id } = req.params;
 
-  // Delete scoped strictly to owner
-  const deleted = await Campaign.findOneAndDelete({ _id: id, userId });
+  // Delete scoped strictly to owner and restricted to drafts. Sent campaigns are kept because
+  // their Delivery records are the audit trail of what was sent to whom.
+  const deleted = await Campaign.findOneAndDelete({ _id: id, userId, status: 'draft' });
   if (!deleted) {
+    const exists = await Campaign.exists({ _id: id, userId });
+    if (exists) {
+      throw new AppError('Only draft campaigns can be deleted.', 409);
+    }
     throw new AppError('Campaign not found.', 404);
   }
 
@@ -319,75 +342,7 @@ export const getCampaignReadiness = asyncHandler(async (req, res) => {
     throw new AppError('Campaign not found.', 404);
   }
 
-  const issues = [];
-
-  // 1. Evaluate name constraints
-  const trimmedName = typeof campaign.name === 'string' ? campaign.name.trim() : '';
-  if (!trimmedName || trimmedName.length < 2) {
-    issues.push('Campaign name must be at least 2 characters long.');
-  } else if (trimmedName.length > 120) {
-    issues.push('Campaign name cannot exceed 120 characters.');
-  }
-
-  // 2. Evaluate subject constraints
-  const trimmedSubject = typeof campaign.subject === 'string' ? campaign.subject.trim() : '';
-  if (!trimmedSubject || trimmedSubject.length < 1) {
-    issues.push('Email subject cannot be empty.');
-  } else if (trimmedSubject.length > 200) {
-    issues.push('Email subject cannot exceed 200 characters.');
-  }
-
-  // 3. Evaluate content presence (at least one of textContent or htmlContent must have non-whitespace content)
-  const hasTextContent =
-    typeof campaign.textContent === 'string' && campaign.textContent.trim().length > 0;
-  const hasHtmlContent =
-    typeof campaign.htmlContent === 'string' && campaign.htmlContent.trim().length > 0;
-
-  if (!hasTextContent && !hasHtmlContent) {
-    issues.push('Campaign must have non-empty text content or HTML content.');
-  }
-
-  // 4. Evaluate status (must be draft)
-  if (campaign.status !== 'draft') {
-    issues.push('Only draft campaigns can be evaluated for readiness.');
-  }
-
-  // 5. Evaluate recipients
-  // Deduplicate stored recipient IDs to compute exact unique IDs evaluated
-  const rawRecipientIds = Array.isArray(campaign.recipientIds) ? campaign.recipientIds : [];
-  const uniqueRecipientIds = [
-    ...new Set(
-      rawRecipientIds
-        .map((rId) => (rId._id || rId).toString())
-        .filter((rId) => mongoose.isValidObjectId(rId))
-    ),
-  ];
-
-  const totalRecipients = uniqueRecipientIds.length;
-
-  let eligibleRecipients = [];
-  if (totalRecipients > 0) {
-    // Query contacts strictly belonging to the authenticated owner
-    const contacts = await Contact.find({
-      _id: { $in: uniqueRecipientIds },
-      userId,
-    }).sort({ createdAt: -1, _id: -1 });
-
-    eligibleRecipients = contacts.map((contact) => ({
-      id: contact._id.toString(),
-      name: contact.name,
-      email: contact.email,
-    }));
-  }
-
-  const eligibleRecipientsCount = eligibleRecipients.length;
-  const missingRecipientsCount = Math.max(0, totalRecipients - eligibleRecipientsCount);
-
-  if (eligibleRecipientsCount === 0) {
-    issues.push('Campaign must have at least one eligible recipient.');
-  }
-
-  const isReady = issues.length === 0;
+  const { isReady, issues, summary } = await evaluateCampaignReadiness(campaign, userId);
 
   res.status(200).json({
     success: true,
@@ -395,15 +350,7 @@ export const getCampaignReadiness = asyncHandler(async (req, res) => {
     data: {
       isReady,
       issues,
-      summary: {
-        totalRecipients,
-        eligibleRecipients,
-        eligibleRecipientsCount,
-        missingRecipientsCount,
-        hasTextContent,
-        hasHtmlContent,
-        status: campaign.status,
-      },
+      summary,
     },
   });
 });
@@ -478,12 +425,6 @@ export const getTestEmailContentIssues = (campaign) => {
 };
 
 /**
- * Lazily created production email service (SMTP resolved from env on first send).
- * Shared across requests so an SMTP transport, once created, is reused.
- */
-let defaultEmailService = null;
-
-/**
  * Resolves the email service for a request.
  * Tests (and future composition roots) inject a service via `app.locals.emailService`;
  * otherwise a fail-closed default service configured from environment variables is used.
@@ -496,10 +437,7 @@ export const resolveEmailService = (req) => {
   if (injected && typeof injected.sendEmail === 'function') {
     return injected;
   }
-  if (!defaultEmailService) {
-    defaultEmailService = createEmailService();
-  }
-  return defaultEmailService;
+  return getDefaultEmailService();
 };
 
 /**
@@ -602,6 +540,172 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Send a ready campaign draft to all of its eligible recipients.
+ *
+ * Guarantees:
+ * - Ownership: foreign and missing campaigns both return 404.
+ * - Explicit intent: the body must contain `{ "confirm": true }` (enforced by the validator).
+ * - Fail closed: readiness is re-evaluated server-side (422 with issues if not ready), and the
+ *   email transport is verified before anything is locked (503 if not configured).
+ * - Exactly one dispatch: the draft -> sending transition is atomic and bound to the evaluated
+ *   version; a concurrent send or an edit made in between returns 409 and sends nothing.
+ * - Asynchronous: responds 202 once deliveries are queued. Progress is available from
+ *   GET /campaigns/:id and GET /campaigns/:id/deliveries.
+ * - Recipients are only owned contacts that still exist; deleted contacts are skipped.
+ *
+ * Route: POST /api/v1/campaigns/:id/send
+ * Access: Protected (Bearer JWT) + per-user send rate limit
+ */
+export const sendCampaign = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+
+  // 1. Load the campaign strictly scoped to the authenticated owner
+  const campaign = await Campaign.findOne({ _id: id, userId });
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  if (campaign.status !== 'draft') {
+    throw new AppError('This campaign has already been sent or is being sent.', 409);
+  }
+
+  // 2. The account must be allowed to send
+  const user = await User.findById(userId).select('status').lean();
+  if (!user) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+  if (user.status && user.status !== 'active') {
+    throw new AppError('Your account is not permitted to send campaigns.', 403);
+  }
+
+  // 3. Re-evaluate readiness server-side (never trust the client's preview)
+  const { isReady, issues, eligibleContacts } = await evaluateCampaignReadiness(campaign, userId);
+  if (!isReady) {
+    throw new AppError(
+      'Campaign is not ready for sending.',
+      422,
+      issues.map((message) => ({ path: 'campaign', message }))
+    );
+  }
+
+  // 4. Verify a transport exists before locking the campaign
+  const emailService = resolveEmailService(req);
+  try {
+    if (typeof emailService.assertConfigured === 'function') {
+      emailService.assertConfigured();
+    }
+  } catch (error) {
+    if (error instanceof EmailConfigurationError) {
+      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
+    }
+    throw error;
+  }
+
+  // 5. Atomically lock, create deliveries, and start background dispatch
+  const locked = await startCampaignDispatch({
+    campaign,
+    userId,
+    eligibleContacts,
+    emailService,
+  });
+
+  if (!locked) {
+    throw new AppError(
+      'Campaign was modified or is already being sent. Refresh and try again.',
+      409
+    );
+  }
+
+  res.status(202).json({
+    success: true,
+    message: 'Campaign sending started',
+    data: {
+      campaign: formatSafeCampaign(locked),
+      queuedRecipients: eligibleContacts.length,
+    },
+  });
+});
+
+/**
+ * Format a Delivery document into a safe, client-facing representation.
+ *
+ * @param {object} delivery
+ * @returns {object}
+ */
+export const formatSafeDelivery = (delivery) => ({
+  id: delivery._id.toString(),
+  contactId: delivery.contactId ? delivery.contactId.toString() : null,
+  name: delivery.name ?? '',
+  email: delivery.email,
+  status: delivery.status,
+  errorCode: delivery.errorCode ?? null,
+  attempts: delivery.attempts ?? 0,
+  sentAt: delivery.sentAt ?? null,
+  failedAt: delivery.failedAt ?? null,
+  createdAt: delivery.createdAt,
+});
+
+/**
+ * List the per-recipient delivery log of a campaign with a status summary.
+ *
+ * Route: GET /api/v1/campaigns/:id/deliveries
+ * Access: Protected (Bearer JWT)
+ */
+export const getCampaignDeliveries = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+  const { page = 1, limit = 20, status } = req.query;
+
+  const campaign = await Campaign.findOne({ _id: id, userId }).select('status').lean();
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  const filter = { campaignId: campaign._id, userId };
+  if (status) {
+    filter.status = status;
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [deliveries, total, counts] = await Promise.all([
+    Delivery.find(filter).sort({ createdAt: 1, _id: 1 }).skip(skip).limit(limit).lean(),
+    Delivery.countDocuments(filter),
+    getDeliveryCounts(campaign._id),
+  ]);
+
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign deliveries retrieved successfully',
+    data: {
+      campaignStatus: campaign.status,
+      summary: counts,
+      deliveries: deliveries.map(formatSafeDelivery),
+      count: deliveries.length,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1 && total > 0,
+      },
+    },
+  });
+});
+
 export default {
   createCampaign,
   getCampaigns,
@@ -610,6 +714,9 @@ export default {
   deleteCampaign,
   getCampaignReadiness,
   sendCampaignTestEmail,
+  sendCampaign,
+  getCampaignDeliveries,
   formatSafeCampaign,
+  formatSafeDelivery,
   validateAndDeduplicateRecipients,
 };

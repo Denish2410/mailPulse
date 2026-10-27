@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import {
   getCampaignReadiness,
   sendCampaignTestEmail,
+  sendCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
+import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 import {
   extractReadinessData,
   formatReadinessIssues,
@@ -14,6 +16,10 @@ import {
   getTestEmailAvailability,
   formatTestEmailSuccess,
   getTestEmailErrorMessage,
+  getCampaignSendAvailability,
+  formatSendConfirmation,
+  getSendCampaignErrorMessage,
+  isCampaignEditable,
 } from '../../utils/campaignHelpers.js';
 
 /**
@@ -34,19 +40,26 @@ import {
  * - "Send test email" (Phase 4.4): sends one [TEST] copy to the signed-in user's OWN
  *   account email via POST /campaigns/:id/test-email. Never contacts campaign recipients,
  *   prevents duplicate submissions, and ignores responses that arrive after the dialog
- *   closes or switches campaigns. Bulk campaign sending is NOT available here.
+ *   closes or switches campaigns.
+ * - "Send campaign" (Phase 5): sends the saved draft to its verified recipients via
+ *   POST /campaigns/:id/send after an explicit in-dialog confirmation. The button is only
+ *   enabled when the server reports the draft as ready, duplicate clicks are blocked, and once
+ *   a campaign is no longer a draft the readiness banner is replaced by live delivery progress.
  *
  * @param {object} props
  * @param {boolean} [props.isOpen=false] - Dialog visibility
  * @param {object|null} [props.campaign=null] - Saved campaign object to preview
  * @param {function(): void} props.onClose - Close callback
  * @param {function(object): void} [props.onEdit] - Optional callback to switch to editing
+ * @param {function(object): void} [props.onCampaignUpdated] - Called with the updated campaign
+ *   (or its new status) after a send starts or finishes, so the list can refresh
  */
 export const CampaignPreviewDialog = ({
   isOpen = false,
   campaign = null,
   onClose,
   onEdit,
+  onCampaignUpdated,
 }) => {
   // Readiness evaluation state
   const [readinessData, setReadinessData] = useState(null);
@@ -100,6 +113,41 @@ export const CampaignPreviewDialog = ({
     } catch (err) {
       if (currentRequestId !== testEmailRequestIdRef.current) return;
       setTestEmail({ status: 'error', message: getTestEmailErrorMessage(err) });
+    }
+  };
+
+  // Campaign send state: status is 'idle' | 'confirming' | 'sending' | 'error'
+  const [sendState, setSendState] = useState({ status: 'idle', message: '' });
+  // Status reported by the server after a send starts (overrides the stale list copy)
+  const [sentStatus, setSentStatus] = useState(null);
+  const sendRequestIdRef = useRef(0);
+
+  // Invalidate any in-flight send response when the session changes
+  useEffect(() => {
+    sendRequestIdRef.current += 1;
+  }, [isOpen, campaign?.id]);
+
+  /**
+   * Sends the campaign to its recipients. Called only from the explicit confirmation step.
+   * The request is not aborted on close: aborting would not undo a send the server accepted.
+   */
+  const handleConfirmSend = async () => {
+    if (sendState.status === 'sending') return;
+
+    const currentRequestId = ++sendRequestIdRef.current;
+    setSendState({ status: 'sending', message: '' });
+
+    try {
+      const data = await sendCampaign(campaign.id);
+      if (currentRequestId !== sendRequestIdRef.current) return;
+      setSentStatus(data?.campaign?.status || 'sending');
+      setSendState({ status: 'idle', message: '' });
+      if (typeof onCampaignUpdated === 'function') {
+        onCampaignUpdated(data?.campaign || { ...campaign, status: 'sending' });
+      }
+    } catch (err) {
+      if (currentRequestId !== sendRequestIdRef.current) return;
+      setSendState({ status: 'error', message: getSendCampaignErrorMessage(err) });
     }
   };
 
@@ -179,7 +227,7 @@ export const CampaignPreviewDialog = ({
   if (!isOpen || !campaign) return null;
 
   // Presentation summaries
-  const statusBadge = getCampaignStatusBadge(campaign.status);
+  const statusBadge = getCampaignStatusBadge(sentStatus || campaign.status);
   const summary = formatReadinessSummary(readinessData?.summary || {});
   const issues = formatReadinessIssues(readinessData?.issues || []);
   const readinessBadge = getReadinessBadge(readinessData?.isReady === true);
@@ -194,11 +242,22 @@ export const CampaignPreviewDialog = ({
   const eligibleCount = summary.eligibleRecipientsCount;
   const missingCount = summary.missingRecipientsCount;
 
+  // Effective lifecycle status (the list copy may be stale right after sending)
+  const effectiveStatus = sentStatus || campaign.status;
+  const isDraft = effectiveStatus === 'draft';
+  const isSendingCampaign = sendState.status === 'sending';
+  const sendAvailability = getCampaignSendAvailability(
+    { ...campaign, status: effectiveStatus },
+    readinessData,
+    { isSending: isSendingCampaign, isLoadingReadiness: isLoadingReadiness || Boolean(readinessError) }
+  );
+
   // Test email availability (recipients are not required: it only goes to the signed-in user)
   const isSendingTestEmail = testEmail.status === 'sending';
-  const testEmailAvailability = getTestEmailAvailability(campaign, {
-    isSending: isSendingTestEmail,
-  });
+  const testEmailAvailability = getTestEmailAvailability(
+    { ...campaign, status: effectiveStatus },
+    { isSending: isSendingTestEmail }
+  );
 
   return (
     <div
@@ -237,7 +296,7 @@ export const CampaignPreviewDialog = ({
               {campaign.name}
             </h2>
             <p id="campaign-preview-desc" className="text-xs text-slate-400 mt-0.5">
-              Review campaign details, email content, and sending readiness before scheduling.
+              Review campaign details, email content, and sending readiness before sending.
             </p>
           </div>
 
@@ -272,8 +331,18 @@ export const CampaignPreviewDialog = ({
             </div>
           </div>
 
-          {/* Section 2: Live Readiness Evaluation Banner */}
-          {isLoadingReadiness ? (
+          {/* Section 2: Delivery progress (sent campaigns) or live readiness evaluation (drafts) */}
+          {!isDraft ? (
+            <DeliveryStatusPanel
+              campaignId={campaign.id}
+              onStatusChange={(status) => {
+                setSentStatus(status);
+                if (typeof onCampaignUpdated === 'function') {
+                  onCampaignUpdated({ ...campaign, status });
+                }
+              }}
+            />
+          ) : isLoadingReadiness ? (
             <div
               className="p-5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-center gap-3 text-sm text-slate-300"
               role="status"
@@ -627,6 +696,40 @@ export const CampaignPreviewDialog = ({
               <span>{testEmail.message}</span>
             </div>
           )}
+          {sendState.status === 'error' && (
+            <div
+              role="alert"
+              className="mx-6 my-3 px-4 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-start gap-2"
+            >
+              <span>{sendState.message}</span>
+            </div>
+          )}
+          {sendState.status === 'confirming' && (
+            <div
+              role="alertdialog"
+              aria-label="Confirm campaign send"
+              className="mx-6 my-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <span>{formatSendConfirmation(sendAvailability.recipientCount)}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSendState({ status: 'idle', message: '' })}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSend}
+                  autoFocus
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
+                >
+                  Yes, send now
+                </button>
+              </div>
+            </div>
+          )}
           {testEmail.status === 'error' && (
             <div
               role="alert"
@@ -647,13 +750,16 @@ export const CampaignPreviewDialog = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>
-              {testEmailAvailability.canSend || isSendingTestEmail
-                ? 'Test emails go only to your own account email. Campaign sending is not available yet.'
+              {!isDraft
+                ? 'This campaign has been sent and can no longer be edited.'
+                : testEmailAvailability.canSend || isSendingTestEmail
+                ? 'Test emails go only to your own account email. Send the campaign when it is ready.'
                 : testEmailAvailability.reason}
             </span>
           </span>
 
           <div className="flex items-center justify-end gap-2.5 flex-wrap">
+            {isDraft && (
             <button
               type="button"
               onClick={handleTestEmailClick}
@@ -676,7 +782,28 @@ export const CampaignPreviewDialog = ({
               )}
               <span>{isSendingTestEmail ? 'Sending test…' : 'Send test email'}</span>
             </button>
-            {onEdit && (
+            )}
+            {isDraft && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (sendAvailability.canSend) {
+                    setSendState({ status: 'confirming', message: '' });
+                  }
+                }}
+                disabled={!sendAvailability.canSend || sendState.status === 'confirming'}
+                aria-busy={isSendingCampaign}
+                aria-label="Send this campaign to its recipients"
+                title={sendAvailability.canSend ? 'Send to all eligible recipients' : sendAvailability.reason}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
+              >
+                {isSendingCampaign && (
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                )}
+                <span>{isSendingCampaign ? 'Sending…' : 'Send campaign'}</span>
+              </button>
+            )}
+            {onEdit && isCampaignEditable({ ...campaign, status: effectiveStatus }) && (
               <button
                 type="button"
                 onClick={() => {

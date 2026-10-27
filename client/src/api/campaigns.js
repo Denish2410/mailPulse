@@ -9,6 +9,8 @@ import apiClient, { getErrorMessage } from '../lib/api.js';
  * - POST   /campaigns: Create a new campaign draft
  * - PATCH  /campaigns/:id: Update an existing campaign draft
  * - DELETE /campaigns/:id: Delete a campaign draft
+ * - POST   /campaigns/:id/send: Send a ready draft to its recipients (Phase 5)
+ * - GET    /campaigns/:id/deliveries: Per-recipient delivery log (Phase 5)
  */
 
 /**
@@ -199,6 +201,64 @@ export const sendCampaignTestEmail = async (id, config = {}) => {
   return response.data?.data;
 };
 
+/**
+ * Send a ready campaign draft to all of its eligible recipients.
+ *
+ * The body is always exactly `{ confirm: true }`: the server sends the stored draft to its
+ * stored, owner-verified recipients, so no recipients, addresses, or content are ever sent from
+ * the client. The server responds 202 once deliveries are queued; dispatch continues in the
+ * background, so poll `getCampaignDeliveries` for progress.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaign: object, queuedRecipients: number }>}
+ */
+export const sendCampaign = async (id, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/send`, { confirm: true }, config);
+  return response.data?.data;
+};
+
+const DELIVERY_STATUSES = ['pending', 'processing', 'sent', 'failed'];
+
+/**
+ * Retrieve the per-recipient delivery log of a campaign.
+ *
+ * @param {string} id - Campaign ID
+ * @param {object} [params={}]
+ * @param {number|string} [params.page] - Page number (positive integer)
+ * @param {number|string} [params.limit] - Page limit (1-100)
+ * @param {string} [params.status] - One of pending, processing, sent, failed
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaignStatus: string, summary: object, deliveries: object[], count: number, pagination: object }>}
+ */
+export const getCampaignDeliveries = async (id, params = {}, config = {}) => {
+  const queryParams = {};
+
+  if (params.page !== undefined && params.page !== null) {
+    const pageNum = Number(params.page);
+    if (Number.isInteger(pageNum) && pageNum >= 1) {
+      queryParams.page = pageNum;
+    }
+  }
+
+  if (params.limit !== undefined && params.limit !== null) {
+    const limitNum = Number(params.limit);
+    if (Number.isInteger(limitNum) && limitNum >= 1 && limitNum <= 100) {
+      queryParams.limit = limitNum;
+    }
+  }
+
+  if (typeof params.status === 'string' && DELIVERY_STATUSES.includes(params.status.trim())) {
+    queryParams.status = params.status.trim();
+  }
+
+  const response = await apiClient.get(`/campaigns/${id}/deliveries`, {
+    params: queryParams,
+    ...config,
+  });
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -209,5 +269,7 @@ export default {
   deleteCampaign,
   getCampaignReadiness,
   sendCampaignTestEmail,
+  sendCampaign,
+  getCampaignDeliveries,
   getErrorMessage,
 };

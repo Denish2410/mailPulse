@@ -53,6 +53,11 @@ export const getCampaignStatusBadge = (status) => {
         label: 'Sent',
         pillClass: 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20',
       };
+    case 'failed':
+      return {
+        label: 'Failed',
+        pillClass: 'bg-rose-500/10 text-rose-300 border border-rose-500/20',
+      };
     default:
       return {
         label: normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Unknown',
@@ -509,8 +514,182 @@ export const getTestEmailErrorMessage = (error) => {
   return 'Failed to send the test email. Please try again.';
 };
 
+/**
+ * Whether a campaign can still be edited or deleted. Only drafts are mutable; once a send has
+ * started the server locks the campaign and keeps it as a record of what was sent.
+ *
+ * @param {object|null|undefined} campaign
+ * @returns {boolean}
+ */
+export const isCampaignEditable = (campaign) =>
+  Boolean(campaign && typeof campaign === 'object' && campaign.status === 'draft');
+
+/**
+ * Determines whether the "Send campaign" action can be offered.
+ *
+ * Mirrors the server's preconditions so the UI never offers a send that is guaranteed to fail.
+ * The server re-evaluates readiness itself; this is only a UX guard.
+ *
+ * @param {object|null|undefined} campaign
+ * @param {object|null|undefined} readiness - Parsed readiness data ({ isReady, summary })
+ * @param {object} [options]
+ * @param {boolean} [options.isSending=false] - Whether a send request is in flight
+ * @param {boolean} [options.isLoadingReadiness=false]
+ * @returns {{ canSend: boolean, reason: string, recipientCount: number }}
+ */
+export const getCampaignSendAvailability = (
+  campaign,
+  readiness,
+  { isSending = false, isLoadingReadiness = false } = {}
+) => {
+  const recipientCount = Number(readiness?.summary?.eligibleRecipientsCount) || 0;
+
+  if (!campaign || typeof campaign !== 'object' || !campaign.id) {
+    return { canSend: false, reason: 'Campaign is not available.', recipientCount };
+  }
+  if (campaign.status !== 'draft') {
+    return { canSend: false, reason: 'This campaign has already been sent.', recipientCount };
+  }
+  if (isSending) {
+    return { canSend: false, reason: 'The campaign is being sent.', recipientCount };
+  }
+  if (isLoadingReadiness || !readiness) {
+    return { canSend: false, reason: 'Checking campaign readiness…', recipientCount };
+  }
+  if (readiness.isReady !== true) {
+    return {
+      canSend: false,
+      reason: 'Resolve the readiness issues before sending.',
+      recipientCount,
+    };
+  }
+  if (recipientCount < 1) {
+    return { canSend: false, reason: 'Add at least one recipient before sending.', recipientCount };
+  }
+  return { canSend: true, reason: '', recipientCount };
+};
+
+/**
+ * Confirmation prompt shown before a campaign is sent.
+ *
+ * @param {number} recipientCount
+ * @returns {string}
+ */
+export const formatSendConfirmation = (recipientCount) => {
+  const count = Number(recipientCount) || 0;
+  return `Send this campaign to ${count} ${count === 1 ? 'recipient' : 'recipients'}? This can't be undone, and the campaign can no longer be edited afterwards.`;
+};
+
+/**
+ * Maps a failed campaign send request to a clear, user-facing message.
+ *
+ * @param {unknown} error - Axios error (or any thrown value)
+ * @returns {string}
+ */
+export const getSendCampaignErrorMessage = (error) => {
+  const status = error?.response?.status;
+  const body = error?.response?.data;
+
+  switch (status) {
+    case 401:
+      return 'Your session has expired. Please sign in again.';
+    case 403:
+      return 'Your account is not permitted to send campaigns.';
+    case 404:
+      return 'This campaign no longer exists. Refresh the list and try again.';
+    case 409:
+      return 'This campaign was changed or has already been sent. Refresh and check its status.';
+    case 422: {
+      const details = Array.isArray(body?.errors)
+        ? body.errors
+            .map((issue) => (typeof issue?.message === 'string' ? issue.message.trim() : ''))
+            .filter(Boolean)
+        : [];
+      return details.length > 0
+        ? `This campaign isn't ready to send: ${details.join(' ')}`
+        : "This campaign isn't ready to send yet.";
+    }
+    case 429:
+      return "You've sent several campaigns recently. Please wait and try again.";
+    case 503:
+      return 'Email sending is not configured on the server yet. Ask an administrator to set up SMTP.';
+    default:
+      break;
+  }
+
+  if (typeof body?.message === 'string' && body.message.trim() && status >= 400 && status < 500) {
+    return body.message.trim();
+  }
+  if (error?.code === 'ECONNABORTED' || error?.message?.includes?.('timeout')) {
+    return 'The request timed out. Check the campaign status before trying again.';
+  }
+  if (error?.message === 'Network Error' || error?.code === 'ERR_NETWORK') {
+    return 'Unable to reach the server. Please check your network connection.';
+  }
+  return 'Failed to send the campaign. Please try again.';
+};
+
+/**
+ * Normalizes a delivery summary from the server into safe numbers plus progress.
+ *
+ * @param {object|null|undefined} summary
+ * @returns {{ total: number, pending: number, processing: number, sent: number, failed: number, processed: number, percent: number, isComplete: boolean }}
+ */
+export const formatDeliverySummary = (summary) => {
+  const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
+  const total = num(summary?.total);
+  const pending = num(summary?.pending);
+  const processing = num(summary?.processing);
+  const sent = num(summary?.sent);
+  const failed = num(summary?.failed);
+  const processed = sent + failed;
+  const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+  return {
+    total,
+    pending,
+    processing,
+    sent,
+    failed,
+    processed,
+    percent,
+    isComplete: total > 0 && pending === 0 && processing === 0,
+  };
+};
+
+/**
+ * Human-readable explanation of a stored delivery error code.
+ *
+ * @param {string|null|undefined} code
+ * @returns {string}
+ */
+export const describeDeliveryError = (code) => {
+  switch (code) {
+    case 'TRANSPORT_ERROR':
+      return 'Rejected by the email provider';
+    case 'INVALID_MESSAGE':
+      return 'Invalid address or message';
+    case 'CONFIGURATION_ERROR':
+      return 'Email sending not configured';
+    case 'INTERRUPTED':
+      return 'Interrupted by a server restart';
+    case null:
+    case undefined:
+    case '':
+      return '';
+    default:
+      return 'Unknown error';
+  }
+};
+
 export default {
   formatCampaignDate,
+  isCampaignEditable,
+  getCampaignSendAvailability,
+  formatSendConfirmation,
+  getSendCampaignErrorMessage,
+  formatDeliverySummary,
+  describeDeliveryError,
   getCampaignStatusBadge,
   normalizeSearchQuery,
   computePageAfterDeletion,

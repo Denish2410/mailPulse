@@ -11,6 +11,11 @@ dotenv.config();
 
 import app from './app.js';
 import { connectDB } from './config/db.js';
+import { getDefaultEmailService } from './services/email.service.js';
+import {
+  resumeInterruptedDispatches,
+  stopAllDispatches,
+} from './services/campaignDispatch.service.js';
 
 let activeServer = null;
 let isStarting = false;
@@ -31,6 +36,7 @@ export const isMainModule = () => {
  * @param {number} [options.timeoutMs] - Maximum milliseconds allowed before forced termination
  * @param {Function} [options.exitFn] - Process termination function
  * @param {object} [options.logger] - Logger interface
+ * @param {Function} [options.stopDispatches] - Stops campaign dispatch workers and awaits in-flight sends
  * @returns {Function} Graceful shutdown function accepting a signal name
  */
 export const createShutdownHandler = ({
@@ -39,6 +45,7 @@ export const createShutdownHandler = ({
   timeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000,
   exitFn = process.exit,
   logger = console,
+  stopDispatches = stopAllDispatches,
 } = {}) => {
   let isShuttingDown = false;
 
@@ -88,6 +95,11 @@ export const createShutdownHandler = ({
         });
       }
 
+      // 3b. Stop campaign dispatch workers (pending deliveries resume on next start)
+      if (typeof stopDispatches === 'function') {
+        await stopDispatches();
+      }
+
       // 4. Close Mongoose database connection
       if (mongooseInstance?.connection?.readyState !== 0) {
         logger.log('[Server] Closing MongoDB connection...');
@@ -118,6 +130,8 @@ export const createShutdownHandler = ({
  * @param {number} [options.port] - Port number to bind to
  * @param {Function} [options.connectDB] - Database connection function
  * @param {Function} [options.exitFn] - Exit function on fatal failure
+ * @param {boolean} [options.resumeDispatches] - Resume campaigns interrupted mid-send
+ *   (defaults to true outside the test environment)
  * @returns {Promise<import('node:http').Server>}
  */
 export const startServer = async (options = {}) => {
@@ -139,6 +153,14 @@ export const startServer = async (options = {}) => {
   try {
     // 1. Await database connection before opening port
     await dbConnector();
+
+    // 1b. Resume campaign sends interrupted by a previous shutdown or crash (non-blocking)
+    const shouldResume = options.resumeDispatches ?? process.env.NODE_ENV !== 'test';
+    if (shouldResume) {
+      resumeInterruptedDispatches({ emailService: getDefaultEmailService() }).catch((err) => {
+        console.error(`[Dispatcher] Failed to resume interrupted dispatches: ${err.name || 'Error'}`);
+      });
+    }
 
     // 2. Start HTTP server only after database connection succeeds
     return await new Promise((resolve, reject) => {

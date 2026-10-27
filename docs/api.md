@@ -222,10 +222,11 @@ The following endpoints will be introduced in subsequent phases:
 - `GET /`: List email campaign drafts with pagination and search
 - `GET /:id`: Retrieve single campaign details
 - `GET /:id/readiness`: Evaluate send-readiness, blocking issues, and resolved recipients
-- `PATCH /:id`: Update campaign draft
-- `DELETE /:id`: Delete campaign draft
+- `PATCH /:id`: Update campaign draft (drafts only; `409` once sent)
+- `DELETE /:id`: Delete campaign draft (drafts only; `409` once sent)
 - `POST /:id/test-email`: Send a `[TEST]` copy of the campaign to the authenticated user's own email
-- `POST /:id/send`: Dispatch or queue campaign (Future Phase)
+- `POST /:id/send`: Send a ready draft to its recipients (requires `{ "confirm": true }`; responds `202`)
+- `GET /:id/deliveries`: Per-recipient delivery log with status summary
 
 #### Campaign Readiness Contract (`GET /api/v1/campaigns/:id/readiness`)
 - **Access**: Protected (Bearer JWT)
@@ -283,6 +284,7 @@ The following endpoints will be introduced in subsequent phases:
 - **Side Effects**: None.
   - The campaign's status, recipients and timestamps are not modified.
   - No delivery records are created.
+  - Only available for drafts; sent campaigns return `422`.
 - **Response Shape (HTTP 200)**:
 ```json
 {
@@ -312,6 +314,82 @@ The following endpoints will be introduced in subsequent phases:
 | 429 | Per-user test email rate limit exceeded |
 | 502 | Email transport failed (provider details are never exposed) |
 | 503 | Email sending is not configured (SMTP is opt-in and fails closed) |
+
+#### Campaign Send Contract (`POST /api/v1/campaigns/:id/send`)
+- **Access**: Protected (Bearer JWT) plus a dedicated per-user rate limit (default 10 requests per hour, configurable via `CAMPAIGN_SEND_RATE_LIMIT_WINDOW_MS` and `CAMPAIGN_SEND_RATE_LIMIT_MAX`).
+- **Request Body** (required, strict): `{ "confirm": true }`. Anything else, including recipients, addresses or content, returns `400`.
+- **Recipients**: The campaign's stored recipients, resolved against contacts the user still owns. Deleted or foreign contacts are skipped. The address is snapshotted onto a Delivery record when the send starts.
+- **Preconditions** (re-evaluated server-side; never trusted from the client):
+  - The campaign is owned by the user (`404` otherwise) and is a `draft` (`409` otherwise).
+  - The account is active (`403` otherwise).
+  - The campaign passes the readiness rules above (`422` with `errors` otherwise).
+  - An email transport is configured (`503` otherwise). Nothing is locked or queued in this case.
+- **Exactly one dispatch**: The `draft -> sending` transition is atomic and bound to the version that passed readiness. A concurrent send, or an edit made in between, returns `409` and sends nothing.
+- **Asynchronous**: Responds `202` once deliveries are queued. Messages are sent in the background with bounded concurrency (`CAMPAIGN_SEND_CONCURRENCY`, default 5, max 20).
+- **Lifecycle**: `draft -> sending -> sent | failed`. The campaign is `sent` when at least one recipient was accepted by the transport, otherwise `failed`. Non-draft campaigns can no longer be edited or deleted (`409`).
+- **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice.
+- **Response Shape (HTTP 202)**:
+```json
+{
+  "success": true,
+  "message": "Campaign sending started",
+  "data": {
+    "campaign": {
+      "id": "671234567890abcdef123456",
+      "status": "sending",
+      "sendStartedAt": "2026-10-27T10:00:00.000Z",
+      "sendCompletedAt": null,
+      "stats": { "total": 120, "sent": 0, "failed": 0 }
+    },
+    "queuedRecipients": 120
+  }
+}
+```
+
+| Code | Meaning |
+| :--- | :--- |
+| 202 | Send accepted; deliveries queued |
+| 400 | Invalid campaign ID, missing `confirm: true`, or unknown body key |
+| 401 | Missing or invalid token |
+| 403 | Account is not active |
+| 404 | Campaign not found or not owned by the user |
+| 409 | Campaign is not a draft, or changed / was sent concurrently |
+| 422 | Campaign not ready; `errors` lists the issues |
+| 429 | Per-user send rate limit exceeded |
+| 503 | Email sending is not configured |
+
+#### Campaign Delivery Log (`GET /api/v1/campaigns/:id/deliveries`)
+- **Access**: Protected (Bearer JWT). Owner-scoped; foreign campaigns return `404`.
+- **Query**: `page` (default 1), `limit` (1-100, default 20), `status` (`pending` | `processing` | `sent` | `failed`, optional).
+- **Response Shape (HTTP 200)**:
+```json
+{
+  "success": true,
+  "message": "Campaign deliveries retrieved successfully",
+  "data": {
+    "campaignStatus": "sent",
+    "summary": { "total": 2, "pending": 0, "processing": 0, "sent": 1, "failed": 1 },
+    "deliveries": [
+      {
+        "id": "6712...",
+        "contactId": "6712...",
+        "name": "Alice Smith",
+        "email": "alice@example.com",
+        "status": "failed",
+        "errorCode": "TRANSPORT_ERROR",
+        "attempts": 1,
+        "sentAt": null,
+        "failedAt": "2026-10-27T10:00:02.000Z",
+        "createdAt": "2026-10-27T10:00:00.000Z"
+      }
+    ],
+    "count": 1,
+    "pagination": { "page": 1, "limit": 20, "total": 2, "totalPages": 1, "hasNextPage": false, "hasPrevPage": false }
+  }
+}
+```
+- **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `INTERRUPTED`, `UNKNOWN_ERROR`.
+- **Sent vs. delivered**: `sent` means the email provider accepted the message. Bounces, opens and clicks are not tracked yet.
 
 ### Analytics (`/api/v1/analytics`)
 - `GET /overview`: High-level open, click, and bounce metrics

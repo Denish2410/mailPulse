@@ -289,7 +289,7 @@ describe('Campaign Model — Schema Validation (Unit / Offline)', () => {
       (err) => {
         assert.equal(err.name, 'ValidationError');
         assert.ok(err.errors.status);
-        assert.match(err.errors.status.message, /Status must be draft/i);
+        assert.match(err.errors.status.message, /Status must be one of draft, sending, sent, or failed/i);
         return true;
       }
     );
