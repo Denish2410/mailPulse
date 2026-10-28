@@ -323,11 +323,14 @@ The following endpoints will be introduced in subsequent phases:
   - The campaign is owned by the user (`404` otherwise) and is a `draft` (`409` otherwise).
   - The account is active (`403` otherwise).
   - The campaign passes the readiness rules above (`422` with `errors` otherwise).
+  - The campaign resolves to at most 5,000 eligible recipients (`422` otherwise). The same cap applies to `recipientIds` on create and update (`400`).
   - An email transport is configured (`503` otherwise). Nothing is locked or queued in this case.
 - **Exactly one dispatch**: The `draft -> sending` transition is atomic and bound to the version that passed readiness. A concurrent send, or an edit made in between, returns `409` and sends nothing.
 - **Asynchronous**: Responds `202` once deliveries are queued. Messages are sent in the background with bounded concurrency (`CAMPAIGN_SEND_CONCURRENCY`, default 5, max 20).
 - **Lifecycle**: `draft -> sending -> sent | failed`. The campaign is `sent` when at least one recipient was accepted by the transport, otherwise `failed`. Non-draft campaigns can no longer be edited or deleted (`409`).
-- **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice.
+- **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice. While the server runs, a watchdog recovers campaigns still `sending` after `CAMPAIGN_STALL_TIMEOUT_MS` (default 15 minutes) with no dispatch running; a campaign that was locked but never got deliveries returns to `draft`.
+- **Guarantee**: at most once per recipient, not exactly once. `INTERRUPTED` and `PERSIST_ERROR` deliveries were possibly (or, for `PERSIST_ERROR`, very likely) accepted by the transport, so `stats.sent` is a lower bound.
+- **Deployment**: single server instance only (dispatch state and rate limits are in process memory).
 - **Response Shape (HTTP 202)**:
 ```json
 {
@@ -388,7 +391,7 @@ The following endpoints will be introduced in subsequent phases:
   }
 }
 ```
-- **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `INTERRUPTED`, `UNKNOWN_ERROR`.
+- **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `INTERRUPTED`, `PERSIST_ERROR`, `UNKNOWN_ERROR`. `INTERRUPTED` (process stopped mid-send) and `PERSIST_ERROR` (transport accepted the message but recording it failed) mean the recipient may already have been emailed; these are never re-sent.
 - **Sent vs. delivered**: `sent` means the email provider accepted the message. Bounces, opens and clicks are not tracked yet.
 
 ### Analytics (`/api/v1/analytics`)

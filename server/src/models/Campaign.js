@@ -41,6 +41,16 @@ import mongoose from 'mongoose';
  */
 export const CAMPAIGN_STATUSES = ['draft', 'sending', 'sent', 'failed'];
 
+/**
+ * Maximum recipients a single campaign may target.
+ *
+ * Bounds the blast radius of one send: it caps the number of Delivery records created per
+ * dispatch, the size of the `$in` used to resolve recipients, and the volume one account can
+ * queue in a single request. The per-user send rate limit bounds how many *requests* are
+ * accepted; this bounds how many *messages* each request can produce.
+ */
+export const MAX_CAMPAIGN_RECIPIENTS = 5000;
+
 const campaignSchema = new mongoose.Schema(
   {
     userId: {
@@ -88,6 +98,10 @@ const campaignSchema = new mongoose.Schema(
         },
       ],
       default: () => [],
+      validate: {
+        validator: (ids) => !Array.isArray(ids) || ids.length <= MAX_CAMPAIGN_RECIPIENTS,
+        message: `A campaign cannot target more than ${MAX_CAMPAIGN_RECIPIENTS} recipients`,
+      },
     },
     sendStartedAt: {
       type: Date,

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Campaign from '../models/Campaign.js';
+import Campaign, { MAX_CAMPAIGN_RECIPIENTS } from '../models/Campaign.js';
 import Contact from '../models/Contact.js';
 import User from '../models/User.js';
 import Delivery from '../models/Delivery.js';
@@ -592,6 +592,17 @@ export const sendCampaign = asyncHandler(async (req, res) => {
       422,
       issues.map((message) => ({ path: 'campaign', message }))
     );
+  }
+
+  // 3b. Enforce the per-campaign recipient ceiling at send time too, so drafts saved before the
+  //     cap existed (or written outside the API) can never produce an oversized dispatch.
+  if (eligibleContacts.length > MAX_CAMPAIGN_RECIPIENTS) {
+    throw new AppError('Campaign is not ready for sending.', 422, [
+      {
+        path: 'campaign.recipientIds',
+        message: `A campaign cannot be sent to more than ${MAX_CAMPAIGN_RECIPIENTS} recipients.`,
+      },
+    ]);
   }
 
   // 4. Verify a transport exists before locking the campaign

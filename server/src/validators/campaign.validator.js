@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import mongoose from 'mongoose';
+import { MAX_CAMPAIGN_RECIPIENTS } from '../models/Campaign.js';
 
 /**
  * Campaign Request Validation Schemas
@@ -62,6 +63,10 @@ export const createCampaignSchema = z.object({
             .string({ invalid_type_error: 'Each recipient ID must be a valid string' })
             .refine(isValidObjectId, { message: 'Invalid recipient ID format' })
         )
+        .max(
+          MAX_CAMPAIGN_RECIPIENTS,
+          `A campaign cannot target more than ${MAX_CAMPAIGN_RECIPIENTS} recipients`
+        )
         .optional()
         .default([]),
     })
@@ -106,6 +111,10 @@ export const updateCampaignSchema = z.object({
           z
             .string({ invalid_type_error: 'Each recipient ID must be a valid string' })
             .refine(isValidObjectId, { message: 'Invalid recipient ID format' })
+        )
+        .max(
+          MAX_CAMPAIGN_RECIPIENTS,
+          `A campaign cannot target more than ${MAX_CAMPAIGN_RECIPIENTS} recipients`
         )
         .optional(),
     })
