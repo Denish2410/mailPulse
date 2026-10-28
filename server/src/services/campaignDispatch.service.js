@@ -28,8 +28,20 @@ import {
  *   for in-flight sends. Remaining 'pending' deliveries are resumed on the next start.
  * - On start (`resumeInterruptedDispatches`) deliveries stuck in 'processing' are marked
  *   failed with 'INTERRUPTED' rather than re-sent (the transport may have accepted them), and
- *   pending work continues. Recipients therefore receive a campaign at most once.
+ *   pending work continues.
+ * - While running, a watchdog (`startDispatchWatchdog`) recovers campaigns wedged in 'sending'
+ *   whose dispatch halted (e.g. on a database error), so they do not wait for a restart.
  * - Errors are recorded as codes only; transport messages and credentials are never stored.
+ *   A database failure after the transport accepted a message is recorded as 'PERSIST_ERROR',
+ *   never as a transport failure.
+ *
+ * Delivery guarantee: AT MOST ONCE per recipient per campaign (atomic claim + never re-sending
+ * 'INTERRUPTED' or 'PERSIST_ERROR'). It is not exactly-once: Delivery records are a lower bound
+ * on what was accepted, since a crash or write failure after acceptance is recorded as failed.
+ *
+ * DEPLOYMENT: SINGLE APPLICATION INSTANCE ONLY. Dispatch bookkeeping (`activeDispatches`,
+ * `stopRequested`) lives in process memory. With several instances, startup recovery or the
+ * watchdog on one instance can fail deliveries that another instance is still sending.
  */
 
 export const DEFAULT_SEND_CONCURRENCY = 5;
@@ -78,9 +90,29 @@ export const toDeliveryErrorCode = (error) => {
 const activeDispatches = new Map();
 
 /**
+ * Campaign IDs currently being recovered in this process. Together with `activeDispatches` this
+ * makes recovery mutually exclusive per campaign, so an overlapping startup recovery and watchdog
+ * sweep can never fail a delivery that the other has already handed to a worker.
+ * @type {Set<string>}
+ */
+const recoveringCampaigns = new Set();
+
+/**
  * Set when the process is shutting down; workers stop claiming new deliveries.
  */
 let stopRequested = false;
+
+/**
+ * Logs a warning, falling back to `error` for loggers without `warn`. Logging must never be
+ * able to throw inside a worker.
+ */
+const logWarning = (logger, message) => {
+  if (typeof logger?.warn === 'function') {
+    logger.warn(message);
+  } else if (typeof logger?.error === 'function') {
+    logger.error(message);
+  }
+};
 
 /**
  * @returns {boolean} True while a dispatch for the campaign is running in this process
@@ -105,6 +137,7 @@ export const waitForCampaignDispatch = (campaignId) =>
  */
 export const stopAllDispatches = async () => {
   stopRequested = true;
+  stopDispatchWatchdog();
   await Promise.allSettled([...activeDispatches.values()]);
 };
 
@@ -170,11 +203,60 @@ export const finalizeCampaign = async (campaignId) => {
 };
 
 /**
+ * Normalizes a transport message ID for storage.
+ *
+ * @param {object} result - Value returned by `emailService.sendEmail`
+ * @returns {string|null}
+ */
+const toStoredMessageId = (result) =>
+  typeof result?.messageId === 'string' ? result.messageId.slice(0, 998) : null;
+
+/**
+ * Records that the transport accepted a delivery.
+ */
+const markDeliverySent = (deliveryId, result) =>
+  Delivery.updateOne(
+    { _id: deliveryId, status: 'processing' },
+    {
+      $set: {
+        status: 'sent',
+        messageId: toStoredMessageId(result),
+        sentAt: new Date(),
+        errorCode: null,
+      },
+    }
+  );
+
+/**
+ * Increments a denormalized campaign counter. Failures are logged and ignored: `stats` is
+ * recomputed from Delivery records when the campaign finalizes, so a missed increment must never
+ * change how the delivery itself is recorded.
+ */
+const incrementCampaignStat = async (campaignId, field, logger) => {
+  try {
+    await Campaign.updateOne({ _id: campaignId }, { $inc: { [`stats.${field}`]: 1 } });
+  } catch (error) {
+    logWarning(
+      logger,
+      `[Dispatcher] Campaign ${String(campaignId)} stats.${field} update skipped: ${error?.name || 'Error'}`
+    );
+  }
+};
+
+/**
  * Claims, sends, and records one delivery. Returns false when no pending work remains.
+ *
+ * Only errors raised while handing the message to the transport are recorded as delivery
+ * failures. Once the transport has accepted a message, a database error is a *persistence*
+ * failure: the recipient was very likely emailed, so the delivery is recorded as
+ * `PERSIST_ERROR` (never as a transport failure) and is never retried.
+ *
+ * Rejects only when the database is unavailable even for recording a failure; the dispatch then
+ * halts and the watchdog or the next startup recovers the campaign.
  *
  * @returns {Promise<boolean>}
  */
-const processNextDelivery = async (campaignId, message, emailService) => {
+export const processNextDelivery = async (campaignId, message, emailService, logger = console) => {
   const delivery = await Delivery.findOneAndUpdate(
     { campaignId, status: 'pending' },
     { $set: { status: 'processing' }, $inc: { attempts: 1 } },
@@ -185,26 +267,15 @@ const processNextDelivery = async (campaignId, message, emailService) => {
     return false;
   }
 
+  // 1. Hand the message to the transport
+  let result;
   try {
-    const result = await emailService.sendEmail({
+    result = await emailService.sendEmail({
       to: delivery.email,
       subject: message.subject,
       text: message.text,
       html: message.html,
     });
-
-    await Delivery.updateOne(
-      { _id: delivery._id, status: 'processing' },
-      {
-        $set: {
-          status: 'sent',
-          messageId: typeof result?.messageId === 'string' ? result.messageId.slice(0, 998) : null,
-          sentAt: new Date(),
-          errorCode: null,
-        },
-      }
-    );
-    await Campaign.updateOne({ _id: campaignId }, { $inc: { 'stats.sent': 1 } });
   } catch (error) {
     await Delivery.updateOne(
       { _id: delivery._id, status: 'processing' },
@@ -216,9 +287,37 @@ const processNextDelivery = async (campaignId, message, emailService) => {
         },
       }
     );
-    await Campaign.updateOne({ _id: campaignId }, { $inc: { 'stats.failed': 1 } });
+    await incrementCampaignStat(campaignId, 'failed', logger);
+    return true;
   }
 
+  // 2. The transport accepted the message: record it, retrying once for transient write errors
+  try {
+    await markDeliverySent(delivery._id, result);
+  } catch {
+    try {
+      await markDeliverySent(delivery._id, result);
+    } catch (persistError) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} delivery ${String(delivery._id)} was accepted by the transport but could not be recorded: ${persistError?.name || 'Error'}`
+      );
+      await Delivery.updateOne(
+        { _id: delivery._id, status: 'processing' },
+        {
+          $set: {
+            status: 'failed',
+            errorCode: 'PERSIST_ERROR',
+            messageId: toStoredMessageId(result),
+            failedAt: new Date(),
+          },
+        }
+      );
+      await incrementCampaignStat(campaignId, 'failed', logger);
+      return true;
+    }
+  }
+
+  await incrementCampaignStat(campaignId, 'sent', logger);
   return true;
 };
 
@@ -257,14 +356,27 @@ export const processCampaignDeliveries = async (
 
     const worker = async () => {
       while (!stopRequested) {
-        const hadWork = await processNextDelivery(campaignId, message, emailService);
+        const hadWork = await processNextDelivery(campaignId, message, emailService, logger);
         if (!hadWork) {
           return;
         }
       }
     };
 
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    // allSettled (not all): if one worker rejects, the others keep running, and this dispatch
+    // must stay tracked in `activeDispatches` until every one of them has stopped, so the
+    // watchdog can never treat a still-running campaign as stalled.
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: workerCount }, () => worker())
+    );
+
+    const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failure) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} dispatch halted: ${failure.reason?.name || 'Error'}. It will be recovered by the watchdog or on restart.`
+      );
+      return;
+    }
 
     if (!stopRequested) {
       await finalizeCampaign(campaignId);
@@ -391,34 +503,56 @@ export const startCampaignDispatch = async ({
 };
 
 /**
- * Resumes campaigns left in 'sending' by a previous process (crash or shutdown).
- * Deliveries stuck in 'processing' are failed with 'INTERRUPTED' instead of being re-sent.
+ * Recovers one campaign left in 'sending' with no dispatch running in this process.
  *
- * @param {object} options
- * @param {{ sendEmail: Function }} options.emailService
- * @param {number} [options.concurrency]
- * @param {object} [options.logger=console]
- * @returns {Promise<number>} Number of campaigns resumed
+ * - Deliveries stuck in 'processing' are failed with 'INTERRUPTED' instead of being re-sent.
+ * - A campaign that was locked but never got any deliveries (the process died between the lock
+ *   and the insert) sent nothing, so it is returned to 'draft' for the user to retry.
+ * - Otherwise stats are recomputed and remaining 'pending' deliveries are dispatched; the
+ *   campaign finalizes when they are done.
+ *
+ * Mutually exclusive per campaign within this process: if the campaign is already dispatching
+ * or being recovered, this returns 'skipped' without touching it. The check and the lock are
+ * synchronous, and dispatch is registered in `activeDispatches` before the lock is released, so
+ * no other recovery can interleave.
+ *
+ * SINGLE-INSTANCE ONLY: "no dispatch running" is known only for this process. With several
+ * application instances, one instance could recover a campaign another is still sending.
+ *
+ * @returns {Promise<'resumed'|'reverted'|'skipped'>}
  */
-export const resumeInterruptedDispatches = async ({
-  emailService,
-  concurrency,
-  logger = console,
-} = {}) => {
-  const stuck = await Campaign.find({ status: 'sending' }).select('_id').lean();
-  let resumed = 0;
+export const recoverCampaign = async (campaignId, { emailService, concurrency, logger = console } = {}) => {
+  const key = String(campaignId);
+  if (isDispatchActive(key) || recoveringCampaigns.has(key)) {
+    return 'skipped';
+  }
+  recoveringCampaigns.add(key);
 
-  for (const { _id: campaignId } of stuck) {
-    if (isDispatchActive(campaignId)) {
-      continue;
-    }
-
+  try {
     await Delivery.updateMany(
       { campaignId, status: 'processing' },
       { $set: { status: 'failed', errorCode: 'INTERRUPTED', failedAt: new Date() } }
     );
 
     const counts = await getDeliveryCounts(campaignId);
+
+    if (counts.total === 0) {
+      const reverted = await Campaign.updateOne(
+        { _id: campaignId, status: 'sending' },
+        {
+          $set: {
+            status: 'draft',
+            sendStartedAt: null,
+            sendCompletedAt: null,
+            'stats.total': 0,
+            'stats.sent': 0,
+            'stats.failed': 0,
+          },
+        }
+      );
+      return reverted.modifiedCount > 0 ? 'reverted' : 'skipped';
+    }
+
     await Campaign.updateOne(
       { _id: campaignId, status: 'sending' },
       {
@@ -430,14 +564,178 @@ export const resumeInterruptedDispatches = async ({
       }
     );
 
+    // Registers in `activeDispatches` synchronously, before the lock below is released
     scheduleCampaignProcessing(campaignId, { emailService, concurrency, logger });
-    resumed += 1;
+    return 'resumed';
+  } finally {
+    recoveringCampaigns.delete(key);
+  }
+};
+
+/**
+ * Resumes campaigns left in 'sending' by a previous process (crash or shutdown).
+ * Called once at startup, before this process has started any dispatch of its own.
+ *
+ * @param {object} options
+ * @param {{ sendEmail: Function }} options.emailService
+ * @param {number} [options.concurrency]
+ * @param {object} [options.logger=console]
+ * @returns {Promise<number>} Number of campaigns resumed or returned to draft
+ */
+export const resumeInterruptedDispatches = async ({
+  emailService,
+  concurrency,
+  logger = console,
+} = {}) => {
+  const stuck = await Campaign.find({ status: 'sending' }).select('_id').lean();
+  let recovered = 0;
+
+  for (const { _id: campaignId } of stuck) {
+    if (isDispatchActive(campaignId)) {
+      continue;
+    }
+
+    const outcome = await recoverCampaign(campaignId, { emailService, concurrency, logger });
+    if (outcome !== 'skipped') {
+      recovered += 1;
+    }
   }
 
-  if (resumed > 0) {
-    logger.log(`[Dispatcher] Resumed ${resumed} interrupted campaign dispatch(es).`);
+  if (recovered > 0) {
+    logger.log(`[Dispatcher] Resumed ${recovered} interrupted campaign dispatch(es).`);
   }
-  return resumed;
+  return recovered;
+};
+
+export const DEFAULT_STALL_TIMEOUT_MS = 15 * 60 * 1000;
+export const DEFAULT_WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
+
+const parsePositiveIntegerEnv = (raw, fallback) => {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return fallback;
+  }
+  const value = Number(String(raw).trim());
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+};
+
+/**
+ * Resolves watchdog timing from CAMPAIGN_STALL_TIMEOUT_MS and CAMPAIGN_WATCHDOG_INTERVAL_MS.
+ *
+ * @param {object} [env=process.env]
+ * @returns {{ stallTimeoutMs: number, intervalMs: number }}
+ */
+export const getWatchdogConfig = (env = process.env) => ({
+  stallTimeoutMs: parsePositiveIntegerEnv(env.CAMPAIGN_STALL_TIMEOUT_MS, DEFAULT_STALL_TIMEOUT_MS),
+  intervalMs: parsePositiveIntegerEnv(env.CAMPAIGN_WATCHDOG_INTERVAL_MS, DEFAULT_WATCHDOG_INTERVAL_MS),
+});
+
+/**
+ * Recovers campaigns that are wedged in 'sending': started at least `stallTimeoutMs` ago and
+ * with no dispatch running in this process (for example after a dispatch halted on a database
+ * error). The age threshold keeps the sweep away from campaigns that were just locked and are
+ * still having their deliveries created.
+ *
+ * SINGLE-INSTANCE ONLY (see `recoverCampaign`).
+ *
+ * @param {object} options
+ * @param {{ sendEmail: Function }} options.emailService
+ * @param {number} [options.concurrency]
+ * @param {object} [options.logger=console]
+ * @param {number} [options.stallTimeoutMs]
+ * @param {Date} [options.now=new Date()]
+ * @returns {Promise<number>} Number of campaigns recovered
+ */
+export const reapStalledCampaigns = async ({
+  emailService,
+  concurrency,
+  logger = console,
+  stallTimeoutMs = getWatchdogConfig().stallTimeoutMs,
+  now = new Date(),
+} = {}) => {
+  if (stopRequested) {
+    return 0;
+  }
+
+  const cutoff = new Date(now.getTime() - stallTimeoutMs);
+  const stalled = await Campaign.find({ status: 'sending', sendStartedAt: { $lte: cutoff } })
+    .select('_id')
+    .lean();
+
+  let recovered = 0;
+  for (const { _id: campaignId } of stalled) {
+    if (stopRequested) {
+      break;
+    }
+    if (isDispatchActive(campaignId)) {
+      continue;
+    }
+
+    const outcome = await recoverCampaign(campaignId, { emailService, concurrency, logger });
+    if (outcome !== 'skipped') {
+      recovered += 1;
+    }
+  }
+
+  if (recovered > 0) {
+    logWarning(logger, `[Dispatcher] Watchdog recovered ${recovered} stalled campaign dispatch(es).`);
+  }
+  return recovered;
+};
+
+let watchdogTimer = null;
+
+/**
+ * Stops the periodic stalled-campaign sweep, if running.
+ */
+export const stopDispatchWatchdog = () => {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+};
+
+/**
+ * Starts a periodic `reapStalledCampaigns` sweep. Sweeps never overlap, the timer does not keep
+ * the process alive, and `stopAllDispatches` stops it during shutdown.
+ *
+ * @param {object} options
+ * @param {{ sendEmail: Function }} options.emailService
+ * @param {number} [options.concurrency]
+ * @param {object} [options.logger=console]
+ * @param {number} [options.intervalMs]
+ * @param {number} [options.stallTimeoutMs]
+ * @returns {Function} Stops the watchdog
+ */
+export const startDispatchWatchdog = ({
+  emailService,
+  concurrency,
+  logger = console,
+  intervalMs,
+  stallTimeoutMs,
+} = {}) => {
+  stopDispatchWatchdog();
+
+  const config = getWatchdogConfig();
+  const every = intervalMs ?? config.intervalMs;
+  const timeout = stallTimeoutMs ?? config.stallTimeoutMs;
+  let sweeping = false;
+
+  watchdogTimer = setInterval(() => {
+    if (sweeping || stopRequested) {
+      return;
+    }
+    sweeping = true;
+    reapStalledCampaigns({ emailService, concurrency, logger, stallTimeoutMs: timeout })
+      .catch((error) => {
+        logger.error(`[Dispatcher] Watchdog sweep failed: ${error?.name || 'Error'}`);
+      })
+      .finally(() => {
+        sweeping = false;
+      });
+  }, every);
+  watchdogTimer.unref?.();
+
+  return stopDispatchWatchdog;
 };
 
 export default {
@@ -445,6 +743,12 @@ export default {
   processCampaignDeliveries,
   scheduleCampaignProcessing,
   resumeInterruptedDispatches,
+  recoverCampaign,
+  reapStalledCampaigns,
+  startDispatchWatchdog,
+  stopDispatchWatchdog,
+  getWatchdogConfig,
+  processNextDelivery,
   finalizeCampaign,
   getDeliveryCounts,
   waitForCampaignDispatch,

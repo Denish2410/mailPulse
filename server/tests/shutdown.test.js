@@ -255,4 +255,70 @@ describe('Server Startup and Graceful Shutdown Tests', () => {
     assert.ok(errorLogged);
     assert.ok(errorLogged.includes('Database connection unexpectedly dropped'));
   });
+
+  it('9. Invalid auth configuration fails at boot, before the database is touched', async () => {
+    const savedSecret = process.env.JWT_SECRET;
+    let connectCalled = false;
+    let exitStatus = null;
+
+    try {
+      for (const badSecret of [undefined, 'too-short-secret']) {
+        if (badSecret === undefined) {
+          delete process.env.JWT_SECRET;
+        } else {
+          process.env.JWT_SECRET = badSecret;
+        }
+
+        await assert.rejects(
+          () =>
+            startServer({
+              port: 0,
+              validateConfig: true,
+              resumeDispatches: false,
+              connectDB: async () => {
+                connectCalled = true;
+              },
+              exitFn: (code) => {
+                exitStatus = code;
+              },
+            }),
+          /JWT_SECRET/
+        );
+        assert.equal(connectCalled, false, 'database connection never attempted');
+        assert.equal(exitStatus, 1);
+      }
+    } finally {
+      if (savedSecret === undefined) {
+        delete process.env.JWT_SECRET;
+      } else {
+        process.env.JWT_SECRET = savedSecret;
+      }
+    }
+  });
+
+  it('10. A valid auth configuration lets startup proceed', async () => {
+    const savedSecret = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = 'a_valid_test_secret_that_is_at_least_32_chars';
+    let serverInstance = null;
+
+    try {
+      serverInstance = await startServer({
+        port: 0,
+        validateConfig: true,
+        resumeDispatches: false,
+        connectDB: async () => {},
+        exitFn: () => {},
+      });
+      assert.equal(serverInstance.listening, true);
+    } finally {
+      if (serverInstance && serverInstance.listening) {
+        await new Promise((resolve) => serverInstance.close(resolve));
+      }
+      if (savedSecret === undefined) {
+        delete process.env.JWT_SECRET;
+      } else {
+        process.env.JWT_SECRET = savedSecret;
+      }
+    }
+  });
 });

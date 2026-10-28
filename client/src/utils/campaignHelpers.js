@@ -672,7 +672,9 @@ export const describeDeliveryError = (code) => {
     case 'CONFIGURATION_ERROR':
       return 'Email sending not configured';
     case 'INTERRUPTED':
-      return 'Interrupted by a server restart';
+      return 'Interrupted by a server restart (may have been delivered)';
+    case 'PERSIST_ERROR':
+      return 'Accepted by the provider, but not recorded (likely delivered)';
     case null:
     case undefined:
     case '':

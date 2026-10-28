@@ -16,6 +16,14 @@ import mongoose from 'mongoose';
  *   transport may already have accepted it.
  * - Sanitized errors: only an error code is stored, never raw SMTP/provider messages.
  * - Tenant scoping: `userId` is denormalized so every query can be owner-scoped.
+ *
+ * Error codes:
+ * - INVALID_MESSAGE / CONFIGURATION_ERROR / TRANSPORT_ERROR / UNKNOWN_ERROR: the transport did
+ *   not accept the message; the recipient was not emailed.
+ * - INTERRUPTED: the process stopped while the delivery was 'processing'; the outcome is unknown
+ *   and the recipient may have been emailed. Never re-sent.
+ * - PERSIST_ERROR: the transport ACCEPTED the message but recording 'sent' failed; the recipient
+ *   was very likely emailed. Never re-sent.
  */
 export const DELIVERY_STATUSES = ['pending', 'processing', 'sent', 'failed'];
 
@@ -24,6 +32,7 @@ export const DELIVERY_ERROR_CODES = [
   'CONFIGURATION_ERROR',
   'TRANSPORT_ERROR',
   'INTERRUPTED',
+  'PERSIST_ERROR',
   'UNKNOWN_ERROR',
 ];
 

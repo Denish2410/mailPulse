@@ -11,9 +11,11 @@ dotenv.config();
 
 import app from './app.js';
 import { connectDB } from './config/db.js';
+import { validateAuthConfig } from './config/auth.js';
 import { getDefaultEmailService } from './services/email.service.js';
 import {
   resumeInterruptedDispatches,
+  startDispatchWatchdog,
   stopAllDispatches,
 } from './services/campaignDispatch.service.js';
 
@@ -130,8 +132,11 @@ export const createShutdownHandler = ({
  * @param {number} [options.port] - Port number to bind to
  * @param {Function} [options.connectDB] - Database connection function
  * @param {Function} [options.exitFn] - Exit function on fatal failure
- * @param {boolean} [options.resumeDispatches] - Resume campaigns interrupted mid-send
- *   (defaults to true outside the test environment)
+ * @param {boolean} [options.resumeDispatches] - Resume campaigns interrupted mid-send and start
+ *   the stalled-campaign watchdog (defaults to true outside the test environment)
+ * @param {boolean} [options.validateConfig] - Validate required configuration (JWT settings)
+ *   before connecting, so a missing or weak secret fails at boot instead of on the first login
+ *   (defaults to true when this module is the process entry point)
  * @returns {Promise<import('node:http').Server>}
  */
 export const startServer = async (options = {}) => {
@@ -151,15 +156,24 @@ export const startServer = async (options = {}) => {
   const exitHandler = options.exitFn || process.exit;
 
   try {
+    // 0. Fail fast on invalid configuration (throws before anything is opened)
+    const shouldValidateConfig = options.validateConfig ?? isMainModule();
+    if (shouldValidateConfig) {
+      validateAuthConfig();
+    }
+
     // 1. Await database connection before opening port
     await dbConnector();
 
-    // 1b. Resume campaign sends interrupted by a previous shutdown or crash (non-blocking)
+    // 1b. Resume campaign sends interrupted by a previous shutdown or crash (non-blocking), then
+    //     keep watching for dispatches that stall while the server runs
     const shouldResume = options.resumeDispatches ?? process.env.NODE_ENV !== 'test';
     if (shouldResume) {
-      resumeInterruptedDispatches({ emailService: getDefaultEmailService() }).catch((err) => {
+      const emailService = getDefaultEmailService();
+      resumeInterruptedDispatches({ emailService }).catch((err) => {
         console.error(`[Dispatcher] Failed to resume interrupted dispatches: ${err.name || 'Error'}`);
       });
+      startDispatchWatchdog({ emailService });
     }
 
     // 2. Start HTTP server only after database connection succeeds

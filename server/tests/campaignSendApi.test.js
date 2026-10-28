@@ -40,11 +40,16 @@ import {
 import {
   waitForCampaignDispatch,
   resumeInterruptedDispatches,
+  reapStalledCampaigns,
+  getWatchdogConfig,
   getSendConcurrency,
   toDeliveryErrorCode,
   DEFAULT_SEND_CONCURRENCY,
   MAX_SEND_CONCURRENCY,
+  DEFAULT_STALL_TIMEOUT_MS,
+  DEFAULT_WATCHDOG_INTERVAL_MS,
 } from '../src/services/campaignDispatch.service.js';
+import { MAX_CAMPAIGN_RECIPIENTS } from '../src/models/Campaign.js';
 import {
   getCampaignSendRateLimitConfig,
   DEFAULT_CAMPAIGN_SEND_RATE_LIMIT_MAX,
@@ -53,6 +58,8 @@ import {
 import {
   sendCampaignSchema,
   getCampaignDeliveriesSchema,
+  createCampaignSchema,
+  updateCampaignSchema,
 } from '../src/validators/campaign.validator.js';
 
 /**
@@ -591,9 +598,331 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       assert.equal(stored.stats.failed, 1);
     });
   });
+
+  describe('7. Recipient cap', () => {
+    it(`Rejects creating a campaign with more than ${MAX_CAMPAIGN_RECIPIENTS} recipient IDs`, async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const recipientIds = Array.from({ length: MAX_CAMPAIGN_RECIPIENTS + 1 }, () =>
+        new mongoose.Types.ObjectId().toString()
+      );
+
+      const res = await request('POST', '/api/v1/campaigns', {
+        token: tokenOne,
+        body: { name: 'Too big', subject: 'Hi', textContent: 'Hello', recipientIds },
+      });
+      assert.equal(res.status, 400);
+      assert.equal(await Campaign.countDocuments({ userId: userOne._id }), 0);
+    });
+
+    it('Refuses to send a legacy draft that resolves to more recipients than the cap', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const emailPrefix = `${testPrefix}-bulk`;
+      const contacts = await Contact.insertMany(
+        Array.from({ length: MAX_CAMPAIGN_RECIPIENTS + 1 }, (_, i) => ({
+          userId: userOne._id,
+          name: `Bulk ${i}`,
+          email: `${emailPrefix}-${i}@example.com`,
+        }))
+      );
+
+      try {
+        // Written directly to the collection, as a draft saved before the cap existed would be
+        const now = new Date();
+        const { insertedId } = await Campaign.collection.insertOne({
+          userId: userOne._id,
+          name: 'Legacy oversized draft',
+          subject: 'Hello',
+          textContent: 'Hello everyone',
+          htmlContent: '',
+          status: 'draft',
+          recipientIds: contacts.map((c) => c._id),
+          stats: { total: 0, sent: 0, failed: 0 },
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        const res = await postSend(insertedId, { token: tokenOne });
+        assert.equal(res.status, 422);
+        const body = await res.json();
+        assert.ok(body.errors.some((e) => e.path === 'campaign.recipientIds'));
+
+        const stored = await Campaign.findById(insertedId).lean();
+        assert.equal(stored.status, 'draft', 'nothing was locked');
+        assert.equal(await Delivery.countDocuments({ campaignId: insertedId }), 0);
+        assert.equal(transport.count, 0);
+      } finally {
+        await Contact.deleteMany({ userId: userOne._id, email: { $regex: `^${emailPrefix}-` } });
+      }
+    });
+  });
+
+  describe('8. Database failures after the transport accepted a message', () => {
+    it('Records PERSIST_ERROR (never TRANSPORT_ERROR), keeps the messageId, and never re-sends', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id, contactB._id],
+      });
+
+      // Every attempt to record ONE chosen delivery as 'sent' fails
+      const originalUpdateOne = Delivery.updateOne.bind(Delivery);
+      let victimId = null;
+      t.mock.method(Delivery, 'updateOne', (filter, update, ...rest) => {
+        if (update?.$set?.status === 'sent') {
+          victimId = victimId ?? String(filter._id);
+          if (String(filter._id) === victimId) {
+            return Promise.reject(Object.assign(new Error('write failed'), { name: 'MongoNetworkError' }));
+          }
+        }
+        return originalUpdateOne(filter, update, ...rest);
+      });
+
+      const res = await postSend(campaign._id, { token: tokenOne });
+      assert.equal(res.status, 202);
+      await waitForCampaignDispatch(campaign._id);
+      t.mock.restoreAll();
+
+      assert.equal(transport.count, 2, 'each recipient handed to the transport exactly once');
+
+      const victim = await Delivery.findById(victimId).lean();
+      assert.equal(victim.status, 'failed');
+      assert.equal(victim.errorCode, 'PERSIST_ERROR');
+      assert.ok(victim.messageId, 'messageId kept for reconciliation');
+
+      const stored = await Campaign.findById(campaign._id).lean();
+      assert.equal(stored.status, 'sent');
+      assert.equal(stored.stats.sent, 1);
+      assert.equal(stored.stats.failed, 1);
+    });
+
+    it('A failed stats increment does not stall the campaign or change delivery records', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id, contactB._id],
+      });
+
+      const originalUpdateOne = Campaign.updateOne.bind(Campaign);
+      t.mock.method(Campaign, 'updateOne', (filter, update, ...rest) => {
+        if (update?.$inc) {
+          return Promise.reject(new Error('stats write failed'));
+        }
+        return originalUpdateOne(filter, update, ...rest);
+      });
+
+      const res = await postSend(campaign._id, { token: tokenOne });
+      assert.equal(res.status, 202);
+      await waitForCampaignDispatch(campaign._id);
+      t.mock.restoreAll();
+
+      const deliveries = await Delivery.find({ campaignId: campaign._id }).lean();
+      assert.ok(deliveries.every((d) => d.status === 'sent'));
+
+      const stored = await Campaign.findById(campaign._id).lean();
+      assert.equal(stored.status, 'sent', 'finalized despite the failed increments');
+      assert.equal(stored.stats.sent, 2, 'stats recomputed from delivery records');
+    });
+  });
+
+  describe('9. Stalled-campaign watchdog', () => {
+    const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
+    const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000);
+
+    const seedDelivery = (campaign, contact, status) => ({
+      campaignId: campaign._id,
+      userId: userOne._id,
+      contactId: contact._id,
+      email: contact.email,
+      name: contact.name,
+      status,
+      attempts: status === 'pending' ? 0 : 1,
+    });
+
+    it('Recovers a campaign stalled past the timeout: INTERRUPTED for in-flight, pending sent', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id, contactB._id],
+        status: 'sending',
+        sendStartedAt: minutesAgo(30),
+        stats: { total: 2, sent: 0, failed: 0 },
+      });
+      await Delivery.create([
+        seedDelivery(campaign, contactA, 'processing'),
+        seedDelivery(campaign, contactB, 'pending'),
+      ]);
+
+      const recovered = await reapStalledCampaigns({
+        emailService: app.locals.emailService,
+        logger: silentLogger,
+        stallTimeoutMs: 15 * 60 * 1000,
+      });
+      assert.equal(recovered, 1);
+      await waitForCampaignDispatch(campaign._id);
+
+      assert.equal(transport.count, 1);
+      assert.equal(transport.sentEmails[0].to, contactB.email);
+      const interrupted = await Delivery.findOne({ campaignId: campaign._id, contactId: contactA._id }).lean();
+      assert.equal(interrupted.errorCode, 'INTERRUPTED');
+      const stored = await Campaign.findById(campaign._id).lean();
+      assert.equal(stored.status, 'sent');
+    });
+
+    it('Leaves a campaign that started recently alone', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id],
+        status: 'sending',
+        sendStartedAt: minutesAgo(1),
+        stats: { total: 1, sent: 0, failed: 0 },
+      });
+      await Delivery.create([seedDelivery(campaign, contactA, 'processing')]);
+
+      const recovered = await reapStalledCampaigns({
+        emailService: app.locals.emailService,
+        logger: silentLogger,
+        stallTimeoutMs: 15 * 60 * 1000,
+      });
+      assert.equal(recovered, 0);
+      const delivery = await Delivery.findOne({ campaignId: campaign._id }).lean();
+      assert.equal(delivery.status, 'processing', 'not failed while it may still be in flight');
+      assert.equal(transport.count, 0);
+    });
+
+    it('Overlapping startup recovery and watchdog sweep never fail an in-flight delivery', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id],
+        status: 'sending',
+        sendStartedAt: minutesAgo(30),
+        stats: { total: 1, sent: 0, failed: 0 },
+      });
+      await Delivery.create([seedDelivery(campaign, contactA, 'pending')]);
+
+      // Hold the transport so the claimed delivery stays 'processing'
+      let release;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const inner = createMockTransport();
+      useTransport({
+        get count() {
+          return inner.count;
+        },
+        get sentEmails() {
+          return inner.sentEmails;
+        },
+        async sendMail(mailOptions) {
+          await gate;
+          return inner.sendMail(mailOptions);
+        },
+      });
+
+      // Make the SECOND recovery's "fail processing rows" update land late, after the first
+      // recovery's worker has already claimed the delivery
+      const originalUpdateMany = Delivery.updateMany.bind(Delivery);
+      let calls = 0;
+      t.mock.method(Delivery, 'updateMany', async (...args) => {
+        calls += 1;
+        if (calls === 2) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        return originalUpdateMany(...args);
+      });
+
+      await Promise.all([
+        resumeInterruptedDispatches({ emailService: app.locals.emailService, logger: silentLogger }),
+        reapStalledCampaigns({
+          emailService: app.locals.emailService,
+          logger: silentLogger,
+          stallTimeoutMs: 15 * 60 * 1000,
+        }),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const inFlight = await Delivery.findOne({ campaignId: campaign._id }).lean();
+      assert.notEqual(inFlight.errorCode, 'INTERRUPTED', 'in-flight delivery must not be failed');
+
+      release();
+      await waitForCampaignDispatch(campaign._id);
+      t.mock.restoreAll();
+
+      const done = await Delivery.findOne({ campaignId: campaign._id }).lean();
+      assert.equal(done.status, 'sent');
+      assert.equal(transport.count, 1);
+    });
+
+    it('Returns a stalled campaign that never got deliveries to draft', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id],
+        status: 'sending',
+        sendStartedAt: minutesAgo(30),
+        stats: { total: 1, sent: 0, failed: 0 },
+      });
+
+      const recovered = await reapStalledCampaigns({
+        emailService: app.locals.emailService,
+        logger: silentLogger,
+        stallTimeoutMs: 15 * 60 * 1000,
+      });
+      assert.equal(recovered, 1);
+
+      const stored = await Campaign.findById(campaign._id).lean();
+      assert.equal(stored.status, 'draft');
+      assert.equal(stored.sendStartedAt, null);
+      assert.equal(transport.count, 0);
+    });
+  });
 });
 
 describe('Campaign dispatch helpers (no database)', () => {
+  it('getWatchdogConfig applies defaults and rejects invalid values', () => {
+    assert.deepEqual(getWatchdogConfig({}), {
+      stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS,
+      intervalMs: DEFAULT_WATCHDOG_INTERVAL_MS,
+    });
+    assert.deepEqual(
+      getWatchdogConfig({ CAMPAIGN_STALL_TIMEOUT_MS: '-1', CAMPAIGN_WATCHDOG_INTERVAL_MS: 'soon' }),
+      { stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS, intervalMs: DEFAULT_WATCHDOG_INTERVAL_MS }
+    );
+    assert.deepEqual(
+      getWatchdogConfig({ CAMPAIGN_STALL_TIMEOUT_MS: '60000', CAMPAIGN_WATCHDOG_INTERVAL_MS: '1000' }),
+      { stallTimeoutMs: 60000, intervalMs: 1000 }
+    );
+  });
+
+  it('create and update schemas cap recipientIds', () => {
+    const ids = (n) => Array.from({ length: n }, () => new mongoose.Types.ObjectId().toString());
+    const base = { name: 'Capped', subject: 'Hi' };
+
+    assert.equal(
+      createCampaignSchema.safeParse({ body: { ...base, recipientIds: ids(MAX_CAMPAIGN_RECIPIENTS) } }).success,
+      true
+    );
+    assert.equal(
+      createCampaignSchema.safeParse({ body: { ...base, recipientIds: ids(MAX_CAMPAIGN_RECIPIENTS + 1) } }).success,
+      false
+    );
+
+    const id = new mongoose.Types.ObjectId().toString();
+    assert.equal(
+      updateCampaignSchema.safeParse({ params: { id }, body: { recipientIds: ids(MAX_CAMPAIGN_RECIPIENTS + 1) } }).success,
+      false
+    );
+  });
+
+  it('Campaign schema rejects saving more recipients than the cap', () => {
+    const doc = new Campaign({
+      userId: new mongoose.Types.ObjectId(),
+      name: 'Capped',
+      subject: 'Hi',
+      recipientIds: Array.from({ length: MAX_CAMPAIGN_RECIPIENTS + 1 }, () => new mongoose.Types.ObjectId()),
+    });
+    const error = doc.validateSync();
+    assert.ok(error?.errors?.recipientIds, 'recipientIds validation error expected');
+  });
+
+  it('toDeliveryErrorCode never produces PERSIST_ERROR (it is only set after transport acceptance)', () => {
+    assert.notEqual(toDeliveryErrorCode(new Error('E11000')), 'PERSIST_ERROR');
+  });
   it('getSendConcurrency applies defaults and bounds', () => {
     assert.equal(getSendConcurrency({}), DEFAULT_SEND_CONCURRENCY);
     assert.equal(getSendConcurrency({ CAMPAIGN_SEND_CONCURRENCY: '3' }), 3);

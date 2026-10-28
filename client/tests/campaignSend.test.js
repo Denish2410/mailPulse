@@ -191,6 +191,8 @@ describe('Campaign Sending (Phase 5)', () => {
     it('11. Describes stored delivery error codes', () => {
       assert.match(describeDeliveryError('TRANSPORT_ERROR'), /provider/);
       assert.match(describeDeliveryError('INTERRUPTED'), /restart/);
+      assert.match(describeDeliveryError('PERSIST_ERROR'), /not recorded/);
+      assert.notEqual(describeDeliveryError('PERSIST_ERROR'), 'Unknown error');
       assert.equal(describeDeliveryError(null), '');
       assert.equal(describeDeliveryError('SOMETHING'), 'Unknown error');
     });

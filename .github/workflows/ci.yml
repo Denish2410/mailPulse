@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27017/mailpulse_ci
+      JWT_SECRET: ci_only_jwt_secret_that_is_at_least_32_characters_long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` fails when package-lock.json does not match the package.json files, so a
+      # dependency added without updating the lockfile can never be merged unnoticed.
+      - name: Install dependencies (lockfile must be in sync)
+        run: npm ci
+
+      # DB-backed tests skip themselves when MongoDB is unreachable. In CI MongoDB is always
+      # provided, so any skipped test means the database was not reached: fail instead of
+      # reporting a misleading green build.
+      - name: Server tests
+        working-directory: server
+        run: |
+          set -o pipefail
+          node --test --test-reporter=tap 'tests/**/*.test.js' | tee ../server-tests.tap
+          if grep -Eq '^# skipped [1-9]' ../server-tests.tap; then
+            echo "::error::Server tests were skipped; MongoDB was not reachable."
+            exit 1
+          fi
+
+      - name: Client tests
+        run: npm run test:client
+
+      - name: Build client
+        run: npm run build
