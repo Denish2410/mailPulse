@@ -395,5 +395,38 @@ The following endpoints will be introduced in subsequent phases:
 - **Sent vs. delivered**: `sent` means the email provider accepted the message. Bounces, opens and clicks are not tracked yet.
 
 ### Analytics (`/api/v1/analytics`)
-- `GET /overview`: High-level open, click, and bounce metrics
-- `GET /campaigns/:id`: Per-campaign delivery performance metrics
+
+#### Analytics Overview (`GET /api/v1/analytics/overview`)
+- **Access**: Protected (Bearer JWT). Every figure is scoped to the authenticated owner.
+- **Query**: `days` = `7` | `30` | `90` (default `30`). Other values return `400`.
+- **Semantics**: `sent`/accepted means the SMTP provider accepted the message. `acceptanceRate` = sent / (sent + failed), one decimal, `null` when nothing finished. Daily buckets are UTC days keyed by `sentAt`/`failedAt`. Opens, clicks and bounces are not tracked yet.
+- **Response Shape (HTTP 200)**:
+```json
+{
+  "success": true,
+  "message": "Analytics overview retrieved successfully",
+  "data": {
+    "range": { "days": 7, "since": "2026-10-24T00:00:00.000Z", "until": "2026-10-30T15:30:00.000Z" },
+    "contacts": { "total": 120 },
+    "campaigns": { "total": 6, "byStatus": { "draft": 3, "sending": 0, "sent": 2, "failed": 1 } },
+    "deliveries": { "total": 240, "sent": 230, "failed": 10, "inProgress": 0, "acceptanceRate": 95.8 },
+    "period": { "sent": 110, "failed": 4, "acceptanceRate": 96.5 },
+    "daily": [{ "date": "2026-10-30", "sent": 110, "failed": 4 }],
+    "failureReasons": [{ "code": "TRANSPORT_ERROR", "count": 4 }],
+    "recentCampaigns": [
+      {
+        "id": "6712...",
+        "name": "October Launch",
+        "subject": "Big news",
+        "status": "sent",
+        "stats": { "total": 114, "sent": 110, "failed": 4 },
+        "acceptanceRate": 96.5,
+        "sendStartedAt": "2026-10-30T10:00:00.000Z",
+        "sendCompletedAt": "2026-10-30T10:01:12.000Z"
+      }
+    ]
+  }
+}
+```
+- `daily` always contains exactly `days` entries (oldest first, zero-filled). `recentCampaigns` lists up to 5 non-draft campaigns, newest send first.
+- **Planned**: `GET /campaigns/:id` per-campaign metrics, and open/click/bounce tracking.
