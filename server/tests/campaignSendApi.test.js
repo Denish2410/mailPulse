@@ -457,7 +457,11 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       const failed = await Delivery.findOne({ campaignId: campaign._id, status: 'failed' }).lean();
       assert.equal(failed.email, contactB.email);
       assert.equal(failed.errorCode, 'TRANSPORT_ERROR');
-      assert.ok(!JSON.stringify(failed).includes('550'), 'raw provider error must not be stored');
+      const storedJson = JSON.stringify(failed);
+      assert.ok(
+        !storedJson.includes('Simulated SMTP') && !storedJson.includes('mailbox unavailable'),
+        'raw provider error must not be stored'
+      );
     });
 
     it('Marks the campaign failed when no recipient is accepted', async (t) => {
