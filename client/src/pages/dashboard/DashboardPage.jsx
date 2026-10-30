@@ -1,9 +1,21 @@
 import { useAuth } from '../../hooks/useAuth.js';
 import Navbar from '../../components/layout/Navbar.jsx';
 import ConnectivityCheck from '../../components/common/ConnectivityCheck.jsx';
+import { Link } from 'react-router-dom';
+import { useAnalyticsOverview } from '../../hooks/useAnalyticsOverview.js';
+import { formatCount, formatRate } from '../../utils/analyticsHelpers.js';
+
+const SummaryRow = ({ label, value, last = false }) => (
+  <div className={`flex items-center justify-between py-1.5 ${last ? '' : 'border-b border-slate-800'}`}>
+    <span>{label}</span>
+    <span className="font-medium text-slate-300 tabular-nums">{value}</span>
+  </div>
+);
 
 export const DashboardPage = () => {
   const { user } = useAuth();
+  const { data, isLoading, error } = useAnalyticsOverview(30);
+  const show = (fn) => (data ? fn(data) : isLoading ? '…' : '—');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
@@ -17,7 +29,7 @@ export const DashboardPage = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold tracking-wide uppercase mb-3 border border-indigo-500/20">
-                Phase 2 — Active Session
+                Active Session
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
                 Welcome back, {user?.name || 'User'}!
@@ -39,23 +51,21 @@ export const DashboardPage = () => {
         {/* Workspace Diagnostics & Status */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <div className="lg:col-span-1 bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
-            <h2 className="text-base font-semibold text-white mb-2">Campaign Manager</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-white">Last 30 days</h2>
+              <Link to="/analytics" className="text-xs font-medium text-indigo-300 hover:text-indigo-200">
+                View analytics →
+              </Link>
+            </div>
             <p className="text-xs text-slate-400 mb-4">
-              Campaign orchestration, analytics pipelines, and audience segmentation will be enabled in future Phase 2 steps.
+              {error ? `Could not load summary: ${error}` : 'Live summary of your audience and sending.'}
             </p>
             <div className="space-y-2 text-xs text-slate-400">
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-800">
-                <span>Campaigns</span>
-                <span className="font-medium text-slate-300">0 Active</span>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-800">
-                <span>Contact Lists</span>
-                <span className="font-medium text-slate-300">0 Lists</span>
-              </div>
-              <div className="flex items-center justify-between py-1.5">
-                <span>Email Sending API</span>
-                <span className="font-medium text-slate-300">Ready for Step 6</span>
-              </div>
+              <SummaryRow label="Contacts" value={show((d) => formatCount(d.contacts.total))} />
+              <SummaryRow label="Draft campaigns" value={show((d) => formatCount(d.campaigns.byStatus.draft))} />
+              <SummaryRow label="Sent campaigns" value={show((d) => formatCount(d.campaigns.byStatus.sent))} />
+              <SummaryRow label="Emails accepted" value={show((d) => formatCount(d.period.sent))} />
+              <SummaryRow label="Acceptance rate" value={show((d) => formatRate(d.period.acceptanceRate))} last />
             </div>
           </div>
 

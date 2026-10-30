@@ -125,6 +125,14 @@ MailPulse provides a complete campaign drafting, recipient assignment, readiness
 
 ---
 
+## Analytics
+
+`GET /api/v1/analytics/overview?days=7|30|90` returns an owner-scoped summary: contact and campaign counts, delivery totals, a zero-filled daily series of accepted/failed sends (UTC days), failure reasons, and the five most recent sent campaigns with their acceptance rate.
+
+- **Analytics page** (`/analytics`): range switcher, KPI cards, a stacked daily bar chart (Recharts), recent campaigns table and failure-reason breakdown.
+- **Dashboard**: the campaign card now shows live 30-day numbers instead of placeholders.
+- "Accepted" means the SMTP provider accepted the message; opens, clicks and bounces are not tracked yet.
+
 ## Quick-Start Guide
 
 ### 1. Prerequisites
