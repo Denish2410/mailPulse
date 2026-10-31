@@ -7,6 +7,7 @@ import {
   EmailConfigurationError,
   EmailTransportError,
 } from './email.service.js';
+import { prepareTrackedEmailHtml } from './tracking.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -267,14 +268,36 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     return false;
   }
 
-  // 1. Hand the message to the transport
+  // 1. Inject tracking pixel and rewrite links for click tracking if HTML content is present
+  let htmlToSend = message.html;
+  if (htmlToSend && typeof htmlToSend === 'string' && htmlToSend.trim()) {
+    try {
+      htmlToSend = prepareTrackedEmailHtml(htmlToSend, {
+        campaignId,
+        recipientId: delivery.contactId ? String(delivery.contactId) : undefined,
+        recipientEmail: delivery.email,
+        baseUrl:
+          process.env.TRACKING_BASE_URL ||
+          process.env.API_BASE_URL ||
+          'http://localhost:5000',
+      });
+    } catch (trackingError) {
+      if (typeof logger?.warn === 'function') {
+        logger.warn(
+          `[Dispatcher] Failed to inject tracking for delivery ${String(delivery._id)}: ${trackingError?.message || 'Error'}`
+        );
+      }
+    }
+  }
+
+  // 2. Hand the message to the transport
   let result;
   try {
     result = await emailService.sendEmail({
       to: delivery.email,
       subject: message.subject,
       text: message.text,
-      html: message.html,
+      html: htmlToSend,
     });
   } catch (error) {
     await Delivery.updateOne(

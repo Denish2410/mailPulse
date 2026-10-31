@@ -18,6 +18,7 @@ import mongoose from 'mongoose';
 import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Campaign from '../src/models/Campaign.js';
+import Delivery from '../src/models/Delivery.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -26,6 +27,7 @@ import {
   TRANSPARENT_1X1_GIF,
   createTrackingToken,
 } from '../src/services/tracking.service.js';
+import { processNextDelivery } from '../src/services/campaignDispatch.service.js';
 
 describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analytics)', () => {
   let server;
@@ -258,6 +260,55 @@ describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analy
 
       assert.ok(Array.isArray(data.data.analytics.linkBreakdown));
       assert.ok(Array.isArray(data.data.analytics.recentActivity));
+    });
+  });
+
+  describe('4. Campaign Dispatch Integration with Open & Click Tracking', () => {
+    it('dispatches campaign email with open tracking pixel and click tracking links injected', async () => {
+      if (!isDbConnected) return;
+
+      const mockTransport = {
+        sentEmails: [],
+        async sendMail(opts) {
+          this.sentEmails.push(opts);
+          return { messageId: '<tracked-1@mailpulse.local>' };
+        },
+      };
+
+      const emailService = {
+        async sendEmail(opts) {
+          return mockTransport.sendMail(opts);
+        },
+      };
+
+      await Delivery.create({
+        campaignId: testCampaign._id,
+        userId: ownerUser._id,
+        contactId: new mongoose.Types.ObjectId(),
+        email: 'delivery-tracked@example.com',
+        name: 'Tracked Recipient',
+        status: 'pending',
+      });
+
+      const message = {
+        subject: 'Tracked Message',
+        text: 'Text version',
+        html: '<p>Visit <a href="https://example.com/special">Special Offer</a></p>',
+      };
+
+      const hadWork = await processNextDelivery(
+        testCampaign._id,
+        message,
+        emailService
+      );
+
+      assert.equal(hadWork, true);
+      assert.equal(mockTransport.sentEmails.length, 1);
+      const sent = mockTransport.sentEmails[0];
+      assert.equal(sent.to, 'delivery-tracked@example.com');
+      assert.ok(sent.html.includes('/api/v1/tracking/open/'), 'HTML must include open tracking pixel URL');
+      assert.ok(sent.html.includes('/api/v1/tracking/click/'), 'HTML must include rewritten click tracking URL');
+      assert.ok(!sent.html.includes('href="https://example.com/special"'), 'Raw destination URL must be rewritten');
     });
   });
 });
