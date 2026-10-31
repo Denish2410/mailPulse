@@ -16,6 +16,7 @@ import {
   startCampaignDispatch,
   getDeliveryCounts,
 } from '../services/campaignDispatch.service.js';
+import { getCampaignTrackingSummary } from '../services/tracking.service.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -717,6 +718,31 @@ export const getCampaignDeliveries = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Retrieve tracking and performance analytics for a campaign.
+ *
+ * Route: GET /api/v1/campaigns/:id/analytics
+ * Access: Protected (Bearer JWT)
+ */
+export const getCampaignAnalytics = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+
+  const analytics = await getCampaignTrackingSummary(id, userId);
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign analytics retrieved successfully',
+    data: {
+      analytics,
+    },
+  });
+});
+
 export default {
   createCampaign,
   getCampaigns,
@@ -727,6 +753,7 @@ export default {
   sendCampaignTestEmail,
   sendCampaign,
   getCampaignDeliveries,
+  getCampaignAnalytics,
   formatSafeCampaign,
   formatSafeDelivery,
   validateAndDeduplicateRecipients,

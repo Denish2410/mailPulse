@@ -241,3 +241,48 @@ graph TD
 - **Process Lifecycle Safety**: `npm run dev` employs `concurrently -k` so that terminating the parent process (via Ctrl+C or SIGINT/SIGTERM) forwards termination signals to both child processes, preventing orphaned port bindings.
 - **Zero-Dependency Native Testing**: Both workspaces run Node.js native test runner (`node:test`), delivering 51 fast, zero-overhead automated tests across 9 test suites without third-party test framework overhead.
 
+---
+
+## 9. Open & Click Tracking Architecture (Phase 7)
+
+MailPulse features a high-performance, cryptographically secure email engagement tracking engine:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Recipient as Email Recipient
+    participant MailClient as Mail Client
+    participant TrackingAPI as MailPulse Tracking API
+    participant DB as MongoDB (TrackingEvent)
+    participant TargetSite as Destination Website
+
+    Note over TrackingAPI: Email HTML prepared with HMAC-signed pixel & rewritten links
+
+    Recipient->>MailClient: Opens email
+    MailClient->>TrackingAPI: GET /api/v1/tracking/open/:token
+    TrackingAPI->>TrackingAPI: Verify HMAC-SHA256 signature (timingSafeEqual)
+    TrackingAPI->>DB: Record TrackingEvent (eventType: 'open')
+    TrackingAPI-->>MailClient: 200 OK (43-byte 1x1 Transparent GIF, no-cache headers)
+
+    Recipient->>MailClient: Clicks link
+    MailClient->>TrackingAPI: GET /api/v1/tracking/click/:token
+    TrackingAPI->>TrackingAPI: Verify HMAC & sanitize destination URL
+    TrackingAPI->>DB: Record TrackingEvent (eventType: 'click')
+    TrackingAPI-->>MailClient: 302 Found (Redirect to targetUrl)
+    MailClient->>TargetSite: Follow redirect to original URL
+```
+
+### Key Security & Architectural Principles:
+1. **Tamper-Proof URL-Safe Tokens**:
+   - Tracking tokens consist of base64url JSON payload concatenated with an HMAC-SHA256 signature (`<payload>.<signature>`).
+   - Verified using constant-time comparison (`crypto.timingSafeEqual`) to eliminate timing attacks.
+   - Click tokens directly embed the target URL, eliminating database lookups on redirect while preventing tampering.
+2. **Open-Redirect Protections**:
+   - Redirection targets are strictly validated to adhere to `http:` or `https:`. Malformed or dangerous schemes (`javascript:`, `data:`, relative paths) are immediately rejected with HTTP 400 Bad Request.
+3. **Anti-Caching & Silent Degradation**:
+   - Open pixel responses set aggressive anti-caching HTTP headers so subsequent opens are reliably counted.
+   - Corrupted or invalid open tokens log security warnings but safely serve the transparent GIF, avoiding broken image indicators in user inboxes.
+4. **Aggregated Analytics Engine**:
+   - MongoDB aggregation pipelines calculate total opens, unique opens, open rate %, total clicks, unique clicks, click-through rate (CTR %), per-link performance, and recent activity timelines.
+
+

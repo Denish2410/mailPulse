@@ -19,6 +19,8 @@ import {
   formatReadinessIssues,
   getReadinessBadge,
   formatReadinessSummary,
+  extractAnalyticsData,
+  formatAnalyticsMetrics,
 } from '../src/utils/campaignHelpers.js';
 import {
   getCampaigns,
@@ -1219,6 +1221,129 @@ describe('Campaigns Management UI Logic & Helpers', () => {
         /Test emails go only to your own account email\./,
         'Preview dialog must clearly state that test emails are self-addressed'
       );
+    });
+  });
+
+  // ==========================================
+  // Part 7: Tracking Analytics Helpers & Dialog
+  // ==========================================
+  describe('Part 7: Tracking Analytics Helpers & Dialog', () => {
+    const analyticsDialogPath = path.resolve(__dirname, '../src/components/campaigns/CampaignAnalyticsDialog.jsx');
+    const analyticsDialogSource = fs.readFileSync(analyticsDialogPath, 'utf8');
+
+    it('43. extractAnalyticsData normalizes empty, null, or undefined payload safely', () => {
+      const empty = extractAnalyticsData(null);
+      assert.equal(empty.campaignId, '');
+      assert.equal(empty.totalRecipients, 0);
+      assert.deepEqual(empty.metrics, {
+        totalOpens: 0,
+        uniqueOpens: 0,
+        openRate: 0,
+        totalClicks: 0,
+        uniqueClicks: 0,
+        clickThroughRate: 0,
+        clickToDeliveredRate: 0,
+      });
+      assert.deepEqual(empty.linkBreakdown, []);
+      assert.deepEqual(empty.recentActivity, []);
+
+      const undef = extractAnalyticsData(undefined);
+      assert.equal(undef.campaignId, '');
+    });
+
+    it('44. extractAnalyticsData normalizes nested Axios response or raw payload', () => {
+      const payload = {
+        data: {
+          data: {
+            campaignId: 'camp-123',
+            campaignName: 'Black Friday Sale',
+            campaignSubject: 'Big Savings',
+            status: 'sent',
+            totalRecipients: 100,
+            metrics: {
+              totalOpens: 50,
+              uniqueOpens: 30,
+              openRate: 30.0,
+              totalClicks: 15,
+              uniqueClicks: 10,
+              clickThroughRate: 33.3,
+              clickToDeliveredRate: 10.0,
+            },
+            linkBreakdown: [
+              { url: 'https://example.com/shop', totalClicks: 15, uniqueClicks: 10 },
+            ],
+            recentActivity: [
+              {
+                id: 'act-1',
+                eventType: 'click',
+                recipientEmail: 'shopper@example.com',
+                targetUrl: 'https://example.com/shop',
+                timestamp: '2026-10-31T14:00:00.000Z',
+              },
+            ],
+          },
+        },
+      };
+
+      const extracted = extractAnalyticsData(payload);
+      assert.equal(extracted.campaignId, 'camp-123');
+      assert.equal(extracted.campaignName, 'Black Friday Sale');
+      assert.equal(extracted.totalRecipients, 100);
+      assert.equal(extracted.metrics.openRate, 30.0);
+      assert.equal(extracted.metrics.clickThroughRate, 33.3);
+      assert.equal(extracted.linkBreakdown.length, 1);
+      assert.equal(extracted.linkBreakdown[0].url, 'https://example.com/shop');
+      assert.equal(extracted.recentActivity.length, 1);
+      assert.equal(extracted.recentActivity[0].eventType, 'click');
+    });
+
+    it('45. formatAnalyticsMetrics produces clean formatted percentages and number strings', () => {
+      const formatted = formatAnalyticsMetrics({
+        openRate: 35.54,
+        clickThroughRate: 12.38,
+        clickToDeliveredRate: 8.9,
+        totalOpens: 1250,
+        uniqueOpens: 950,
+        totalClicks: 340,
+        uniqueClicks: 210,
+      });
+
+      assert.equal(formatted.openRateFormatted, '35.5%');
+      assert.equal(formatted.ctrFormatted, '12.4%');
+      assert.equal(formatted.clickToDeliveredFormatted, '8.9%');
+      assert.equal(formatted.totalOpensFormatted, '1,250');
+      assert.equal(formatted.uniqueOpensFormatted, '950');
+      assert.equal(formatted.totalClicksFormatted, '340');
+      assert.equal(formatted.uniqueClicksFormatted, '210');
+    });
+
+    it('46. formatAnalyticsMetrics handles missing, undefined, or non-numeric metrics gracefully', () => {
+      const empty = formatAnalyticsMetrics({});
+      assert.equal(empty.openRateFormatted, '0.0%');
+      assert.equal(empty.ctrFormatted, '0.0%');
+      assert.equal(empty.clickToDeliveredFormatted, '0.0%');
+      assert.equal(empty.totalOpensFormatted, '0');
+      assert.equal(empty.uniqueOpensFormatted, '0');
+
+      const nullMetrics = formatAnalyticsMetrics(null);
+      assert.equal(nullMetrics.openRateFormatted, '0.0%');
+    });
+
+    it('47. CampaignAnalyticsDialog conforms to accessibility standards (dialog role, aria-modal, Escape key)', () => {
+      assert.match(analyticsDialogSource, /role="dialog"/, 'Dialog must declare role="dialog"');
+      assert.match(analyticsDialogSource, /aria-modal="true"/, 'Dialog must declare aria-modal="true"');
+      assert.match(analyticsDialogSource, /aria-labelledby="campaign-analytics-title"/, 'Dialog must declare aria-labelledby');
+      assert.match(analyticsDialogSource, /aria-describedby="campaign-analytics-desc"/, 'Dialog must declare aria-describedby');
+      assert.match(analyticsDialogSource, /e\.key === 'Escape'/, 'Dialog must handle Escape key for dismissal');
+    });
+
+    it('48. CampaignAnalyticsDialog contains refresh mechanism and safe error retry', () => {
+      assert.match(analyticsDialogSource, /refreshTrigger/, 'Dialog must support refreshing metrics');
+      assert.match(analyticsDialogSource, /Retry/, 'Dialog must provide retry capability on error');
+    });
+
+    it('49. CampaignAnalyticsDialog does not leak tracking signing secrets or JWT keys', () => {
+      assert.doesNotMatch(analyticsDialogSource, /TRACKING_SECRET|JWT_SECRET|process\.env/);
     });
   });
 });

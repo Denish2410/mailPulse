@@ -9,6 +9,7 @@ import {
   sendCampaignTestEmail,
   sendCampaign,
   getCampaignDeliveries,
+  getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { testEmailRateLimiter } from '../middleware/testEmailRateLimiter.js';
@@ -54,6 +55,7 @@ router.get('/', validate(getCampaignsQuerySchema), getCampaigns);
 router.get('/:id/readiness', validate(campaignIdParamSchema), getCampaignReadiness);
 
 /**
+/**
  * @route   POST /api/v1/campaigns/:id/test-email
  * @desc    Send a single "[TEST]" copy of a campaign to the authenticated user's own account email.
  *          Never contacts campaign recipients and never modifies the campaign.
@@ -81,6 +83,13 @@ router.post('/:id/send', campaignSendRateLimiter, validate(sendCampaignSchema), 
  * @access  Protected
  */
 router.get('/:id/deliveries', validate(getCampaignDeliveriesSchema), getCampaignDeliveries);
+
+/**
+ * @route   GET /api/v1/campaigns/:id/analytics
+ * @desc    Retrieve open and click tracking analytics for a campaign
+ * @access  Protected
+ */
+router.get('/:id/analytics', validate(campaignIdParamSchema), getCampaignAnalytics);
 
 /**
  * @route   GET /api/v1/campaigns/:id

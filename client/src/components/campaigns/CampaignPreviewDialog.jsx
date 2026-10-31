@@ -60,6 +60,7 @@ export const CampaignPreviewDialog = ({
   onClose,
   onEdit,
   onCampaignUpdated,
+  onViewAnalytics,
 }) => {
   // Readiness evaluation state
   const [readinessData, setReadinessData] = useState(null);
@@ -759,6 +760,18 @@ export const CampaignPreviewDialog = ({
           </span>
 
           <div className="flex items-center justify-end gap-2.5 flex-wrap">
+            {onViewAnalytics && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onViewAnalytics(campaign);
+                }}
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                View Analytics
+              </button>
+            )}
             {isDraft && (
             <button
               type="button"

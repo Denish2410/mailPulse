@@ -399,7 +399,7 @@ The following endpoints will be introduced in subsequent phases:
 #### Analytics Overview (`GET /api/v1/analytics/overview`)
 - **Access**: Protected (Bearer JWT). Every figure is scoped to the authenticated owner.
 - **Query**: `days` = `7` | `30` | `90` (default `30`). Other values return `400`.
-- **Semantics**: `sent`/accepted means the SMTP provider accepted the message. `acceptanceRate` = sent / (sent + failed), one decimal, `null` when nothing finished. Daily buckets are UTC days keyed by `sentAt`/`failedAt`. Opens, clicks and bounces are not tracked yet.
+- **Semantics**: `sent`/accepted means the SMTP provider accepted the message. `acceptanceRate` = sent / (sent + failed), one decimal, `null` when nothing finished. Daily buckets are UTC days keyed by `sentAt`/`failedAt`.
 - **Response Shape (HTTP 200)**:
 ```json
 {
@@ -429,4 +429,61 @@ The following endpoints will be introduced in subsequent phases:
 }
 ```
 - `daily` always contains exactly `days` entries (oldest first, zero-filled). `recentCampaigns` lists up to 5 non-draft campaigns, newest send first.
-- **Planned**: `GET /campaigns/:id` per-campaign metrics, and open/click/bounce tracking.
+
+### Tracking & Engagement Analytics (`/api/v1/tracking` & `/api/v1/campaigns/:id/analytics`)
+
+#### 1. Open Tracking Pixel (`GET /api/v1/tracking/open/:token`)
+- **Access**: Public
+- **Authentication**: None (validated cryptographically via HMAC-SHA256 signature in token)
+- **Response**: HTTP 200 OK with `image/gif` (43-byte 1x1 transparent GIF).
+- **Headers**: Strict anti-cache headers (`Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0`, `Pragma: no-cache`, `Expires: 0`).
+- **Resilience**: If a token is corrupt or tampered with, logs a security warning internally but still serves the transparent 1x1 GIF so recipient email clients never display broken image placeholders.
+
+#### 2. Click Tracking Redirect (`GET /api/v1/tracking/click/:token`)
+- **Access**: Public
+- **Authentication**: None (validated cryptographically via HMAC-SHA256 signature in token)
+- **Response**: HTTP 302 Found redirecting to target URL.
+- **Security**: Open-redirect protection strictly validates that the destination URL adheres to `http:` or `https:`. Malformed, relative, or non-HTTP schemes (`javascript:`, `data:`) return HTTP 400 Bad Request.
+
+#### 3. Campaign Tracking Analytics (`GET /api/v1/campaigns/:id/analytics`)
+- **Access**: Protected (Bearer JWT)
+- **Response Shape (HTTP 200)**:
+```json
+{
+  "success": true,
+  "message": "Campaign analytics retrieved successfully",
+  "data": {
+    "campaignId": "671234567890abcdef123456",
+    "campaignName": "Fall Announcement",
+    "campaignSubject": "Exciting product news",
+    "status": "sent",
+    "totalRecipients": 100,
+    "metrics": {
+      "totalOpens": 45,
+      "uniqueOpens": 32,
+      "openRate": 32.0,
+      "totalClicks": 18,
+      "uniqueClicks": 12,
+      "clickThroughRate": 37.5,
+      "clickToDeliveredRate": 12.0
+    },
+    "linkBreakdown": [
+      {
+        "url": "https://example.com/learn-more",
+        "totalClicks": 12,
+        "uniqueClicks": 8
+      }
+    ],
+    "recentActivity": [
+      {
+        "id": "671234567890abcdef123499",
+        "eventType": "open",
+        "recipientEmail": "user@example.com",
+        "targetUrl": null,
+        "timestamp": "2026-10-31T12:00:00.000Z",
+        "userAgent": "Mozilla/5.0..."
+      }
+    ]
+  }
+}
+```

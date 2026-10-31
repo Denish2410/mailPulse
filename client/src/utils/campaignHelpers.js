@@ -684,6 +684,129 @@ export const describeDeliveryError = (code) => {
   }
 };
 
+/**
+ * Safely extracts and normalizes campaign tracking analytics data.
+ * Gracefully handles null, undefined, or missing nested properties.
+ *
+ * @param {object|null|undefined} responseOrPayload
+ * @returns {{
+ *   campaignId: string,
+ *   campaignName: string,
+ *   campaignSubject: string,
+ *   status: string,
+ *   totalRecipients: number,
+ *   metrics: {
+ *     totalOpens: number,
+ *     uniqueOpens: number,
+ *     openRate: number,
+ *     totalClicks: number,
+ *     uniqueClicks: number,
+ *     clickThroughRate: number,
+ *     clickToDeliveredRate: number
+ *   },
+ *   linkBreakdown: Array<{ url: string, totalClicks: number, uniqueClicks: number }>,
+ *   recentActivity: Array<{ id: string, eventType: string, recipientEmail: string, targetUrl: string|null, timestamp: string, userAgent: string|null }>
+ * }}
+ */
+export const extractAnalyticsData = (responseOrPayload) => {
+  if (!responseOrPayload || typeof responseOrPayload !== 'object') {
+    return {
+      campaignId: '',
+      campaignName: '',
+      campaignSubject: '',
+      status: '',
+      totalRecipients: 0,
+      metrics: {
+        totalOpens: 0,
+        uniqueOpens: 0,
+        openRate: 0,
+        totalClicks: 0,
+        uniqueClicks: 0,
+        clickThroughRate: 0,
+        clickToDeliveredRate: 0,
+      },
+      linkBreakdown: [],
+      recentActivity: [],
+    };
+  }
+
+  let raw = responseOrPayload;
+  if (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) {
+    if (raw.data.data && typeof raw.data.data === 'object' && !Array.isArray(raw.data.data)) {
+      raw = raw.data.data;
+    } else if ('metrics' in raw.data || 'campaignId' in raw.data) {
+      raw = raw.data;
+    }
+  }
+
+  const rawMetrics = raw.metrics && typeof raw.metrics === 'object' ? raw.metrics : {};
+
+  return {
+    campaignId: String(raw.campaignId || ''),
+    campaignName: typeof raw.campaignName === 'string' ? raw.campaignName : '',
+    campaignSubject: typeof raw.campaignSubject === 'string' ? raw.campaignSubject : '',
+    status: typeof raw.status === 'string' ? raw.status : '',
+    totalRecipients: Math.max(0, Number(raw.totalRecipients) || 0),
+    metrics: {
+      totalOpens: Math.max(0, Number(rawMetrics.totalOpens) || 0),
+      uniqueOpens: Math.max(0, Number(rawMetrics.uniqueOpens) || 0),
+      openRate: Math.max(0, Number(rawMetrics.openRate) || 0),
+      totalClicks: Math.max(0, Number(rawMetrics.totalClicks) || 0),
+      uniqueClicks: Math.max(0, Number(rawMetrics.uniqueClicks) || 0),
+      clickThroughRate: Math.max(0, Number(rawMetrics.clickThroughRate) || 0),
+      clickToDeliveredRate: Math.max(0, Number(rawMetrics.clickToDeliveredRate) || 0),
+    },
+    linkBreakdown: Array.isArray(raw.linkBreakdown)
+      ? raw.linkBreakdown
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            url: typeof item.url === 'string' ? item.url : '',
+            totalClicks: Math.max(0, Number(item.totalClicks) || 0),
+            uniqueClicks: Math.max(0, Number(item.uniqueClicks) || 0),
+          }))
+      : [],
+    recentActivity: Array.isArray(raw.recentActivity)
+      ? raw.recentActivity
+          .filter((evt) => evt && typeof evt === 'object')
+          .map((evt) => ({
+            id: String(evt.id || evt._id || ''),
+            eventType: evt.eventType === 'click' ? 'click' : 'open',
+            recipientEmail: typeof evt.recipientEmail === 'string' ? evt.recipientEmail : '',
+            targetUrl: typeof evt.targetUrl === 'string' ? evt.targetUrl : null,
+            timestamp: evt.timestamp || '',
+            userAgent: typeof evt.userAgent === 'string' ? evt.userAgent : null,
+          }))
+      : [],
+  };
+};
+
+/**
+ * Formats raw analytics metrics into human-readable strings.
+ *
+ * @param {object|null|undefined} metrics
+ * @returns {{
+ *   openRateFormatted: string,
+ *   ctrFormatted: string,
+ *   clickToDeliveredFormatted: string,
+ *   totalOpensFormatted: string,
+ *   uniqueOpensFormatted: string,
+ *   totalClicksFormatted: string,
+ *   uniqueClicksFormatted: string
+ * }}
+ */
+export const formatAnalyticsMetrics = (metrics = {}) => {
+  const m = metrics || {};
+  return {
+    openRateFormatted: `${(Number(m.openRate) || 0).toFixed(1)}%`,
+    ctrFormatted: `${(Number(m.clickThroughRate) || 0).toFixed(1)}%`,
+    clickToDeliveredFormatted: `${(Number(m.clickToDeliveredRate) || 0).toFixed(1)}%`,
+    totalOpensFormatted: (Number(m.totalOpens) || 0).toLocaleString(),
+    uniqueOpensFormatted: (Number(m.uniqueOpens) || 0).toLocaleString(),
+    totalClicksFormatted: (Number(m.totalClicks) || 0).toLocaleString(),
+    uniqueClicksFormatted: (Number(m.uniqueClicks) || 0).toLocaleString(),
+  };
+};
+
 export default {
   formatCampaignDate,
   isCampaignEditable,
@@ -705,4 +828,6 @@ export default {
   getTestEmailAvailability,
   formatTestEmailSuccess,
   getTestEmailErrorMessage,
+  extractAnalyticsData,
+  formatAnalyticsMetrics,
 };

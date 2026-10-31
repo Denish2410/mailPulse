@@ -6,6 +6,7 @@ import CampaignsPagination from '../../components/campaigns/CampaignsPagination.
 import DeleteCampaignDialog from '../../components/campaigns/DeleteCampaignDialog.jsx';
 import CampaignFormDialog from '../../components/campaigns/CampaignFormDialog.jsx';
 import CampaignPreviewDialog from '../../components/campaigns/CampaignPreviewDialog.jsx';
+import CampaignAnalyticsDialog from '../../components/campaigns/CampaignAnalyticsDialog.jsx';
 import {
   getCampaigns,
   getCampaignById,
@@ -57,6 +58,10 @@ export const CampaignsPage = () => {
   // Preview & Review modal dialog state
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeCampaignForPreview, setActiveCampaignForPreview] = useState(null);
+
+  // Tracking Analytics modal dialog state
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [activeCampaignForAnalytics, setActiveCampaignForAnalytics] = useState(null);
 
   // Ref to track latest request ID to prevent stale out-of-order race conditions
   const requestIdRef = useRef(0);
@@ -247,6 +252,17 @@ export const CampaignsPage = () => {
     setActiveCampaignForPreview(null);
   };
 
+  // Tracking Analytics handlers
+  const handleOpenAnalyticsDialog = (campaign) => {
+    setActiveCampaignForAnalytics(campaign);
+    setIsAnalyticsOpen(true);
+  };
+
+  const handleCloseAnalyticsDialog = () => {
+    setIsAnalyticsOpen(false);
+    setActiveCampaignForAnalytics(null);
+  };
+
   const hasActiveFilters = Boolean(searchInput.trim());
 
   return (
@@ -372,6 +388,7 @@ export const CampaignsPage = () => {
             onResetFilters={handleResetFilters}
             onNewCampaign={handleOpenCreateDialog}
             onPreviewCampaign={handleOpenPreviewDialog}
+            onViewAnalytics={handleOpenAnalyticsDialog}
             onEditCampaign={handleOpenEditDialog}
             onDeleteCampaign={handleOpenDeleteDialog}
           />
@@ -427,6 +444,20 @@ export const CampaignsPage = () => {
             handleOpenEditDialog(campaignToEdit);
           }}
           onCampaignUpdated={() => setRefreshTrigger((prev) => prev + 1)}
+          onViewAnalytics={(campaignForStats) => {
+            handleClosePreviewDialog();
+            handleOpenAnalyticsDialog(campaignForStats);
+          }}
+        />
+      )}
+
+      {/* Campaign Tracking Analytics Dialog */}
+      {isAnalyticsOpen && activeCampaignForAnalytics && (
+        <CampaignAnalyticsDialog
+          key={activeCampaignForAnalytics?.id || 'analytics'}
+          isOpen={isAnalyticsOpen}
+          campaign={activeCampaignForAnalytics}
+          onClose={handleCloseAnalyticsDialog}
         />
       )}
     </div>

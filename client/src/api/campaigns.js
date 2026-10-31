@@ -183,6 +183,7 @@ export const getCampaignReadiness = async (id, config = {}) => {
 };
 
 /**
+/**
  * Send a single "[TEST]" copy of a campaign to the authenticated user's own account email.
  *
  * The request body is intentionally empty: the server always resolves the destination from
@@ -259,6 +260,19 @@ export const getCampaignDeliveries = async (id, params = {}, config = {}) => {
   return response.data?.data;
 };
 
+/**
+ * Retrieve tracking analytics metrics for a campaign by ID.
+ * Returns open rates, click rates, link performance, and recent activity.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} Campaign tracking summary data
+ */
+export const getCampaignAnalytics = async (id, config = {}) => {
+  const response = await apiClient.get(`/campaigns/${id}/analytics`, config);
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -271,5 +285,6 @@ export default {
   sendCampaignTestEmail,
   sendCampaign,
   getCampaignDeliveries,
+  getCampaignAnalytics,
   getErrorMessage,
 };

@@ -9,6 +9,7 @@ import {
   updateCampaign,
   deleteCampaign,
   getCampaignReadiness,
+  getCampaignAnalytics,
 } from '../src/api/campaigns.js';
 import {
   validateCampaignName,
@@ -430,6 +431,111 @@ describe('Campaigns API Client & Campaign Validation', () => {
           (err) => {
             assert.equal(err.response?.status, 404);
             assert.equal(getErrorMessage(err), 'Campaign not found.');
+            return true;
+          }
+        );
+      });
+    });
+
+    describe('getCampaignAnalytics', () => {
+      it('13. Calls GET /campaigns/:id/analytics and returns tracking summary data', async () => {
+        const campaignId = '671234567890abcdef123456';
+        const mockAnalyticsData = {
+          campaignId,
+          campaignName: 'Test Campaign',
+          campaignSubject: 'Test Subject',
+          status: 'sent',
+          totalRecipients: 50,
+          metrics: {
+            totalOpens: 25,
+            uniqueOpens: 20,
+            openRate: 40.0,
+            totalClicks: 10,
+            uniqueClicks: 8,
+            clickThroughRate: 40.0,
+            clickToDeliveredRate: 16.0,
+          },
+          linkBreakdown: [
+            { url: 'https://example.com/deal', totalClicks: 10, uniqueClicks: 8 },
+          ],
+          recentActivity: [
+            {
+              id: 'evt-1',
+              eventType: 'open',
+              recipientEmail: 'user@example.com',
+              timestamp: '2026-10-31T12:00:00.000Z',
+            },
+          ],
+        };
+
+        let capturedUrl = null;
+        let capturedConfig = null;
+
+        mock.method(apiClient, 'get', async (url, config) => {
+          capturedUrl = url;
+          capturedConfig = config;
+          return {
+            data: {
+              success: true,
+              message: 'Campaign analytics retrieved successfully',
+              data: mockAnalyticsData,
+            },
+          };
+        });
+
+        const result = await getCampaignAnalytics(campaignId);
+
+        assert.equal(capturedUrl, `/campaigns/${campaignId}/analytics`);
+        assert.deepEqual(capturedConfig, {});
+        assert.deepEqual(result, mockAnalyticsData);
+        assert.equal(result.metrics.openRate, 40.0);
+        assert.equal(result.metrics.uniqueOpens, 20);
+        assert.equal(result.linkBreakdown.length, 1);
+      });
+
+      it('14. Forwards optional Axios configuration (signal, custom headers)', async () => {
+        const controller = new AbortController();
+        const customConfig = {
+          signal: controller.signal,
+          headers: { 'X-Tracking-Request': 'true' },
+        };
+
+        let capturedConfig = null;
+
+        mock.method(apiClient, 'get', async (url, config) => {
+          capturedConfig = config;
+          return {
+            data: {
+              success: true,
+              data: { metrics: {} },
+            },
+          };
+        });
+
+        await getCampaignAnalytics('camp-xyz', customConfig);
+
+        assert.equal(capturedConfig.signal, controller.signal);
+        assert.equal(capturedConfig.headers['X-Tracking-Request'], 'true');
+      });
+
+      it('15. Propagates rejected API errors to caller', async () => {
+        const mockError = new Error('Forbidden');
+        mockError.response = {
+          status: 403,
+          data: { success: false, message: 'You do not have permission to view this campaign analytics.' },
+        };
+
+        mock.method(apiClient, 'get', async () => {
+          throw mockError;
+        });
+
+        await assert.rejects(
+          async () => {
+            await getCampaignAnalytics('forbidden-camp-id');
+          },
+          (err) => {
+            assert.equal(err.response?.status, 403);
+            assert.equal(getErrorMessage(err), 'You do not have permission to view this campaign analytics.');
             return true;
           }
         );
