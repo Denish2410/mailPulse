@@ -22,3 +22,4 @@ router.get('/open/:token', trackOpen);
 router.get('/click/:token', trackClick);
 
 export default router;
+
