@@ -285,4 +285,48 @@ sequenceDiagram
 4. **Aggregated Analytics Engine**:
    - MongoDB aggregation pipelines calculate total opens, unique opens, open rate %, total clicks, unique clicks, click-through rate (CTR %), per-link performance, and recent activity timelines.
 
+---
+
+## 10. Unsubscribe & Suppression Management Architecture (Phase 8)
+
+MailPulse implements full-lifecycle unsubscribe handling and suppression enforcement in compliance with CAN-SPAM, GDPR, and RFC 8058:
+
+```mermaid
+flowchart TD
+    subgraph Outbound Dispatch
+        Dispatcher["Campaign Dispatcher"] --> GenToken["Generate HMAC Unsubscribe Token"]
+        GenToken --> InjectContent["Inject {{unsubscribeUrl}} & Compliance Footer"]
+        InjectContent --> AddHeaders["Attach RFC 8058 Headers\n(List-Unsubscribe, List-Unsubscribe-Post)"]
+        AddHeaders --> Transport["Deliver via Transport"]
+    end
+
+    subgraph Inbound Unsubscribe Requests
+        Transport --> Inbox["Recipient Mail Client"]
+        Inbox -->|1-Click Header POST| RFC8058["POST /api/v1/tracking/unsubscribe/:token\n(List-Unsubscribe=One-Click)"]
+        Inbox -->|Footer Link Click| LandingPage["GET /api/v1/tracking/unsubscribe/:token\n(HTML Confirmation Page)"]
+        LandingPage -->|Form Confirm| RFC8058
+    end
+
+    subgraph Suppression Engine
+        RFC8058 --> MarkContact["Contact.isUnsubscribed = true"]
+        RFC8058 --> UpsertSuppression["Suppression Record (userId + email)"]
+        RFC8058 --> LogTelemetry["TrackingEvent (type: 'unsubscribe')"]
+    end
+
+    subgraph Enforcement & Readiness
+        UpsertSuppression --> ReadinessCheck["Campaign Readiness:\nFilters out suppressed contacts"]
+        UpsertSuppression --> DispatchCheck["Dispatcher:\nSkips suppressed deliveries (SUPPRESSED)"]
+    end
+```
+
+### Key Security & Architectural Principles:
+1. **RFC 8058 One-Click Native Headers**:
+   - Outbound campaign emails include `List-Unsubscribe: <https://.../api/v1/tracking/unsubscribe/:token>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
+   - Major email providers (Gmail, Yahoo, Apple Mail) render native "Unsubscribe" buttons at the top of incoming messages that trigger silent, one-click opt-out without human login friction.
+2. **Multi-Tenant Suppression Isolation**:
+   - The `Suppression` collection maintains a unique compound index on `{ userId: 1, email: 1 }`.
+   - If an account owner deletes a contact and subsequently re-adds or re-imports the same email, the recipient's suppression status remains permanently enforced for that account.
+3. **Double-Layered Dispatch & Readiness Protection**:
+   - **Readiness Gate**: `evaluateCampaignReadiness` queries active suppressions and excludes unsubscribed contacts from eligible recipients, reporting `unsubscribedRecipientsCount` in the summary.
+   - **Dispatcher Gate**: In `processNextDelivery`, a real-time check verifies that neither the contact nor the email address has opted out between campaign creation and send execution. Suppressed recipients are cleanly marked `failed` with error code `SUPPRESSED` without invoking the SMTP transport.
 

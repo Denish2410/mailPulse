@@ -14,16 +14,22 @@ import {
   TrackingTokenError,
   createTrackingToken,
   verifyTrackingToken,
+  createUnsubscribeToken,
+  verifyUnsubscribeToken,
   injectOpenTrackingPixel,
   rewriteLinksForClickTracking,
+  injectUnsubscribeLinks,
   prepareTrackedEmailHtml,
   recordOpenEvent,
   recordClickEvent,
+  recordUnsubscribeEvent,
   getCampaignTrackingSummary,
 } from '../src/services/tracking.service.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import Campaign from '../src/models/Campaign.js';
 import User from '../src/models/User.js';
+import Contact from '../src/models/Contact.js';
+import Suppression from '../src/models/Suppression.js';
 import { connectDB } from '../src/config/db.js';
 
 describe('Tracking Service Tests (server/src/services/tracking.service.js)', () => {
@@ -397,6 +403,141 @@ describe('Tracking Service Tests (server/src/services/tracking.service.js)', () 
           message: 'Campaign not found.',
         }
       );
+    });
+  });
+
+  describe('6. Unsubscribe Tokens & Link Injection', () => {
+    it('creates and verifies a valid HMAC unsubscribe token', () => {
+      const payload = {
+        campaignId: testCampaign._id,
+        recipientId: new mongoose.Types.ObjectId(),
+        recipientEmail: 'Recipient@Example.com',
+        userId: testUser._id,
+      };
+
+      const token = createUnsubscribeToken(payload, testSecret);
+      assert.ok(typeof token === 'string');
+      assert.ok(token.includes('.'));
+
+      const verified = verifyUnsubscribeToken(token, testSecret);
+      assert.equal(verified.campaignId, testCampaign._id.toString());
+      assert.equal(verified.recipientEmail, 'recipient@example.com');
+      assert.equal(verified.userId, testUser._id.toString());
+      assert.equal(verified.eventType, 'unsubscribe');
+    });
+
+    it('rejects tampered unsubscribe token signature', () => {
+      const token = createUnsubscribeToken(
+        { recipientEmail: 'a@example.com', userId: testUser._id },
+        testSecret
+      );
+      const [payloadPart, sigPart] = token.split('.');
+      const tampered = `${payloadPart}.${sigPart.slice(0, -2)}xx`;
+
+      assert.throws(() => verifyUnsubscribeToken(tampered, testSecret), {
+        name: 'TrackingTokenError',
+        message: 'Invalid unsubscribe token signature',
+      });
+    });
+
+    it('replaces {{unsubscribeUrl}} and {{unsubscribe}} in HTML and text', () => {
+      const html = '<p>Hello <a href="{{unsubscribeUrl}}">Unsub</a> or {{unsubscribe}}</p>';
+      const text = 'Hello visit {{unsubscribeUrl}} to leave';
+      const unsubUrl = 'https://mailpulse.local/api/v1/tracking/unsubscribe/tok123';
+
+      const result = injectUnsubscribeLinks(html, text, {
+        unsubscribeUrl: unsubUrl,
+        appendToText: true,
+      });
+      assert.ok(!result.html.includes('{{unsubscribeUrl}}'));
+      assert.ok(!result.html.includes('{{unsubscribe}}'));
+      assert.ok(result.html.includes(unsubUrl));
+      assert.ok(result.text.includes(unsubUrl));
+      assert.ok(!result.text.includes('{{unsubscribeUrl}}'));
+    });
+
+    it('appends compliant footer if no placeholder is present', () => {
+      const html = '<html><body><h1>Hello World</h1></body></html>';
+      const text = 'Hello World plain text';
+      const unsubUrl = 'https://mailpulse.local/api/v1/tracking/unsubscribe/tok123';
+
+      const result = injectUnsubscribeLinks(html, text, {
+        unsubscribeUrl: unsubUrl,
+        appendToText: true,
+      });
+      assert.ok(result.html.includes('mailpulse-unsubscribe-footer'));
+      assert.ok(result.html.includes(unsubUrl));
+      assert.ok(result.html.includes('</body>'));
+      assert.ok(result.text.includes('To unsubscribe, please visit: ' + unsubUrl));
+    });
+
+    it('prepareTrackedEmailHtml includes unsubscribe footer when unsubscribeUrl option is provided', () => {
+      const html = '<p>Check <a href="https://example.com/shop">shop</a></p>';
+      const unsubUrl = 'https://mailpulse.local/api/v1/tracking/unsubscribe/tok123';
+
+      const result = prepareTrackedEmailHtml(html, {
+        campaignId: testCampaign._id,
+        recipientEmail: 'user@example.com',
+        baseUrl: 'http://localhost:5000',
+        unsubscribeUrl: unsubUrl,
+      });
+
+      assert.ok(result.includes('/api/v1/tracking/open/'));
+      assert.ok(result.includes('/api/v1/tracking/click/'));
+      assert.ok(result.includes(unsubUrl));
+    });
+  });
+
+  describe('7. Unsubscribe Event Recording & Suppression Sync', () => {
+    it('marks contact unsubscribed and creates a persistent suppression record', async () => {
+      if (!isDbConnected) return;
+
+      const testEmail = `optout-${Date.now()}@example.com`;
+      const contact = await Contact.create({
+        userId: testUser._id,
+        name: 'Unsub Tester',
+        email: testEmail,
+      });
+
+      const token = createUnsubscribeToken({
+        campaignId: testCampaign._id,
+        recipientId: contact._id,
+        recipientEmail: testEmail,
+        userId: testUser._id,
+      });
+
+      const outcome = await recordUnsubscribeEvent(token, {
+        ip: '192.168.1.1',
+        userAgent: 'TestBrowser',
+        reason: 'Too frequent',
+        source: 'link',
+      });
+
+      assert.equal(outcome.success, true);
+      assert.equal(outcome.email, testEmail);
+
+      // Verify Contact is marked unsubscribed
+      const updatedContact = await Contact.findById(contact._id);
+      assert.equal(updatedContact.isUnsubscribed, true);
+      assert.ok(updatedContact.unsubscribedAt instanceof Date);
+      assert.equal(updatedContact.unsubscribeReason, 'Too frequent');
+
+      // Verify Suppression record is persisted
+      const suppression = await Suppression.findOne({
+        userId: testUser._id,
+        email: testEmail,
+      });
+      assert.ok(suppression);
+      assert.equal(suppression.reason, 'Too frequent');
+      assert.equal(suppression.source, 'link');
+
+      // Verify TrackingEvent was logged
+      const trackingEvt = await TrackingEvent.findOne({
+        campaignId: testCampaign._id,
+        recipientEmail: testEmail,
+        eventType: 'unsubscribe',
+      });
+      assert.ok(trackingEvt);
     });
   });
 });

@@ -237,6 +237,7 @@ export const extractReadinessData = (responseOrPayload) => {
   const totalRecipients = Math.max(0, Number(rawSummary.totalRecipients) || 0);
   const eligibleRecipientsCount = Math.max(0, Number(rawSummary.eligibleRecipientsCount) || 0);
   const missingRecipientsCount = Math.max(0, Number(rawSummary.missingRecipientsCount) || 0);
+  const unsubscribedRecipientsCount = Math.max(0, Number(rawSummary.unsubscribedRecipientsCount) || 0);
   const hasTextContent = Boolean(rawSummary.hasTextContent);
   const hasHtmlContent = Boolean(rawSummary.hasHtmlContent);
   const status = typeof rawSummary.status === 'string' ? rawSummary.status.trim() : '';
@@ -260,6 +261,7 @@ export const extractReadinessData = (responseOrPayload) => {
       eligibleRecipients,
       eligibleRecipientsCount,
       missingRecipientsCount,
+      unsubscribedRecipientsCount,
       hasTextContent,
       hasHtmlContent,
       status,
@@ -367,6 +369,7 @@ export const formatReadinessSummary = (summaryOrPayload) => {
   const eligibleCount = Math.max(0, Number(summary.eligibleRecipientsCount) || 0);
   const totalCount = Math.max(0, Number(summary.totalRecipients) || 0);
   const missingCount = Math.max(0, Number(summary.missingRecipientsCount) || 0);
+  const unsubscribedCount = Math.max(0, Number(summary.unsubscribedRecipientsCount) || 0);
   const hasText = Boolean(summary.hasTextContent);
   const hasHtml = Boolean(summary.hasHtmlContent);
 
@@ -384,6 +387,14 @@ export const formatReadinessSummary = (summaryOrPayload) => {
     missingLabel = `${missingCount} recipients unavailable`;
   }
 
+  // Unsubscribed label
+  let unsubscribedLabel = '';
+  if (unsubscribedCount === 1) {
+    unsubscribedLabel = '1 recipient unsubscribed';
+  } else if (unsubscribedCount > 1) {
+    unsubscribedLabel = `${unsubscribedCount} recipients unsubscribed`;
+  }
+
   // Content type label
   let contentLabel = 'No content';
   if (hasText && hasHtml) {
@@ -397,10 +408,12 @@ export const formatReadinessSummary = (summaryOrPayload) => {
   return {
     recipientsLabel,
     missingLabel,
+    unsubscribedLabel,
     contentLabel,
     eligibleRecipientsCount: eligibleCount,
     totalRecipients: totalCount,
     missingRecipientsCount: missingCount,
+    unsubscribedRecipientsCount: unsubscribedCount,
     hasTextContent: hasText,
     hasHtmlContent: hasHtml,
     hasContent: hasText || hasHtml,
@@ -755,6 +768,8 @@ export const extractAnalyticsData = (responseOrPayload) => {
       uniqueClicks: Math.max(0, Number(rawMetrics.uniqueClicks) || 0),
       clickThroughRate: Math.max(0, Number(rawMetrics.clickThroughRate) || 0),
       clickToDeliveredRate: Math.max(0, Number(rawMetrics.clickToDeliveredRate) || 0),
+      totalUnsubscribes: Math.max(0, Number(rawMetrics.totalUnsubscribes) || 0),
+      unsubscribeRate: Math.max(0, Number(rawMetrics.unsubscribeRate) || 0),
     },
     linkBreakdown: Array.isArray(raw.linkBreakdown)
       ? raw.linkBreakdown
@@ -770,7 +785,7 @@ export const extractAnalyticsData = (responseOrPayload) => {
           .filter((evt) => evt && typeof evt === 'object')
           .map((evt) => ({
             id: String(evt.id || evt._id || ''),
-            eventType: evt.eventType === 'click' ? 'click' : 'open',
+            eventType: ['click', 'unsubscribe'].includes(evt.eventType) ? evt.eventType : 'open',
             recipientEmail: typeof evt.recipientEmail === 'string' ? evt.recipientEmail : '',
             targetUrl: typeof evt.targetUrl === 'string' ? evt.targetUrl : null,
             timestamp: evt.timestamp || '',
@@ -791,7 +806,9 @@ export const extractAnalyticsData = (responseOrPayload) => {
  *   totalOpensFormatted: string,
  *   uniqueOpensFormatted: string,
  *   totalClicksFormatted: string,
- *   uniqueClicksFormatted: string
+ *   uniqueClicksFormatted: string,
+ *   totalUnsubscribesFormatted: string,
+ *   unsubscribeRateFormatted: string
  * }}
  */
 export const formatAnalyticsMetrics = (metrics = {}) => {
@@ -804,6 +821,8 @@ export const formatAnalyticsMetrics = (metrics = {}) => {
     uniqueOpensFormatted: (Number(m.uniqueOpens) || 0).toLocaleString(),
     totalClicksFormatted: (Number(m.totalClicks) || 0).toLocaleString(),
     uniqueClicksFormatted: (Number(m.uniqueClicks) || 0).toLocaleString(),
+    totalUnsubscribesFormatted: (Number(m.totalUnsubscribes) || 0).toLocaleString(),
+    unsubscribeRateFormatted: `${(Number(m.unsubscribeRate) || 0).toFixed(1)}%`,
   };
 };
 

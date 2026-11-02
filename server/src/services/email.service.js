@@ -158,11 +158,29 @@ export const validateMessage = (message) => {
     throw new InvalidMessageError('Email must contain non-empty text content or HTML content.');
   }
 
+  // 4. Custom Headers Validation (e.g. List-Unsubscribe, List-Unsubscribe-Post)
+  const cleanHeaders = {};
+  if (message.headers !== undefined) {
+    if (typeof message.headers !== 'object' || message.headers === null || Array.isArray(message.headers)) {
+      throw new InvalidMessageError('Custom headers must be an object if provided.');
+    }
+    for (const [key, val] of Object.entries(message.headers)) {
+      if (typeof key !== 'string' || !key.trim() || /[\r\n]/.test(key)) {
+        throw new InvalidMessageError('Header names must not contain line breaks or carriage returns.');
+      }
+      if (typeof val !== 'string' || /[\r\n]/.test(val)) {
+        throw new InvalidMessageError('Header values must not contain line breaks or carriage returns.');
+      }
+      cleanHeaders[key.trim()] = val.trim();
+    }
+  }
+
   return {
     to: normalizedTo,
     subject: trimmedSubject,
     text: cleanText,
     html: cleanHtml,
+    headers: cleanHeaders,
   };
 };
 
@@ -415,6 +433,7 @@ export const createEmailService = ({ transport, from, env = process.env } = {}) 
         subject: validated.subject,
         text: validated.text,
         html: validated.html,
+        ...(Object.keys(validated.headers).length > 0 && { headers: validated.headers }),
       };
 
       // 5. Send via transport with sanitized error handling

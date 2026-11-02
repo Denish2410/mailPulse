@@ -1,10 +1,15 @@
 import { Router } from 'express';
-import { trackOpen, trackClick } from '../controllers/tracking.controller.js';
+import {
+  trackOpen,
+  trackClick,
+  getUnsubscribe,
+  processUnsubscribe,
+} from '../controllers/tracking.controller.js';
 
 const router = Router();
 
 /**
- * Public email tracking routes (no authentication required)
+ * Public email tracking & unsubscribe routes (no authentication required)
  */
 
 /**
@@ -20,6 +25,20 @@ router.get('/open/:token', trackOpen);
  * @access  Public
  */
 router.get('/click/:token', trackClick);
+
+/**
+ * @route   GET /api/v1/tracking/unsubscribe/:token
+ * @desc    Display unsubscribe confirmation landing page or validate token
+ * @access  Public
+ */
+router.get('/unsubscribe/:token', getUnsubscribe);
+
+/**
+ * @route   POST /api/v1/tracking/unsubscribe/:token
+ * @desc    Process unsubscribe request (RFC 8058 One-Click, web form, or API)
+ * @access  Public
+ */
+router.post('/unsubscribe/:token', processUnsubscribe);
 
 export default router;
 

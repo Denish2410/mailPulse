@@ -246,7 +246,7 @@ export const CampaignAnalyticsDialog = ({
               </div>
 
               {/* Key Metrics Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* 1. Open Rate Card */}
                 <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800">
                   <div className="flex items-center justify-between mb-2">
@@ -290,7 +290,7 @@ export const CampaignAnalyticsDialog = ({
                 </div>
 
                 {/* 3. Click-to-Delivered Rate Card */}
-                <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 sm:col-span-2 lg:col-span-1">
+                <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
                       Click-to-Delivered
@@ -305,7 +305,28 @@ export const CampaignAnalyticsDialog = ({
                       : '0.0%'}
                   </div>
                   <div className="text-xs text-slate-500 mt-1">
-                    of {totalRecipients.toLocaleString()} total target recipients
+                    of {totalRecipients.toLocaleString()} total recipients
+                  </div>
+                </div>
+
+                {/* 4. Unsubscribe Rate Card */}
+                <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                      Unsubscribe Rate
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      {formatted.unsubscribeRateFormatted}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-bold text-white mt-1">
+                    {formatted.totalUnsubscribesFormatted}
+                    <span className="text-xs font-normal text-slate-400 ml-1.5">
+                      opt-outs
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    opt-out requests recorded
                   </div>
                 </div>
               </div>
@@ -381,6 +402,8 @@ export const CampaignAnalyticsDialog = ({
                               className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider shrink-0 ${
                                 event.eventType === 'click'
                                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : event.eventType === 'unsubscribe'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                                   : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
                               }`}
                             >

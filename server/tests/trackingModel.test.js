@@ -75,7 +75,7 @@ describe('TrackingEvent Model Tests (server/src/models/TrackingEvent.js)', () =>
       assert.ok(err.errors.eventType, 'eventType is required');
     });
 
-    it('fails validation when eventType is not "open" or "click"', () => {
+    it('fails validation when eventType is not "open", "click", or "unsubscribe"', () => {
       const invalidType = new TrackingEvent({
         campaignId: new mongoose.Types.ObjectId(),
         recipientEmail: 'user@example.com',
@@ -85,7 +85,7 @@ describe('TrackingEvent Model Tests (server/src/models/TrackingEvent.js)', () =>
       const err = invalidType.validateSync();
       assert.ok(err);
       assert.ok(err.errors.eventType);
-      assert.match(err.errors.eventType.message, /Event type must be either open or click/);
+      assert.match(err.errors.eventType.message, /Event type must be open, click, or unsubscribe/);
     });
 
     it('normalizes recipientEmail by trimming and lowercasing', () => {

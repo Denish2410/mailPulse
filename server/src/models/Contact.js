@@ -38,6 +38,21 @@ const contactSchema = new mongoose.Schema(
         'Please provide a valid email address',
       ],
     },
+    isUnsubscribed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    unsubscribedAt: {
+      type: Date,
+      default: null,
+    },
+    unsubscribeReason: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: [250, 'Unsubscribe reason cannot exceed 250 characters'],
+    },
   },
   {
     timestamps: true,
@@ -54,6 +69,11 @@ contactSchema.index({ userId: 1, email: 1 }, { unique: true });
  * Compound query & sort index: Optimizes sorted list retrieval scoped to an owner.
  */
 contactSchema.index({ userId: 1, createdAt: -1 });
+
+/**
+ * Compound query index: Optimizes filtering of subscribed vs. unsubscribed contacts per owner.
+ */
+contactSchema.index({ userId: 1, isUnsubscribed: 1 });
 
 // Prevent model overwrite in development watch and test runners
 const Contact = mongoose.models.Contact || mongoose.model('Contact', contactSchema);

@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import TrackingEvent from '../models/TrackingEvent.js';
 import Campaign from '../models/Campaign.js';
+import Contact from '../models/Contact.js';
+import Suppression from '../models/Suppression.js';
 import { AppError } from '../middleware/errorHandler.js';
 
 /**
@@ -63,8 +65,8 @@ export const createTrackingToken = (payload, secret) => {
   if (!recipientEmail) {
     throw new Error('recipientEmail is required in tracking payload');
   }
-  if (!['open', 'click'].includes(eventType)) {
-    throw new Error('eventType must be open or click');
+  if (!['open', 'click', 'unsubscribe'].includes(eventType)) {
+    throw new Error('eventType must be open, click, or unsubscribe');
   }
   if (eventType === 'click' && !targetUrl) {
     throw new Error('targetUrl is required for click tracking tokens');
@@ -72,10 +74,11 @@ export const createTrackingToken = (payload, secret) => {
 
   // Compact payload structure
   const data = {
-    c: campaignId.toString(),
+    c: campaignId ? campaignId.toString() : null,
     r: recipientId ? recipientId.toString() : null,
     e: recipientEmail.trim().toLowerCase(),
     t: eventType,
+    ...(payload.userId && { w: payload.userId.toString() }),
     ...(targetUrl && { u: targetUrl }),
   };
 
@@ -137,10 +140,108 @@ export const verifyTrackingToken = (token, secret) => {
       recipientEmail: parsed.e,
       eventType: parsed.t,
       targetUrl: parsed.u || null,
+      ...(parsed.w && { userId: parsed.w }),
     };
   } catch (err) {
     if (err instanceof TrackingTokenError) throw err;
     throw new TrackingTokenError(`Failed to parse tracking token payload: ${err.message}`);
+  }
+};
+
+/**
+ * Generate a tamper-proof, URL-safe unsubscribe token using HMAC-SHA256.
+ *
+ * @param {object} payload
+ * @param {string} [payload.campaignId] - Optional campaign ID
+ * @param {string} [payload.recipientId] - Optional contact ID
+ * @param {string} payload.recipientEmail - Recipient email
+ * @param {string} payload.userId - Account owner user ID
+ * @param {string} [secret] - Optional secret override
+ * @returns {string} URL-safe signed unsubscribe token
+ */
+export const createUnsubscribeToken = (payload, secret) => {
+  if (!payload || typeof payload !== 'object') {
+    throw new TypeError('Unsubscribe payload must be a non-null object');
+  }
+
+  const { campaignId, recipientId, recipientEmail, userId } = payload;
+
+  if (!recipientEmail || typeof recipientEmail !== 'string' || !recipientEmail.trim()) {
+    throw new Error('recipientEmail is required in unsubscribe payload');
+  }
+  if (!userId) {
+    throw new Error('userId is required in unsubscribe payload');
+  }
+
+  const data = {
+    c: campaignId ? campaignId.toString() : null,
+    r: recipientId ? recipientId.toString() : null,
+    e: recipientEmail.trim().toLowerCase(),
+    w: userId.toString(),
+    t: 'unsubscribe',
+  };
+
+  const jsonStr = JSON.stringify(data);
+  const encodedPayload = Buffer.from(jsonStr, 'utf8').toString('base64url');
+
+  const resolvedSecret = getTrackingSecret(secret);
+  const signature = crypto
+    .createHmac('sha256', resolvedSecret)
+    .update(encodedPayload)
+    .digest('base64url');
+
+  return `${encodedPayload}.${signature}`;
+};
+
+/**
+ * Verify and decode an HMAC-signed unsubscribe token.
+ *
+ * @param {string} token - Signed token
+ * @param {string} [secret] - Optional secret override
+ * @returns {{ campaignId: string|null, recipientId: string|null, recipientEmail: string, userId: string, eventType: 'unsubscribe' }}
+ * @throws {TrackingTokenError}
+ */
+export const verifyUnsubscribeToken = (token, secret) => {
+  if (typeof token !== 'string' || !token.includes('.')) {
+    throw new TrackingTokenError('Invalid unsubscribe token format');
+  }
+
+  const [encodedPayload, signature] = token.split('.');
+  if (!encodedPayload || !signature) {
+    throw new TrackingTokenError('Malformed unsubscribe token parts');
+  }
+
+  const resolvedSecret = getTrackingSecret(secret);
+  const expectedSignature = crypto
+    .createHmac('sha256', resolvedSecret)
+    .update(encodedPayload)
+    .digest('base64url');
+
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+
+  if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+    throw new TrackingTokenError('Invalid unsubscribe token signature');
+  }
+
+  try {
+    const jsonStr = Buffer.from(encodedPayload, 'base64url').toString('utf8');
+    const parsed = JSON.parse(jsonStr);
+
+    if (!parsed.e || !parsed.w || parsed.t !== 'unsubscribe') {
+      throw new TrackingTokenError('Missing required claims in unsubscribe token');
+    }
+
+    return {
+      campaignId: parsed.c || null,
+      recipientId: parsed.r || null,
+      recipientEmail: parsed.e,
+      userId: parsed.w,
+      eventType: 'unsubscribe',
+    };
+  } catch (err) {
+    if (err instanceof TrackingTokenError) throw err;
+    throw new TrackingTokenError(`Failed to parse unsubscribe token payload: ${err.message}`);
   }
 };
 
@@ -234,15 +335,74 @@ export const rewriteLinksForClickTracking = (
 };
 
 /**
- * Combines link rewriting and open-pixel injection in a single operation.
+ * Injects unsubscribe links into HTML and plain text email contents.
+ *
+ * Supports {{unsubscribeUrl}} and {{unsubscribe}} template merge tags.
+ * If no placeholder is found in the HTML, appends a compliant, accessible footer.
+ * If text content is present and lacks a placeholder, appends an unsubscribe link.
+ *
+ * @param {string} html - HTML email body
+ * @param {string} text - Plain text email body
+ * @param {object} options
+ * @param {string} options.unsubscribeUrl - Fully qualified unsubscribe link
+ * @returns {{ html: string, text: string }}
+ */
+export const injectUnsubscribeLinks = (html, text, { unsubscribeUrl, appendToText = false } = {}) => {
+  if (!unsubscribeUrl || typeof unsubscribeUrl !== 'string') {
+    throw new TypeError('unsubscribeUrl is required');
+  }
+
+  let updatedHtml = typeof html === 'string' ? html : '';
+  let updatedText = typeof text === 'string' ? text : '';
+
+  const tagPattern = /\{\{\s*(?:unsubscribeUrl|unsubscribe)\s*\}\}/gi;
+
+  // 1. Process HTML
+  if (updatedHtml) {
+    if (tagPattern.test(updatedHtml)) {
+      updatedHtml = updatedHtml.replace(tagPattern, unsubscribeUrl);
+    } else {
+      const footer = `<div class="mailpulse-unsubscribe-footer" style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #6b7280; font-family: sans-serif;">
+  <p style="margin: 0;">Don't want to receive these emails? <a href="${unsubscribeUrl}" style="color: #4b5563; text-decoration: underline;">Unsubscribe here</a>.</p>
+</div>`;
+      if (/<\/body>/i.test(updatedHtml)) {
+        updatedHtml = updatedHtml.replace(/<\/body>/i, `${footer}\n</body>`);
+      } else {
+        updatedHtml = `${updatedHtml}\n${footer}`;
+      }
+    }
+  }
+
+  // 2. Process Plain Text
+  if (updatedText) {
+    if (tagPattern.test(updatedText)) {
+      updatedText = updatedText.replace(tagPattern, unsubscribeUrl);
+    } else if (appendToText) {
+      updatedText = `${updatedText}\n\n---\nTo unsubscribe, please visit: ${unsubscribeUrl}`;
+    }
+  }
+
+  return { html: updatedHtml, text: updatedText };
+};
+
+/**
+ * Combines link rewriting, unsubscribe injection, and open-pixel injection in a single operation.
  *
  * @param {string} htmlContent
  * @param {object} options
  * @returns {string} Fully tracked HTML content
  */
-export const prepareTrackedEmailHtml = (htmlContent, options) => {
-  const withRewrittenLinks = rewriteLinksForClickTracking(htmlContent, options);
-  return injectOpenTrackingPixel(withRewrittenLinks, options);
+export const prepareTrackedEmailHtml = (htmlContent, options = {}) => {
+  let processedHtml = rewriteLinksForClickTracking(htmlContent, options);
+
+  if (options.unsubscribeUrl) {
+    const unsubResult = injectUnsubscribeLinks(processedHtml, '', {
+      unsubscribeUrl: options.unsubscribeUrl,
+    });
+    processedHtml = unsubResult.html;
+  }
+
+  return injectOpenTrackingPixel(processedHtml, options);
 };
 
 /**
@@ -326,6 +486,90 @@ export const recordClickEvent = async (token, { ip, userAgent } = {}, secret) =>
 };
 
 /**
+ * Records an unsubscribe event, updates Contact, upserts Suppression record, and logs TrackingEvent.
+ *
+ * @param {string|object} tokenOrPayload - Token string or decoded payload
+ * @param {object} [metadata]
+ * @param {string} [metadata.ip]
+ * @param {string} [metadata.userAgent]
+ * @param {string} [metadata.reason]
+ * @param {'link'|'one-click-header'|'admin'|'import'} [metadata.source='link']
+ * @returns {Promise<{ success: boolean, email: string, isNewSuppression: boolean }>}
+ */
+export const recordUnsubscribeEvent = async (tokenOrPayload, metadata = {}) => {
+  const payload =
+    typeof tokenOrPayload === 'string'
+      ? verifyUnsubscribeToken(tokenOrPayload)
+      : tokenOrPayload;
+
+  if (!payload || !payload.recipientEmail || !payload.userId) {
+    throw new TrackingTokenError('Invalid unsubscribe payload: recipientEmail and userId are required');
+  }
+
+  const { recipientEmail, userId, campaignId, recipientId } = payload;
+  const { ip, userAgent, reason, source = 'link' } = metadata;
+  const now = new Date();
+  const normalizedEmail = recipientEmail.toLowerCase().trim();
+
+  // 1. Update Contact if exists for this owner
+  const contactQuery = recipientId && mongoose.isValidObjectId(recipientId)
+    ? { _id: recipientId, userId }
+    : { userId, email: normalizedEmail };
+
+  await Contact.updateMany(
+    contactQuery,
+    {
+      $set: {
+        isUnsubscribed: true,
+        unsubscribedAt: now,
+        ...(reason && { unsubscribeReason: String(reason).slice(0, 250) }),
+      },
+    }
+  );
+
+  // 2. Upsert Suppression record to persist across future contact re-creations
+  const suppressionResult = await Suppression.updateOne(
+    { userId, email: normalizedEmail },
+    {
+      $setOnInsert: {
+        userId,
+        email: normalizedEmail,
+        campaignId: campaignId && mongoose.isValidObjectId(campaignId) ? campaignId : null,
+        reason: reason ? String(reason).slice(0, 250) : null,
+        source: ['link', 'one-click-header', 'admin', 'import'].includes(source) ? source : 'link',
+        createdAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  // 3. Record TrackingEvent for auditing and campaign analytics
+  if (campaignId && mongoose.isValidObjectId(campaignId)) {
+    try {
+      await TrackingEvent.create({
+        campaignId,
+        recipientId: recipientId && mongoose.isValidObjectId(recipientId) ? recipientId : null,
+        recipientEmail: normalizedEmail,
+        eventType: 'unsubscribe',
+        ip: ip ? String(ip).slice(0, 100) : null,
+        userAgent: userAgent ? String(userAgent).slice(0, 500) : null,
+        timestamp: now,
+      });
+    } catch (eventErr) {
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn(`[Tracking] Failed to write TrackingEvent for unsubscribe: ${eventErr.message}`);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    email: normalizedEmail,
+    isNewSuppression: Boolean(suppressionResult.upsertedCount > 0),
+  };
+};
+
+/**
  * Retrieve comprehensive campaign tracking analytics and performance summary.
  *
  * @param {string|mongoose.Types.ObjectId} campaignId
@@ -354,7 +598,7 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
   const objectIdCampaign = new mongoose.Types.ObjectId(campaignId.toString());
 
   // Aggregate metrics using MongoDB pipeline
-  const [openStats, clickStats, linkStats, recentEvents] = await Promise.all([
+  const [openStats, clickStats, linkStats, recentEvents, unsubscribeStats] = await Promise.all([
     // 1. Open metrics: total & unique opens
     TrackingEvent.aggregate([
       { $match: { campaignId: objectIdCampaign, eventType: 'open' } },
@@ -418,12 +662,16 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
       .sort({ timestamp: -1 })
       .limit(20)
       .lean(),
+
+    // 5. Unsubscribe metrics
+    TrackingEvent.countDocuments({ campaignId: objectIdCampaign, eventType: 'unsubscribe' }),
   ]);
 
   const totalOpens = openStats[0]?.totalOpens || 0;
   const uniqueOpens = openStats[0]?.uniqueOpens || 0;
   const totalClicks = clickStats[0]?.totalClicks || 0;
   const uniqueClicks = clickStats[0]?.uniqueClicks || 0;
+  const totalUnsubscribes = typeof unsubscribeStats === 'number' ? unsubscribeStats : 0;
 
   // Rate calculations
   const openRate =
@@ -432,6 +680,8 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
     totalRecipients > 0 ? Number(((uniqueClicks / totalRecipients) * 100).toFixed(1)) : 0;
   const clickThroughRate =
     uniqueOpens > 0 ? Number(((uniqueClicks / uniqueOpens) * 100).toFixed(1)) : 0;
+  const unsubscribeRate =
+    totalRecipients > 0 ? Number(((totalUnsubscribes / totalRecipients) * 100).toFixed(1)) : 0;
 
   return {
     campaignId: campaign._id.toString(),
@@ -447,6 +697,8 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
       uniqueClicks,
       clickThroughRate,
       clickToDeliveredRate,
+      totalUnsubscribes,
+      unsubscribeRate,
     },
     linkBreakdown: linkStats,
     recentActivity: recentEvents.map((evt) => ({
@@ -465,11 +717,15 @@ export default {
   TrackingTokenError,
   createTrackingToken,
   verifyTrackingToken,
+  createUnsubscribeToken,
+  verifyUnsubscribeToken,
   injectOpenTrackingPixel,
   rewriteLinksForClickTracking,
+  injectUnsubscribeLinks,
   prepareTrackedEmailHtml,
   recordOpenEvent,
   recordClickEvent,
+  recordUnsubscribeEvent,
   getCampaignTrackingSummary,
 };
 

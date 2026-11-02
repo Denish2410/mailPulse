@@ -465,7 +465,9 @@ The following endpoints will be introduced in subsequent phases:
       "totalClicks": 18,
       "uniqueClicks": 12,
       "clickThroughRate": 37.5,
-      "clickToDeliveredRate": 12.0
+      "clickToDeliveredRate": 12.0,
+      "totalUnsubscribes": 2,
+      "unsubscribeRate": 2.0
     },
     "linkBreakdown": [
       {
@@ -487,3 +489,25 @@ The following endpoints will be introduced in subsequent phases:
   }
 }
 ```
+
+#### 4. Unsubscribe Confirmation Page (`GET /api/v1/tracking/unsubscribe/:token`)
+- **Access**: Public
+- **Authentication**: Cryptographically verified via HMAC-SHA256 signature in token
+- **Response**:
+  - `Accept: text/html`: Serves a clean, mobile-responsive HTML confirmation page prompting the recipient to confirm opt-out with a single click.
+  - `Accept: application/json` or `?format=json`: Returns JSON `{ success: true, email: "user@example.com", message: "Unsubscribe token is valid" }`.
+- **Error Codes**: `400` if the token is malformed, has an invalid signature, or is missing required claims.
+
+#### 5. One-Click & Web Unsubscribe Endpoint (`POST /api/v1/tracking/unsubscribe/:token`)
+- **Access**: Public
+- **Supported Methods**:
+  - **RFC 8058 One-Click Header**: Triggered natively by mail clients (e.g. Gmail, Yahoo, Apple Mail) sending `POST` with `List-Unsubscribe=One-Click`.
+  - **Web Form Submission**: Form POST from the HTML confirmation page.
+  - **JSON API Request**: `POST` with `{ "reason": "Optional feedback" }`.
+- **Side Effects**:
+  - Marks recipient `Contact` as `isUnsubscribed: true` and sets `unsubscribedAt`.
+  - Upserts permanent `Suppression` record scoped to `{ userId, email }`.
+  - Records a `TrackingEvent` with `eventType: 'unsubscribe'` for engagement analytics.
+  - Excludes the contact from future campaign readiness and dispatches.
+- **Response**:
+  - HTML or JSON confirmation response depending on client `Accept` headers.

@@ -38,8 +38,8 @@ const trackingEventSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Event type is required'],
       enum: {
-        values: ['open', 'click'],
-        message: 'Event type must be either open or click',
+        values: ['open', 'click', 'unsubscribe'],
+        message: 'Event type must be open, click, or unsubscribe',
       },
       index: true,
     },

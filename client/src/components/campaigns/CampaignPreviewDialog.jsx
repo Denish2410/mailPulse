@@ -242,6 +242,7 @@ export const CampaignPreviewDialog = ({
     : campaign.recipientsCount || 0;
   const eligibleCount = summary.eligibleRecipientsCount;
   const missingCount = summary.missingRecipientsCount;
+  const unsubscribedCount = summary.unsubscribedRecipientsCount;
 
   // Effective lifecycle status (the list copy may be stale right after sending)
   const effectiveStatus = sentStatus || campaign.status;
@@ -639,6 +640,17 @@ export const CampaignPreviewDialog = ({
                       </svg>
                       <span>
                         Notice: {missingCount} recipient(s) originally stored on this draft could not be verified. They may have been deleted or belong to a different account.
+                      </span>
+                    </div>
+                  )}
+
+                  {unsubscribedCount > 0 && (
+                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2">
+                      <svg className="w-4 h-4 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>
+                        Notice: {unsubscribedCount} recipient(s) are unsubscribed or suppressed and will not receive this campaign.
                       </span>
                     </div>
                   )}

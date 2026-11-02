@@ -126,8 +126,15 @@ export const ContactsTable = ({
                       {initial}
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-100 group-hover:text-indigo-200 transition-colors">
-                        {contact.name}
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-100 group-hover:text-indigo-200 transition-colors">
+                          {contact.name}
+                        </span>
+                        {contact.isUnsubscribed && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Unsubscribed
+                          </span>
+                        )}
                       </div>
                       <div className="md:hidden text-xs text-slate-400 font-mono mt-0.5">
                         {contact.email}

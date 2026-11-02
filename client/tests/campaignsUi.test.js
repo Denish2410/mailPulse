@@ -473,6 +473,20 @@ describe('Campaigns Management UI Logic & Helpers', () => {
         assert.equal(noneMissing.missingRecipientsCount, 0);
       });
 
+      it('33b. Formats unsubscribed-recipient count labels accurately', () => {
+        const singleUnsub = formatReadinessSummary({ unsubscribedRecipientsCount: 1 });
+        assert.equal(singleUnsub.unsubscribedLabel, '1 recipient unsubscribed');
+        assert.equal(singleUnsub.unsubscribedRecipientsCount, 1);
+
+        const pluralUnsub = formatReadinessSummary({ unsubscribedRecipientsCount: 4 });
+        assert.equal(pluralUnsub.unsubscribedLabel, '4 recipients unsubscribed');
+        assert.equal(pluralUnsub.unsubscribedRecipientsCount, 4);
+
+        const noneUnsub = formatReadinessSummary({ unsubscribedRecipientsCount: 0 });
+        assert.equal(noneUnsub.unsubscribedLabel, '');
+        assert.equal(noneUnsub.unsubscribedRecipientsCount, 0);
+      });
+
       it('34. Formats content presence labels (Plain Text & HTML, Plain Text, HTML, No content)', () => {
         const both = formatReadinessSummary({ hasTextContent: true, hasHtmlContent: true });
         assert.equal(both.contentLabel, 'Plain Text & HTML');
@@ -1306,6 +1320,8 @@ describe('Campaigns Management UI Logic & Helpers', () => {
         uniqueOpens: 950,
         totalClicks: 340,
         uniqueClicks: 210,
+        totalUnsubscribes: 15,
+        unsubscribeRate: 1.25,
       });
 
       assert.equal(formatted.openRateFormatted, '35.5%');
@@ -1315,6 +1331,8 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       assert.equal(formatted.uniqueOpensFormatted, '950');
       assert.equal(formatted.totalClicksFormatted, '340');
       assert.equal(formatted.uniqueClicksFormatted, '210');
+      assert.equal(formatted.totalUnsubscribesFormatted, '15');
+      assert.equal(formatted.unsubscribeRateFormatted, '1.3%');
     });
 
     it('46. formatAnalyticsMetrics handles missing, undefined, or non-numeric metrics gracefully', () => {

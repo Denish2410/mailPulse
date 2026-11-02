@@ -19,6 +19,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Campaign from '../src/models/Campaign.js';
 import Delivery from '../src/models/Delivery.js';
+import Contact from '../src/models/Contact.js';
+import Suppression from '../src/models/Suppression.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -26,8 +28,10 @@ import { hashPassword } from '../src/services/password.service.js';
 import {
   TRANSPARENT_1X1_GIF,
   createTrackingToken,
+  createUnsubscribeToken,
 } from '../src/services/tracking.service.js';
 import { processNextDelivery } from '../src/services/campaignDispatch.service.js';
+import { evaluateCampaignReadiness } from '../src/services/campaignReadiness.service.js';
 
 describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analytics)', () => {
   let server;
@@ -309,6 +313,217 @@ describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analy
       assert.ok(sent.html.includes('/api/v1/tracking/open/'), 'HTML must include open tracking pixel URL');
       assert.ok(sent.html.includes('/api/v1/tracking/click/'), 'HTML must include rewritten click tracking URL');
       assert.ok(!sent.html.includes('href="https://example.com/special"'), 'Raw destination URL must be rewritten');
+      assert.ok(sent.html.includes('/api/v1/tracking/unsubscribe/'), 'HTML must include unsubscribe URL');
+      assert.ok(sent.headers['List-Unsubscribe'], 'Headers must include List-Unsubscribe');
+      assert.equal(sent.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+    });
+  });
+
+  describe('5. Public Unsubscribe Endpoints (/api/v1/tracking/unsubscribe/:token)', () => {
+    it('GET returns 400 for an invalid or tampered unsubscribe token', async () => {
+      const res = await fetch(`${baseUrl}/api/v1/tracking/unsubscribe/invalid-token-123.fake-signature`, {
+        headers: { Accept: 'application/json' },
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.message, /Invalid or expired unsubscribe link/i);
+    });
+
+    it('GET returns 200 with HTML confirmation page for a valid token', async () => {
+      if (!isDbConnected) return;
+
+      const token = createUnsubscribeToken({
+        campaignId: testCampaign._id,
+        recipientEmail: 'unsub-get-user@example.com',
+        userId: ownerUser._id,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/tracking/unsubscribe/${token}`, {
+        headers: { Accept: 'text/html' },
+      });
+
+      assert.equal(res.status, 200);
+      const text = await res.text();
+      assert.ok(text.includes('Confirm Unsubscribe'));
+      assert.ok(text.includes('unsub-get-user@example.com'));
+      assert.ok(text.includes(`<form method="POST" action="/api/v1/tracking/unsubscribe/${token}">`));
+    });
+
+    it('GET returns 200 JSON when format=json query parameter is present', async () => {
+      if (!isDbConnected) return;
+
+      const token = createUnsubscribeToken({
+        campaignId: testCampaign._id,
+        recipientEmail: 'unsub-json@example.com',
+        userId: ownerUser._id,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/tracking/unsubscribe/${token}?format=json`);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.email, 'unsub-json@example.com');
+    });
+
+    it('POST processes unsubscribe request via web form and updates models', async () => {
+      if (!isDbConnected) return;
+
+      const testEmail = `unsub-post-${Date.now()}@example.com`;
+      const contact = await Contact.create({
+        userId: ownerUser._id,
+        name: 'Unsub Web User',
+        email: testEmail,
+      });
+
+      const token = createUnsubscribeToken({
+        campaignId: testCampaign._id,
+        recipientId: contact._id,
+        recipientEmail: testEmail,
+        userId: ownerUser._id,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/tracking/unsubscribe/${token}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'text/html',
+        },
+        body: 'reason=Not+interested+anymore',
+      });
+
+      assert.equal(res.status, 200);
+      const text = await res.text();
+      assert.ok(text.includes('You have been unsubscribed'));
+      assert.ok(text.includes(testEmail));
+
+      // Verify contact updated
+      const updated = await Contact.findById(contact._id);
+      assert.equal(updated.isUnsubscribed, true);
+      assert.ok(updated.unsubscribedAt instanceof Date);
+
+      // Verify suppression created
+      const suppression = await Suppression.findOne({
+        userId: ownerUser._id,
+        email: testEmail,
+      });
+      assert.ok(suppression);
+      assert.equal(suppression.source, 'link');
+    });
+
+    it('POST processes RFC 8058 One-Click unsubscribe header request', async () => {
+      if (!isDbConnected) return;
+
+      const testEmail = `oneclick-${Date.now()}@example.com`;
+      await Contact.create({
+        userId: ownerUser._id,
+        name: 'One Click User',
+        email: testEmail,
+      });
+
+      const token = createUnsubscribeToken({
+        campaignId: testCampaign._id,
+        recipientEmail: testEmail,
+        userId: ownerUser._id,
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/tracking/unsubscribe/${token}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'List-Unsubscribe=One-Click',
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.email, testEmail);
+
+      const suppression = await Suppression.findOne({
+        userId: ownerUser._id,
+        email: testEmail,
+      });
+      assert.ok(suppression);
+      assert.equal(suppression.source, 'one-click-header');
+    });
+  });
+
+  describe('6. Suppression Enforcement in Campaign Readiness and Dispatch', () => {
+    it('readiness evaluation filters out unsubscribed contacts and increments unsubscribedRecipientsCount', async () => {
+      if (!isDbConnected) return;
+
+      const activeContact = await Contact.create({
+        userId: ownerUser._id,
+        name: 'Active Contact',
+        email: `active-${Date.now()}@example.com`,
+      });
+
+      const unsubContact = await Contact.create({
+        userId: ownerUser._id,
+        name: 'Unsubscribed Contact',
+        email: `unsub-${Date.now()}@example.com`,
+        isUnsubscribed: true,
+        unsubscribedAt: new Date(),
+      });
+
+      const campaign = {
+        name: 'Readiness Suppression Campaign',
+        subject: 'Subject Line',
+        textContent: 'Content',
+        status: 'draft',
+        recipientIds: [activeContact._id, unsubContact._id],
+      };
+
+      const readiness = await evaluateCampaignReadiness(campaign, ownerUser._id);
+      assert.equal(readiness.isReady, true);
+      assert.equal(readiness.summary.totalRecipients, 2);
+      assert.equal(readiness.summary.eligibleRecipientsCount, 1);
+      assert.equal(readiness.summary.unsubscribedRecipientsCount, 1);
+      assert.equal(readiness.eligibleContacts[0]._id.toString(), activeContact._id.toString());
+    });
+
+    it('dispatch skips suppressed contact and marks delivery status failed with SUPPRESSED error code', async () => {
+      if (!isDbConnected) return;
+
+      const suppressedEmail = `suppressed-${Date.now()}@example.com`;
+      await Suppression.create({
+        userId: ownerUser._id,
+        email: suppressedEmail,
+        source: 'link',
+      });
+
+      const delivery = await Delivery.create({
+        campaignId: testCampaign._id,
+        userId: ownerUser._id,
+        contactId: new mongoose.Types.ObjectId(),
+        email: suppressedEmail,
+        name: 'Suppressed Recipient',
+        status: 'pending',
+      });
+
+      const mockEmailService = {
+        sent: [],
+        async sendEmail(opts) {
+          this.sent.push(opts);
+          return { messageId: '<should-not-be-called>' };
+        },
+      };
+
+      const hadWork = await processNextDelivery(
+        testCampaign._id,
+        { subject: 'Subj', text: 'Text', html: '<p>HTML</p>' },
+        mockEmailService
+      );
+
+      assert.equal(hadWork, true);
+      assert.equal(mockEmailService.sent.length, 0, 'Must NOT attempt to send email to suppressed recipient');
+
+      const updated = await Delivery.findById(delivery._id);
+      assert.equal(updated.status, 'failed');
+      assert.equal(updated.errorCode, 'SUPPRESSED');
+      assert.ok(updated.failedAt instanceof Date);
     });
   });
 });

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
+import Suppression from '../models/Suppression.js';
 
 /**
  * Campaign Readiness Evaluation (shared by the readiness endpoint and the send endpoint)
@@ -78,14 +79,39 @@ export const evaluateCampaignReadiness = async (campaign, userId) => {
   const totalRecipients = uniqueRecipientIds.length;
 
   let eligibleContacts = [];
+  let unsubscribedRecipientsCount = 0;
+  let missingRecipientsCount = 0;
+
   if (totalRecipients > 0) {
-    eligibleContacts = await Contact.find({
+    const ownedContacts = await Contact.find({
       _id: { $in: uniqueRecipientIds },
       userId,
     })
-      .select('name email')
+      .select('name email isUnsubscribed')
       .sort({ createdAt: -1, _id: -1 })
       .lean();
+
+    missingRecipientsCount = Math.max(0, totalRecipients - ownedContacts.length);
+
+    const contactEmails = ownedContacts.map((c) => c.email.toLowerCase().trim());
+    const suppressions = await Suppression.find({
+      userId,
+      email: { $in: contactEmails },
+    })
+      .select('email')
+      .lean();
+
+    const suppressedEmailSet = new Set(suppressions.map((s) => s.email.toLowerCase().trim()));
+
+    eligibleContacts = ownedContacts.filter((contact) => {
+      const isSuppressed =
+        Boolean(contact.isUnsubscribed) || suppressedEmailSet.has(contact.email.toLowerCase().trim());
+      if (isSuppressed) {
+        unsubscribedRecipientsCount += 1;
+        return false;
+      }
+      return true;
+    });
   }
 
   const eligibleRecipients = eligibleContacts.map((contact) => ({
@@ -95,7 +121,6 @@ export const evaluateCampaignReadiness = async (campaign, userId) => {
   }));
 
   const eligibleRecipientsCount = eligibleRecipients.length;
-  const missingRecipientsCount = Math.max(0, totalRecipients - eligibleRecipientsCount);
 
   if (eligibleRecipientsCount === 0) {
     issues.push('Campaign must have at least one eligible recipient.');
@@ -110,6 +135,7 @@ export const evaluateCampaignReadiness = async (campaign, userId) => {
       eligibleRecipients,
       eligibleRecipientsCount,
       missingRecipientsCount,
+      unsubscribedRecipientsCount,
       hasTextContent,
       hasHtmlContent,
       status: campaign.status,

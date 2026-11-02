@@ -1,13 +1,19 @@
 import mongoose from 'mongoose';
 import Campaign from '../models/Campaign.js';
 import Delivery from '../models/Delivery.js';
+import Contact from '../models/Contact.js';
+import Suppression from '../models/Suppression.js';
 import {
   EmailServiceError,
   InvalidMessageError,
   EmailConfigurationError,
   EmailTransportError,
 } from './email.service.js';
-import { prepareTrackedEmailHtml } from './tracking.service.js';
+import {
+  prepareTrackedEmailHtml,
+  createUnsubscribeToken,
+  injectUnsubscribeLinks,
+} from './tracking.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -268,36 +274,104 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     return false;
   }
 
-  // 1. Inject tracking pixel and rewrite links for click tracking if HTML content is present
+  // 1. Suppression & Unsubscribe Check: Never dispatch to unsubscribed or suppressed recipients
+  if (delivery.userId) {
+    const isSuppressed = await Suppression.exists({
+      userId: delivery.userId,
+      email: delivery.email.toLowerCase().trim(),
+    });
+    const isContactUnsubscribed = delivery.contactId
+      ? await Contact.exists({ _id: delivery.contactId, isUnsubscribed: true })
+      : false;
+
+    if (isSuppressed || isContactUnsubscribed) {
+      await Delivery.updateOne(
+        { _id: delivery._id, status: 'processing' },
+        {
+          $set: {
+            status: 'failed',
+            errorCode: 'SUPPRESSED',
+            failedAt: new Date(),
+          },
+        }
+      );
+      await incrementCampaignStat(campaignId, 'failed', logger);
+      return true;
+    }
+  }
+
+  // 2. Resolve Unsubscribe URL and RFC 8058 One-Click headers
+  const baseUrl =
+    process.env.TRACKING_BASE_URL ||
+    process.env.API_BASE_URL ||
+    'http://localhost:5000';
+
+  let unsubscribeUrl = '';
+  let customHeaders = {};
+
+  if (delivery.userId) {
+    try {
+      const unsubToken = createUnsubscribeToken({
+        campaignId,
+        recipientId: delivery.contactId ? String(delivery.contactId) : undefined,
+        recipientEmail: delivery.email,
+        userId: delivery.userId,
+      });
+      unsubscribeUrl = `${baseUrl}/api/v1/tracking/unsubscribe/${unsubToken}`;
+      customHeaders = {
+        'List-Unsubscribe': `<${unsubscribeUrl}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      };
+    } catch (tokenErr) {
+      logWarning(
+        logger,
+        `[Dispatcher] Failed to create unsubscribe token for delivery ${String(delivery._id)}: ${tokenErr?.message || 'Error'}`
+      );
+    }
+  }
+
+  // 3. Inject tracking pixel, rewrite links, and add unsubscribe footers
   let htmlToSend = message.html;
+  let textToSend = message.text;
+
   if (htmlToSend && typeof htmlToSend === 'string' && htmlToSend.trim()) {
     try {
       htmlToSend = prepareTrackedEmailHtml(htmlToSend, {
         campaignId,
         recipientId: delivery.contactId ? String(delivery.contactId) : undefined,
         recipientEmail: delivery.email,
-        baseUrl:
-          process.env.TRACKING_BASE_URL ||
-          process.env.API_BASE_URL ||
-          'http://localhost:5000',
+        baseUrl,
+        unsubscribeUrl,
       });
     } catch (trackingError) {
-      if (typeof logger?.warn === 'function') {
-        logger.warn(
-          `[Dispatcher] Failed to inject tracking for delivery ${String(delivery._id)}: ${trackingError?.message || 'Error'}`
-        );
-      }
+      logWarning(
+        logger,
+        `[Dispatcher] Failed to inject tracking for delivery ${String(delivery._id)}: ${trackingError?.message || 'Error'}`
+      );
     }
   }
 
-  // 2. Hand the message to the transport
+  if (textToSend && typeof textToSend === 'string' && textToSend.trim() && unsubscribeUrl) {
+    try {
+      const textResult = injectUnsubscribeLinks('', textToSend, { unsubscribeUrl });
+      textToSend = textResult.text;
+    } catch (textErr) {
+      logWarning(
+        logger,
+        `[Dispatcher] Failed to inject text unsubscribe link for delivery ${String(delivery._id)}: ${textErr?.message || 'Error'}`
+      );
+    }
+  }
+
+  // 4. Hand the message to the transport with custom headers
   let result;
   try {
     result = await emailService.sendEmail({
       to: delivery.email,
       subject: message.subject,
-      text: message.text,
+      text: textToSend,
       html: htmlToSend,
+      ...(Object.keys(customHeaders).length > 0 && { headers: customHeaders }),
     });
   } catch (error) {
     await Delivery.updateOne(
