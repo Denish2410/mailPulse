@@ -17,6 +17,7 @@ import {
   getDeliveryCounts,
 } from '../services/campaignDispatch.service.js';
 import { getCampaignTrackingSummary } from '../services/tracking.service.js';
+import { personalizeMessage } from '../services/personalization.service.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -476,7 +477,7 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
   }
 
   // 2. Resolve the destination from the authenticated account, never from the request
-  const user = await User.findById(userId).select('email status').lean();
+  const user = await User.findById(userId).select('name email status').lean();
   if (!user || typeof user.email !== 'string' || !user.email.trim()) {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
@@ -503,13 +504,18 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
 
   // 4. Dispatch exactly one message to the account email
   const emailService = resolveEmailService(req);
+  // Merge tags render with the account holder's own details so the test shows the real output
+  const preview = personalizeMessage(
+    { subject: campaign.subject, text: campaign.textContent ?? '', html: campaign.htmlContent ?? '' },
+    { name: user.name, email: destination }
+  );
   let result;
   try {
     result = await emailService.sendEmail({
       to: destination,
-      subject: buildTestEmailSubject(campaign.subject),
-      text: campaign.textContent ?? '',
-      html: campaign.htmlContent ?? '',
+      subject: buildTestEmailSubject(preview.subject || campaign.subject),
+      text: preview.text,
+      html: preview.html,
     });
   } catch (error) {
     if (error instanceof InvalidMessageError) {

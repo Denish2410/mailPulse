@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { validateCampaignForm } from '../../utils/validation.js';
 import { getErrorMessage } from '../../lib/api.js';
 import { RecipientSelector } from './RecipientSelector.jsx';
+import TemplatePicker from '../templates/TemplatePicker.jsx';
+import MergeTagToolbar from '../templates/MergeTagToolbar.jsx';
+import { insertAtSelection, templateToCampaignFields } from '../../utils/templateHelpers.js';
 
 /**
  * CampaignFormDialog Component
@@ -122,6 +125,38 @@ export const CampaignFormDialog = ({
     if (serverError) setServerError(null);
   };
 
+  // Template application and merge tag insertion
+  const lastFieldIdRef = useRef('campaign-form-html');
+
+  const handleApplyTemplate = (template) => {
+    const fields = templateToCampaignFields(template);
+    setSubject(fields.subject);
+    setTextContent(fields.textContent);
+    setHtmlContent(fields.htmlContent);
+    setActiveTab(fields.htmlContent && !fields.textContent ? 'html' : activeTab);
+    setErrors((prev) => ({ ...prev, subject: null, textContent: null, htmlContent: null, content: null }));
+  };
+
+  const handleInsertMergeTag = (snippet) => {
+    const id = lastFieldIdRef.current;
+    const el = document.getElementById(id);
+    const config = {
+      'campaign-form-subject': [subject, setSubject, 'subject'],
+      'campaign-form-text': [textContent, setTextContent, 'text'],
+      'campaign-form-html': [htmlContent, setHtmlContent, 'html'],
+    }[id];
+    if (!config) return;
+    const [current, setter, tab] = config;
+    const { value, cursor } = insertAtSelection(current, snippet, el?.selectionStart, el?.selectionEnd);
+    setter(value);
+    if (tab !== 'subject') setActiveTab(tab);
+    requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      target?.focus();
+      target?.setSelectionRange?.(cursor, cursor);
+    });
+  };
+
   const handleTextContentChange = (e) => {
     setTextContent(e.target.value);
     if (errors.textContent) {
@@ -227,7 +262,14 @@ export const CampaignFormDialog = ({
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
+        <form
+          onSubmit={handleSubmit}
+          onFocus={(e) => {
+            if (['campaign-form-subject', 'campaign-form-text', 'campaign-form-html'].includes(e.target.id)) {
+              lastFieldIdRef.current = e.target.id;
+            }
+          }}
+          className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
           {/* Top-Level Server Error Banner */}
           {serverError && (
             <div
@@ -263,6 +305,8 @@ export const CampaignFormDialog = ({
             </div>
           ) : (
             <>
+              {!isEditing && <TemplatePicker onApply={handleApplyTemplate} disabled={isSubmitting} />}
+
               {/* Campaign Name & Subject Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Campaign Name */}
@@ -358,6 +402,10 @@ export const CampaignFormDialog = ({
                       ? `${textContent.length} characters`
                       : `${htmlContent.length} characters`}
                   </span>
+                </div>
+
+                <div className="mb-2">
+                  <MergeTagToolbar onInsert={handleInsertMergeTag} disabled={isSubmitting} />
                 </div>
 
                 {/* Plain Text Editor */}
