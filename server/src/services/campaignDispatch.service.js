@@ -14,6 +14,7 @@ import {
   createUnsubscribeToken,
   injectUnsubscribeLinks,
 } from './tracking.service.js';
+import { personalizeMessage } from './personalization.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -330,9 +331,13 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     }
   }
 
-  // 3. Inject tracking pixel, rewrite links, and add unsubscribe footers
-  let htmlToSend = message.html;
-  let textToSend = message.text;
+  // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
+  //    recipient values can never alter tracking links)
+  const personalized = personalizeMessage(message, { name: delivery.name, email: delivery.email });
+
+  // 3b. Inject tracking pixel, rewrite links, and add unsubscribe footers
+  let htmlToSend = personalized.html;
+  let textToSend = personalized.text;
 
   if (htmlToSend && typeof htmlToSend === 'string' && htmlToSend.trim()) {
     try {
@@ -368,7 +373,7 @@ export const processNextDelivery = async (campaignId, message, emailService, log
   try {
     result = await emailService.sendEmail({
       to: delivery.email,
-      subject: message.subject,
+      subject: personalized.subject || message.subject,
       text: textToSend,
       html: htmlToSend,
       ...(Object.keys(customHeaders).length > 0 && { headers: customHeaders }),
