@@ -222,10 +222,12 @@ The following endpoints will be introduced in subsequent phases:
 - `GET /`: List email campaign drafts with pagination and search
 - `GET /:id`: Retrieve single campaign details
 - `GET /:id/readiness`: Evaluate send-readiness, blocking issues, and resolved recipients
-- `PATCH /:id`: Update campaign draft (drafts only; `409` once sent)
-- `DELETE /:id`: Delete campaign draft (drafts only; `409` once sent)
+- `PATCH /:id`: Update campaign draft (drafts only; `409` once sent or scheduled)
+- `DELETE /:id`: Delete campaign draft (drafts only; `409` once sent or scheduled)
 - `POST /:id/test-email`: Send a `[TEST]` copy of the campaign to the authenticated user's own email
 - `POST /:id/send`: Send a ready draft to its recipients (requires `{ "confirm": true }`; responds `202`)
+- `POST /:id/schedule`: Schedule a ready draft for future automated dispatch (Phase 9)
+- `POST /:id/cancel-schedule`: Cancel a scheduled campaign and revert it to draft (Phase 9)
 - `GET /:id/deliveries`: Per-recipient delivery log with status summary
 
 #### Campaign Readiness Contract (`GET /api/v1/campaigns/:id/readiness`)
@@ -234,7 +236,7 @@ The following endpoints will be introduced in subsequent phases:
   - `name`: Must be between 2 and 120 characters long.
   - `subject`: Must be between 1 and 200 characters long.
   - `content`: At least one of `textContent` or `htmlContent` must have non-whitespace content.
-  - `status`: Must be `'draft'`.
+  - `status`: Must be `'draft'` or `'scheduled'`.
   - `recipients`: At least 1 recipient must resolve to an existing, verified contact owned by the authenticated user.
 - **Response Shape (HTTP 200)**:
 ```json
@@ -393,6 +395,19 @@ The following endpoints will be introduced in subsequent phases:
 ```
 - **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `INTERRUPTED`, `PERSIST_ERROR`, `UNKNOWN_ERROR`. `INTERRUPTED` (process stopped mid-send) and `PERSIST_ERROR` (transport accepted the message but recording it failed) mean the recipient may already have been emailed; these are never re-sent.
 - **Sent vs. delivered**: `sent` means the email provider accepted the message. Bounces, opens and clicks are not tracked yet.
+
+#### Campaign Scheduling Contract (`POST /api/v1/campaigns/:id/schedule` & `POST /api/v1/campaigns/:id/cancel-schedule`)
+- **Access**: Protected (Bearer JWT).
+- **Schedule Endpoint (`POST /:id/schedule`)**:
+  - Request body: `{ "scheduledAt": "2026-11-04T15:30:00.000Z" }` (must be a valid ISO-8601 string strictly in the future).
+  - Validates campaign readiness, active owner account, and configured email service (`503` if SMTP unconfigured, `422` if not ready).
+  - Transitions `status: 'draft'` -> `'scheduled'` (or updates `scheduledAt` if already scheduled).
+  - Responds `200 OK` with the updated safe campaign representation including `scheduledAt`.
+- **Cancel Schedule Endpoint (`POST /:id/cancel-schedule`)**:
+  - Requires no body.
+  - Transitions `status: 'scheduled'` -> `'draft'` and clears `scheduledAt: null`.
+  - Responds `200 OK` with the reverted campaign draft.
+- **Locking**: While in `scheduled` status, `PATCH /:id` (edit) and `DELETE /:id` (delete) are locked and return `409 Conflict`.
 
 ### Analytics (`/api/v1/analytics`)
 

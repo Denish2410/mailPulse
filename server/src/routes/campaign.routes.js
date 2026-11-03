@@ -8,6 +8,8 @@ import {
   getCampaignReadiness,
   sendCampaignTestEmail,
   sendCampaign,
+  scheduleCampaign,
+  cancelScheduledCampaign,
   getCampaignDeliveries,
   getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
@@ -22,6 +24,7 @@ import {
   getCampaignsQuerySchema,
   sendTestEmailSchema,
   sendCampaignSchema,
+  scheduleCampaignSchema,
   getCampaignDeliveriesSchema,
 } from '../validators/campaign.validator.js';
 
@@ -76,6 +79,20 @@ router.post(
  * @access  Protected, plus a dedicated per-user send rate limit
  */
 router.post('/:id/send', campaignSendRateLimiter, validate(sendCampaignSchema), sendCampaign);
+
+/**
+ * @route   POST /api/v1/campaigns/:id/schedule
+ * @desc    Schedule a ready draft for future dispatch.
+ * @access  Protected
+ */
+router.post('/:id/schedule', validate(scheduleCampaignSchema), scheduleCampaign);
+
+/**
+ * @route   POST /api/v1/campaigns/:id/cancel-schedule
+ * @desc    Cancel a scheduled campaign and revert it to draft.
+ * @access  Protected
+ */
+router.post('/:id/cancel-schedule', validate(campaignIdParamSchema), cancelScheduledCampaign);
 
 /**
  * @route   GET /api/v1/campaigns/:id/deliveries

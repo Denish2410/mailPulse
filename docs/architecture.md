@@ -330,3 +330,34 @@ flowchart TD
    - **Readiness Gate**: `evaluateCampaignReadiness` queries active suppressions and excludes unsubscribed contacts from eligible recipients, reporting `unsubscribedRecipientsCount` in the summary.
    - **Dispatcher Gate**: In `processNextDelivery`, a real-time check verifies that neither the contact nor the email address has opted out between campaign creation and send execution. Suppressed recipients are cleanly marked `failed` with error code `SUPPRESSED` without invoking the SMTP transport.
 
+---
+
+## 11. Scheduled Campaign Dispatch Architecture (Phase 9)
+
+MailPulse provides automated, background-scheduled campaign dispatches with strict race-condition guarantees:
+
+```mermaid
+flowchart TD
+    Draft["Campaign (draft)"] -->|POST /:id/schedule| Scheduled["Campaign (scheduled)\nscheduledAt: Future Date"]
+    Scheduled -->|POST /:id/cancel-schedule| Draft
+    Scheduled -->|POST /:id/schedule| Scheduled
+
+    subgraph Background Scheduler Worker
+        Timer["Interval Poller (15s)"] -->|Find due campaigns| Query["status: 'scheduled' AND scheduledAt <= now"]
+        Query --> AtomicLock["Atomic findOneAndUpdate\n(status: 'scheduled' -> 'sending')"]
+        AtomicLock --> Readiness{"Re-evaluate Readiness\n& Owner Status"}
+        Readiness -->|Valid| Dispatcher["startCampaignDispatch()"]
+        Readiness -->|Unready or Suspended| Fail["status: 'failed'"]
+    end
+```
+
+### Key Guarantees & Design:
+1. **Double-Dispatch Prevention & Atomic Claims**:
+   - The background scheduler queries for due campaigns where `status: 'scheduled'` and `scheduledAt: { $lte: new Date() }`.
+   - Transitions into `'sending'` atomically, ensuring overlapping polling sweeps cannot claim the same campaign twice.
+2. **Editing & Deletion Locks**:
+   - Scheduled campaigns are locked from mutations (`PATCH` and `DELETE` return HTTP `409 Conflict`), requiring an explicit schedule cancellation first.
+3. **Graceful Lifecycle Management**:
+   - In production, the scheduler runs alongside the dispatch watchdog and terminates safely on `SIGTERM` / `SIGINT`, awaiting any in-flight polls before closing database connections.
+   - The scheduler is disabled in `NODE_ENV=test` to ensure test isolation.
+

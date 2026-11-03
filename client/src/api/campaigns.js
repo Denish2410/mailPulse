@@ -261,6 +261,31 @@ export const getCampaignDeliveries = async (id, params = {}, config = {}) => {
 };
 
 /**
+ * Schedule (or reschedule) a campaign for automatic dispatch at a future time.
+ *
+ * @param {string} id - Campaign ID
+ * @param {{ scheduledAt: string }} payload - ISO-8601 future date/time
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaign: object }>}
+ */
+export const scheduleCampaign = async (id, { scheduledAt }, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/schedule`, { scheduledAt }, config);
+  return response.data?.data;
+};
+
+/**
+ * Cancel a campaign's schedule, returning it to draft.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaign: object }>}
+ */
+export const cancelScheduledCampaign = async (id, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/cancel-schedule`, {}, config);
+  return response.data?.data;
+};
+
+/**
  * Retrieve tracking analytics metrics for a campaign by ID.
  * Returns open rates, click rates, link performance, and recent activity.
  *
@@ -284,6 +309,8 @@ export default {
   getCampaignReadiness,
   sendCampaignTestEmail,
   sendCampaign,
+  scheduleCampaign,
+  cancelScheduledCampaign,
   getCampaignDeliveries,
   getCampaignAnalytics,
   getErrorMessage,

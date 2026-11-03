@@ -41,6 +41,7 @@ export const formatSafeCampaign = (campaign) => {
     status: doc.status,
     recipientIds,
     recipientsCount: recipientIds.length,
+    scheduledAt: doc.scheduledAt ?? null,
     sendStartedAt: doc.sendStartedAt ?? null,
     sendCompletedAt: doc.sendCompletedAt ?? null,
     stats: {
@@ -640,6 +641,158 @@ export const sendCampaign = asyncHandler(async (req, res) => {
     data: {
       campaign: formatSafeCampaign(locked),
       queuedRecipients: eligibleContacts.length,
+    },
+  });
+});
+
+/**
+ * Schedule a campaign draft for future dispatch.
+ *
+ * Route: POST /api/v1/campaigns/:id/schedule
+ * Access: Protected (Bearer JWT)
+ */
+export const scheduleCampaign = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+  const { scheduledAt } = req.body;
+
+  const targetDate = new Date(scheduledAt);
+  if (isNaN(targetDate.getTime()) || targetDate.getTime() <= Date.now()) {
+    throw new AppError('Scheduled time must be in the future.', 400);
+  }
+
+  // 1. Load campaign scoped to owner
+  const campaign = await Campaign.findOne({ _id: id, userId });
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  // 2. Only draft or scheduled campaigns can be scheduled/rescheduled
+  if (campaign.status !== 'draft' && campaign.status !== 'scheduled') {
+    throw new AppError('Only draft or scheduled campaigns can be scheduled.', 409);
+  }
+
+  // 3. User account status check
+  const user = await User.findById(userId).select('status').lean();
+  if (!user) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+  if (user.status && user.status !== 'active') {
+    throw new AppError('Your account is not permitted to schedule campaigns.', 403);
+  }
+
+  // 4. Evaluate readiness
+  const { isReady, issues, eligibleContacts } = await evaluateCampaignReadiness(campaign, userId);
+  if (!isReady) {
+    throw new AppError(
+      'Campaign is not ready for scheduling.',
+      422,
+      issues.map((message) => ({ path: 'campaign', message }))
+    );
+  }
+
+  if (eligibleContacts.length > MAX_CAMPAIGN_RECIPIENTS) {
+    throw new AppError('Campaign is not ready for scheduling.', 422, [
+      {
+        path: 'campaign.recipientIds',
+        message: `A campaign cannot be scheduled with more than ${MAX_CAMPAIGN_RECIPIENTS} recipients.`,
+      },
+    ]);
+  }
+
+  // 5. Verify email transport configured
+  const emailService = resolveEmailService(req);
+  try {
+    if (typeof emailService.assertConfigured === 'function') {
+      emailService.assertConfigured();
+    }
+  } catch (error) {
+    if (error instanceof EmailConfigurationError) {
+      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
+    }
+    throw error;
+  }
+
+  // 6. Atomically update status and scheduledAt
+  const updatedCampaign = await Campaign.findOneAndUpdate(
+    {
+      _id: id,
+      userId,
+      status: { $in: ['draft', 'scheduled'] },
+    },
+    {
+      $set: {
+        status: 'scheduled',
+        scheduledAt: targetDate,
+      },
+    },
+    { new: true }
+  );
+
+  if (!updatedCampaign) {
+    throw new AppError('Campaign was modified or is already sending. Refresh and try again.', 409);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign scheduled successfully',
+    data: {
+      campaign: formatSafeCampaign(updatedCampaign),
+    },
+  });
+});
+
+/**
+ * Cancel a scheduled campaign and revert it to draft status.
+ *
+ * Route: POST /api/v1/campaigns/:id/cancel-schedule
+ * Access: Protected (Bearer JWT)
+ */
+export const cancelScheduledCampaign = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+
+  const campaign = await Campaign.findOne({ _id: id, userId });
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  if (campaign.status !== 'scheduled') {
+    throw new AppError('Only scheduled campaigns can be canceled.', 409);
+  }
+
+  const updatedCampaign = await Campaign.findOneAndUpdate(
+    {
+      _id: id,
+      userId,
+      status: 'scheduled',
+    },
+    {
+      $set: {
+        status: 'draft',
+        scheduledAt: null,
+      },
+    },
+    { new: true }
+  );
+
+  if (!updatedCampaign) {
+    throw new AppError('Campaign is no longer scheduled or is currently sending.', 409);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign schedule canceled successfully',
+    data: {
+      campaign: formatSafeCampaign(updatedCampaign),
     },
   });
 });

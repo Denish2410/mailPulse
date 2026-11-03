@@ -172,7 +172,7 @@ describe('Analytics API (GET /api/v1/analytics/overview)', () => {
 
     assert.equal(data.range.days, 7);
     assert.equal(data.contacts.total, 3);
-    assert.deepEqual(data.campaigns.byStatus, { draft: 1, sending: 0, sent: 1, failed: 0 });
+    assert.deepEqual(data.campaigns.byStatus, { draft: 1, scheduled: 0, sending: 0, sent: 1, failed: 0 });
     assert.equal(data.campaigns.total, 2);
     assert.deepEqual(
       { ...data.deliveries },

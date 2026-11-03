@@ -205,8 +205,8 @@ export const getCampaignsQuerySchema = z.object({
         .max(100, 'Search query cannot exceed 100 characters')
         .optional(),
       status: z
-        .enum(['draft', 'sending', 'sent', 'failed'], {
-          errorMap: () => ({ message: 'Status must be one of draft, sending, sent, or failed' }),
+        .enum(['draft', 'scheduled', 'sending', 'sent', 'failed'], {
+          errorMap: () => ({ message: 'Status must be one of draft, scheduled, sending, sent, or failed' }),
         })
         .optional(),
     })
@@ -278,6 +278,34 @@ export const getCampaignDeliveriesSchema = z.object({
           }),
         })
         .optional(),
+    })
+    .strict(),
+});
+
+/**
+ * Schema for POST /api/v1/campaigns/:id/schedule (Schedule Campaign)
+ *
+ * Validates params.id and body.scheduledAt.
+ * scheduledAt must be a valid ISO 8601 string or parseable date string representing a future time.
+ */
+export const scheduleCampaignSchema = z.object({
+  params: z
+    .object({
+      id: z
+        .string({ required_error: 'Campaign ID is required' })
+        .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
+    })
+    .strict(),
+  body: z
+    .object({
+      scheduledAt: z
+        .string({ required_error: 'scheduledAt is required' })
+        .refine((val) => !isNaN(Date.parse(val)), {
+          message: 'scheduledAt must be a valid date string',
+        })
+        .refine((val) => new Date(val).getTime() > Date.now(), {
+          message: 'scheduledAt must be a future date and time',
+        }),
     })
     .strict(),
 });

@@ -43,6 +43,11 @@ export const getCampaignStatusBadge = (status) => {
         label: 'Draft',
         pillClass: 'bg-amber-500/10 text-amber-300 border border-amber-500/20',
       };
+    case 'scheduled':
+      return {
+        label: 'Scheduled',
+        pillClass: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
+      };
     case 'sending':
       return {
         label: 'Sending',
@@ -64,6 +69,55 @@ export const getCampaignStatusBadge = (status) => {
         pillClass: 'bg-slate-800/80 text-slate-400 border border-slate-700',
       };
   }
+};
+
+/**
+ * Formats a scheduled send time (date and time), or "—" when invalid.
+ *
+ * @param {string|Date|unknown} value
+ * @returns {string}
+ */
+export const formatScheduledAt = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date);
+  } catch {
+    return '—';
+  }
+};
+
+/**
+ * Converts a `datetime-local` input value (local time) to an ISO string, or null if invalid
+ * or not strictly in the future.
+ *
+ * @param {string|unknown} localValue
+ * @param {number} [now=Date.now()]
+ * @returns {string|null}
+ */
+export const localInputToFutureIso = (localValue, now = Date.now()) => {
+  if (typeof localValue !== 'string' || !localValue) return null;
+  const date = new Date(localValue);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= now) return null;
+  return date.toISOString();
+};
+
+/**
+ * Formats a Date as a `datetime-local` value (local time, minute precision).
+ *
+ * @param {Date} date
+ * @returns {string}
+ */
+export const toDatetimeLocalValue = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 /**
@@ -835,6 +889,9 @@ export default {
   formatDeliverySummary,
   describeDeliveryError,
   getCampaignStatusBadge,
+  formatScheduledAt,
+  localInputToFutureIso,
+  toDatetimeLocalValue,
   normalizeSearchQuery,
   computePageAfterDeletion,
   toggleRecipientId,

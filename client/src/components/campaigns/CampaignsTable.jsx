@@ -1,4 +1,4 @@
-import { formatCampaignDate, getCampaignStatusBadge, isCampaignEditable } from '../../utils/campaignHelpers.js';
+import { formatCampaignDate, formatScheduledAt, getCampaignStatusBadge, isCampaignEditable } from '../../utils/campaignHelpers.js';
 
 /**
  * CampaignsTable Component
@@ -154,6 +154,11 @@ export const CampaignsTable = ({
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusBadge.pillClass}`}>
                     {statusBadge.label}
                   </span>
+                  {campaign.status === 'scheduled' && campaign.scheduledAt && (
+                    <span className="block mt-1 text-[11px] text-purple-300/80">
+                      {formatScheduledAt(campaign.scheduledAt)}
+                    </span>
+                  )}
                 </td>
 
                 {/* Recipients Count Badge */}
@@ -277,6 +282,18 @@ export const CampaignsTable = ({
                       </svg>
                     </button>
                     </>
+                    )}
+                    {campaign.status === 'scheduled' && (
+                      <span
+                        title="Scheduled campaigns are locked. Cancel the schedule to edit or delete."
+                        aria-label={`Campaign ${campaign.name} is scheduled and locked`}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-purple-300 bg-purple-500/10 border border-purple-500/20 cursor-not-allowed"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                        Locked
+                      </span>
                     )}
                   </div>
                 </td>

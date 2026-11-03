@@ -39,7 +39,7 @@ import mongoose from 'mongoose';
 /**
  * Supported campaign lifecycle states.
  */
-export const CAMPAIGN_STATUSES = ['draft', 'sending', 'sent', 'failed'];
+export const CAMPAIGN_STATUSES = ['draft', 'scheduled', 'sending', 'sent', 'failed'];
 
 /**
  * Maximum recipients a single campaign may target.
@@ -86,7 +86,7 @@ const campaignSchema = new mongoose.Schema(
       type: String,
       enum: {
         values: CAMPAIGN_STATUSES,
-        message: 'Status must be one of draft, sending, sent, or failed',
+        message: 'Status must be one of draft, scheduled, sending, sent, or failed',
       },
       default: 'draft',
     },
@@ -102,6 +102,11 @@ const campaignSchema = new mongoose.Schema(
         validator: (ids) => !Array.isArray(ids) || ids.length <= MAX_CAMPAIGN_RECIPIENTS,
         message: `A campaign cannot target more than ${MAX_CAMPAIGN_RECIPIENTS} recipients`,
       },
+    },
+    scheduledAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
     sendStartedAt: {
       type: Date,
@@ -132,6 +137,11 @@ campaignSchema.index({ userId: 1, createdAt: -1 });
  * Status index: lets the dispatcher find campaigns left in 'sending' after a restart.
  */
 campaignSchema.index({ status: 1 });
+
+/**
+ * Scheduled dispatch index: lets the scheduler poll for due campaigns efficiently.
+ */
+campaignSchema.index({ status: 1, scheduledAt: 1 });
 
 // Prevent model overwrite in development watch and test runners
 const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', campaignSchema);

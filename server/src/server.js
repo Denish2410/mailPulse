@@ -18,6 +18,10 @@ import {
   startDispatchWatchdog,
   stopAllDispatches,
 } from './services/campaignDispatch.service.js';
+import {
+  startCampaignScheduler,
+  stopCampaignScheduler,
+} from './services/campaignScheduler.service.js';
 
 let activeServer = null;
 let isStarting = false;
@@ -102,6 +106,9 @@ export const createShutdownHandler = ({
         await stopDispatches();
       }
 
+      // 3c. Stop the scheduled-campaign poller and wait for an in-flight poll
+      await stopCampaignScheduler();
+
       // 4. Close Mongoose database connection
       if (mongooseInstance?.connection?.readyState !== 0) {
         logger.log('[Server] Closing MongoDB connection...');
@@ -174,6 +181,7 @@ export const startServer = async (options = {}) => {
         console.error(`[Dispatcher] Failed to resume interrupted dispatches: ${err.name || 'Error'}`);
       });
       startDispatchWatchdog({ emailService });
+      startCampaignScheduler({ emailService });
     }
 
     // 2. Start HTTP server only after database connection succeeds

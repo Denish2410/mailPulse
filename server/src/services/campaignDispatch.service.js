@@ -542,7 +542,7 @@ export const startCampaignDispatch = async ({
     {
       _id: campaign._id,
       userId,
-      status: 'draft',
+      status: { $in: ['draft', 'scheduled'] },
       updatedAt: campaign.updatedAt,
     },
     {

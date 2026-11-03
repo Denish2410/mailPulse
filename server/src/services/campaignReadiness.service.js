@@ -61,9 +61,9 @@ export const evaluateCampaignReadiness = async (campaign, userId) => {
     issues.push('Campaign must have non-empty text content or HTML content.');
   }
 
-  // 4. Status (must be draft)
-  if (campaign.status !== 'draft') {
-    issues.push('Only draft campaigns can be evaluated for readiness.');
+  // 4. Status (must be draft or scheduled)
+  if (campaign.status !== 'draft' && campaign.status !== 'scheduled') {
+    issues.push('Only draft or scheduled campaigns can be evaluated for readiness.');
   }
 
   // 5. Recipients: deduplicate stored IDs and resolve only contacts owned by the user

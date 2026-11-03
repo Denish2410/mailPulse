@@ -3,6 +3,8 @@ import {
   getCampaignReadiness,
   sendCampaignTestEmail,
   sendCampaign,
+  scheduleCampaign,
+  cancelScheduledCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
@@ -20,6 +22,9 @@ import {
   formatSendConfirmation,
   getSendCampaignErrorMessage,
   isCampaignEditable,
+  formatScheduledAt,
+  localInputToFutureIso,
+  toDatetimeLocalValue,
 } from '../../utils/campaignHelpers.js';
 
 /**
@@ -152,6 +157,68 @@ export const CampaignPreviewDialog = ({
     }
   };
 
+  // Scheduling state
+  const [scheduleInput, setScheduleInput] = useState('');
+  const [scheduleState, setScheduleState] = useState({ status: 'idle', message: '' });
+  const [scheduleOverride, setScheduleOverride] = useState(null);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [prevScheduleKey, setPrevScheduleKey] = useState(`${isOpen}:${campaign?.id}`);
+  const scheduleKey = `${isOpen}:${campaign?.id}`;
+  if (scheduleKey !== prevScheduleKey) {
+    setPrevScheduleKey(scheduleKey);
+    setScheduleInput('');
+    setScheduleState({ status: 'idle', message: '' });
+    setScheduleOverride(null);
+    setIsRescheduling(false);
+  }
+
+  const getScheduleErrorMessage = (err) => {
+    const status = err?.response?.status;
+    if (status === 400) return 'Choose a valid date and time in the future.';
+    if (status === 409) return 'This campaign changed or is no longer schedulable. Refresh and try again.';
+    if (status === 422) return "This campaign isn't ready to schedule yet.";
+    if (status === 503) return 'Email sending is not configured on the server.';
+    return getSendCampaignErrorMessage(err);
+  };
+
+  const applyScheduleResult = (data, fallbackStatus) => {
+    const updated = data?.campaign || { ...campaign, status: fallbackStatus };
+    setScheduleOverride({ status: updated.status, scheduledAt: updated.scheduledAt ?? null });
+    if (typeof onCampaignUpdated === 'function') onCampaignUpdated(updated);
+  };
+
+  const handleSchedule = async () => {
+    if (scheduleState.status === 'saving') return;
+    const iso = localInputToFutureIso(scheduleInput);
+    if (!iso) {
+      setScheduleState({ status: 'error', message: 'Choose a date and time in the future.' });
+      return;
+    }
+    setScheduleState({ status: 'saving', message: '' });
+    try {
+      const data = await scheduleCampaign(campaign.id, { scheduledAt: iso });
+      applyScheduleResult(data, 'scheduled');
+      setIsRescheduling(false);
+      setScheduleInput('');
+      setScheduleState({ status: 'idle', message: '' });
+    } catch (err) {
+      setScheduleState({ status: 'error', message: getScheduleErrorMessage(err) });
+    }
+  };
+
+  const handleCancelSchedule = async () => {
+    if (scheduleState.status === 'saving') return;
+    setScheduleState({ status: 'saving', message: '' });
+    try {
+      const data = await cancelScheduledCampaign(campaign.id);
+      applyScheduleResult(data, 'draft');
+      setIsRescheduling(false);
+      setScheduleState({ status: 'idle', message: '' });
+    } catch (err) {
+      setScheduleState({ status: 'error', message: getScheduleErrorMessage(err) });
+    }
+  };
+
   // Synchronize tab preference based on available campaign content
   useEffect(() => {
     if (!isOpen || !campaign) return;
@@ -228,7 +295,7 @@ export const CampaignPreviewDialog = ({
   if (!isOpen || !campaign) return null;
 
   // Presentation summaries
-  const statusBadge = getCampaignStatusBadge(sentStatus || campaign.status);
+  const statusBadge = getCampaignStatusBadge(sentStatus || scheduleOverride?.status || campaign.status);
   const summary = formatReadinessSummary(readinessData?.summary || {});
   const issues = formatReadinessIssues(readinessData?.issues || []);
   const readinessBadge = getReadinessBadge(readinessData?.isReady === true);
@@ -245,7 +312,10 @@ export const CampaignPreviewDialog = ({
   const unsubscribedCount = summary.unsubscribedRecipientsCount;
 
   // Effective lifecycle status (the list copy may be stale right after sending)
-  const effectiveStatus = sentStatus || campaign.status;
+  const effectiveStatus = sentStatus || scheduleOverride?.status || campaign.status;
+  const effectiveScheduledAt = scheduleOverride ? scheduleOverride.scheduledAt : campaign.scheduledAt;
+  const isScheduled = effectiveStatus === 'scheduled';
+  const isScheduling = scheduleState.status === 'saving';
   const isDraft = effectiveStatus === 'draft';
   const isSendingCampaign = sendState.status === 'sending';
   const sendAvailability = getCampaignSendAvailability(
@@ -334,7 +404,65 @@ export const CampaignPreviewDialog = ({
           </div>
 
           {/* Section 2: Delivery progress (sent campaigns) or live readiness evaluation (drafts) */}
-          {!isDraft ? (
+          {isScheduled ? (
+            <div
+              role="status"
+              className="p-4 sm:p-5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-200 text-sm flex flex-col gap-3"
+            >
+              <div>
+                <p className="font-semibold">Scheduled to send {formatScheduledAt(effectiveScheduledAt)}</p>
+                <p className="text-xs text-purple-300/80 mt-1">
+                  This campaign is locked. Cancel the schedule to edit it.
+                </p>
+              </div>
+              {isRescheduling && (
+                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-slate-300">
+                    New date and time
+                    <input
+                      type="datetime-local"
+                      value={scheduleInput}
+                      min={toDatetimeLocalValue(new Date())}
+                      onChange={(e) => setScheduleInput(e.target.value)}
+                      className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSchedule}
+                    disabled={isScheduling || !scheduleInput}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400"
+                  >
+                    {isScheduling ? 'Saving…' : 'Save new time'}
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRescheduling((v) => !v);
+                    setScheduleState({ status: 'idle', message: '' });
+                  }}
+                  disabled={isScheduling}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-purple-100 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 disabled:opacity-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400"
+                >
+                  {isRescheduling ? 'Close reschedule' : 'Reschedule'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelSchedule}
+                  disabled={isScheduling}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  Cancel Schedule
+                </button>
+              </div>
+              {scheduleState.status === 'error' && (
+                <p role="alert" className="text-xs text-rose-300">{scheduleState.message}</p>
+              )}
+            </div>
+          ) : !isDraft ? (
             <DeliveryStatusPanel
               campaignId={campaign.id}
               onStatusChange={(status) => {
@@ -756,6 +884,32 @@ export const CampaignPreviewDialog = ({
           )}
         </div>
 
+        {isDraft && sendAvailability.canSend && (
+          <div className="mx-6 mb-3 px-4 py-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row sm:items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs text-slate-300">
+              Schedule send
+              <input
+                type="datetime-local"
+                value={scheduleInput}
+                min={toDatetimeLocalValue(new Date())}
+                onChange={(e) => setScheduleInput(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleSchedule}
+              disabled={isScheduling || !scheduleInput}
+              className="px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400"
+            >
+              {isScheduling ? 'Scheduling…' : 'Schedule Send'}
+            </button>
+            {scheduleState.status === 'error' && (
+              <p role="alert" className="text-xs text-rose-300">{scheduleState.message}</p>
+            )}
+          </div>
+        )}
+
         {/* Dialog Footer */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 px-6 py-4 border-t border-slate-800 bg-slate-900/90 shrink-0">
           <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
@@ -763,7 +917,9 @@ export const CampaignPreviewDialog = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>
-              {!isDraft
+              {isScheduled
+                ? 'This campaign is scheduled and locked until the schedule is canceled.'
+                : !isDraft
                 ? 'This campaign has been sent and can no longer be edited.'
                 : testEmailAvailability.canSend || isSendingTestEmail
                 ? 'Test emails go only to your own account email. Send the campaign when it is ready.'
