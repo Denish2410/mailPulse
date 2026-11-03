@@ -8,8 +8,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Frontend (`client/`)**: React 19, Vite, Tailwind CSS, React Router v6, Axios, Recharts.
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
-- **Latest Commit**: `7f59253 feat(scheduler): Phase 9 — Scheduled Campaign Dispatch`
-- **Testing Baseline**: **649 automated tests** (385 server, 264 client), 0 failures, 0 skipped.
+- **Latest Commit**: see `git log` (Phase 10 work lives on branch `phase10/personalization`)
+- **Testing Baseline**: **673 automated tests** (403 server, 270 client), 0 failures, 0 skipped.
 
 ---
 
@@ -39,7 +39,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 ---
 
-## 3. Completed Phases Summary (Phases 1 – 9)
+## 3. Completed Phases Summary (Phases 1 – 10)
 
 ### Phase 1: Core Infrastructure & Security
 - Monorepo setup, centralized Express error handling, Helmet, CORS, morgan logging.
@@ -95,6 +95,12 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - Edit/delete locks (`409 Conflict`) while scheduled.
 - Frontend datetime picker, "Scheduled" badges, and preview reschedule/cancel controls.
 
+### Phase 10: Template Engine & Personalization
+- `personalization.service.js`: `{{name}}`, `{{firstName}}`, `{{lastName}}`, `{{email}}` with `{{tag | "fallback"}}`; single-pass, HTML-escaped in HTML, control chars stripped in subjects; unknown and `{{unsubscribeUrl}}` tags untouched.
+- Merge tags render per recipient in dispatch (before tracking/unsubscribe injection) and in test emails (account holder's details).
+- `Template` model + `/api/v1/templates` CRUD (tenant-scoped, unique name per user, 200 per user).
+- Client: `/templates` library page, "Start from template" in the campaign form (copy, not link), merge tag toolbar.
+
 ---
 
 ## 4. Key Data Models (Mongoose)
@@ -109,6 +115,9 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
 - **Delivery** (`server/src/models/Delivery.js`):
   - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
+- **Template** (`server/src/models/Template.js`):
+  - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`.
+  - Indexes: `{ userId: 1, name: 1 }` (unique), `{ userId: 1, updatedAt: -1 }`.
 - **Suppression** (`server/src/models/Suppression.js`):
   - Fields: `userId`, `email`, `reason`, `source`, `createdAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique).
@@ -138,6 +147,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/campaigns/:id/cancel-schedule` | POST | Protected | Cancel schedule, revert to draft |
 | `/api/v1/campaigns/:id/deliveries` | GET | Protected | Delivery audit log |
 | `/api/v1/campaigns/:id/analytics` | GET | Protected | Open/click engagement analytics |
+| `/api/v1/templates` | GET, POST | Protected | List and create templates |
+| `/api/v1/templates/:id` | GET, PATCH, DELETE | Protected | Template CRUD |
 | `/api/v1/analytics/overview` | GET | Protected | Overview metrics (`?days=7\|30\|90`) |
 | `/api/v1/tracking/open/:token` | GET | Public | Transparent 1x1 GIF tracking pixel |
 | `/api/v1/tracking/click/:token` | GET | Public | Click tracking redirect |
@@ -168,9 +179,6 @@ git diff --check
 
 ## 7. Future Phases Roadmap
 
-- **Phase 10: Dynamic Template Engine & Recipient Personalization**:
-  - Merge tags: `{{name}}`, `{{firstName}}`, `{{email}}`, with fallback syntax `{{name | "Customer"}}`.
-  - Reusable template library (HTML design management).
 - **Phase 11: Contact Segmentation & Tagging**:
   - Tags (`VIP`, `Lead`) and smart dynamic filters (e.g., opened in last 30 days).
   - Target campaigns directly by tag or segment criteria.
