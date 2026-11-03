@@ -1,286 +1,269 @@
-# MailPulse
+<div align="center">
 
-MailPulse is a full-stack email campaign management and analytics platform built with the MERN stack (MongoDB, Express, React, Node.js).
+# 📬 MailPulse
 
-This repository contains both the frontend client and the backend server applications organized as an npm monorepo workspace.
+### Write it. Check it. Send it. Measure it.
+
+**A friendly, full-stack email campaign platform — from first draft to delivery report.**
+
+![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![Express](https://img.shields.io/badge/Express-API-000000?style=for-the-badge&logo=express&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-Build-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+
+[🚀 Quick Start](#-up-and-running-in-4-steps) •
+[✨ Features](#-what-mailpulse-does) •
+[🧰 Commands](#-handy-commands) •
+[🩺 Help](#-something-not-working) •
+[📚 Docs](#-learn-more)
+
+</div>
 
 ---
 
-## Folder Structure
+## 💡 What is MailPulse?
 
-```text
-MailPulse/
-├── client/
-│   ├── public/
-│   ├── src/
-│   │   ├── api/
-│   │   │   └── health.js
-│   │   ├── assets/
-│   │   ├── components/
-│   │   │   ├── common/
-│   │   │   │   └── ConnectivityCheck.jsx
-│   │   │   ├── layout/
-│   │   │   ├── contacts/
-│   │   │   └── campaigns/
-│   │   ├── pages/
-│   │   │   ├── auth/
-│   │   │   ├── dashboard/
-│   │   │   ├── contacts/
-│   │   │   ├── campaigns/
-│   │   │   └── analytics/
-│   │   ├── hooks/
-│   │   ├── lib/
-│   │   │   └── api.js
-│   │   ├── services/
-│   │   │   └── api.js
-│   │   ├── context/
-│   │   ├── utils/
-│   │   ├── App.jsx
-│   │   ├── index.css
-│   │   └── main.jsx
-│   ├── tests/
-│   │   └── api.test.js
-│   ├── .env.example
-│   ├── (client/.env - create locally, ignored by git)
-│   ├── package.json
-│   └── vite.config.js
-│
-├── server/
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── db.js
-│   │   ├── middleware/
-│   │   │   └── errorHandler.js
-│   │   ├── routes/
-│   │   │   └── health.routes.js
-│   │   ├── validators/
-│   │   │   └── validate.js
-│   │   ├── controllers/
-│   │   ├── models/
-│   │   ├── services/
-│   │   ├── jobs/
-│   │   ├── utils/
-│   │   ├── app.js
-│   │   └── server.js
-│   ├── tests/
-│   │   ├── appConfig.test.js
-│   │   ├── errorHandler.test.js
-│   │   ├── health.test.js
-│   │   ├── shutdown.test.js
-│   │   └── validation.test.js
-│   ├── package.json
-│   ├── .env.example
-│   └── (server/.env - create locally, ignored by git)
-│
-├── docs/
-│   ├── architecture.md
-│   └── api.md
-│
-├── .gitignore
-├── package.json
-└── README.md
+Think of MailPulse as your **mission control for email campaigns**:
+
+```
+  📇 Contacts  ──►  ✍️ Draft  ──►  🔍 Preview  ──►  🧪 Test  ──►  🚀 Send  ──►  📊 Analytics
 ```
 
----
-
-## Technology Stack
-
-### Frontend (`client/`)
-- **React.js (v19)** with JSX
-- **Vite** build tool and dev server
-- **Tailwind CSS** utility-first styling
-- **React Router** client-side routing
-- **Axios** HTTP client with centralized instance and configuration
-- **Recharts** analytics visualization
-
-### Backend (`server/`)
-- **Node.js** with ES modules (`"type": "module"`)
-- **Express.js** web framework
-- **MongoDB** database with **Mongoose** ODM
-- **dotenv** environment management
-- **cors** cross-origin resource sharing
-- **helmet** HTTP security headers
-- **morgan** HTTP request logger
-- **zod** runtime schema validation
-- **express-rate-limit** rate limiting middleware
-- **nodemon** development server
+Add your contacts, write a campaign, preview it safely, send yourself a test, launch it to everyone — then watch the numbers roll in. No guesswork, no double-sends.
 
 ---
 
-## Campaign Management & Preview
+## 🚀 Up and running in 4 steps
 
-MailPulse provides a complete campaign drafting, recipient assignment, readiness validation, and review workflow:
+> **You'll need:** [Node.js 20+](https://nodejs.org) · npm 10+ · [MongoDB](https://www.mongodb.com/try/download/community) (local, or a free [Atlas](https://www.mongodb.com/atlas) URI)
 
-- **Campaign CRUD & Recipient Selection**: Create, search, paginate, edit, and delete campaign drafts. Attach recipients selected from the authenticated user's contact list.
-- **Backend Readiness Validation**: The `GET /api/v1/campaigns/:id/readiness` endpoint verifies draft status, name and subject constraints, non-empty content (HTML or plain text), and confirms at least one selected recipient resolves to an existing owned contact.
-- **Preview & Review UI**: A dedicated modal dialog providing live readiness checks, safe plain-text viewing, and an isolated sandboxed `<iframe>` (`sandbox=""`, `srcDoc`) for email HTML rendering without script execution or DOM injection risks.
-- **Recipient Metrics**: Clear metric breakdowns distinguishing total selected recipients, verified eligible recipients, and missing or unavailable contacts.
-- **Test Emails**: `POST /api/v1/campaigns/:id/test-email` sends a single `[TEST]` copy of a draft to the signed-in user's own account email only. It never contacts campaign recipients, never modifies the campaign, is rate limited per user, and fails closed (HTTP 503) when SMTP is not configured. The Preview & Review dialog exposes this as a **Send test email** button, disabled until the draft has a subject and content, with duplicate-click protection and clear feedback for rate limits and configuration errors.
-- **Campaign Sending**: `POST /api/v1/campaigns/:id/send` (body `{ "confirm": true }`) sends a ready draft to its verified recipients. Readiness and SMTP configuration are re-checked server-side, and the `draft -> sending` transition is atomic so a campaign can never be sent twice. Messages go out in the background with bounded concurrency, one Delivery record per recipient, and the campaign finishes as `sent` or `failed`. Sent campaigns are locked against editing and deletion. In the UI, **Send campaign** in the Preview & Review dialog asks for confirmation, then shows live progress and a per-recipient delivery report.
-- **Delivery Log**: `GET /api/v1/campaigns/:id/deliveries` returns per-recipient status (`pending`, `processing`, `sent`, `failed`) with sanitized error codes and a summary. Interrupted sends resume on restart without re-sending to anyone, and a watchdog recovers campaigns whose dispatch stalls while the server is running.
-- **Delivery guarantee**: each recipient is emailed **at most once** per campaign. It is not exactly-once: `sent` means "accepted by the SMTP transport", not "delivered", and a crash or database failure right after acceptance is recorded as `failed` (`INTERRUPTED` or `PERSIST_ERROR`) even though the message likely went out. Treat counts as a lower bound.
-- **Limits**: a campaign may target at most **5,000 recipients** (enforced on create, update and send).
-- **Deployment constraint**: run **exactly one server instance**. Dispatch bookkeeping and the per-user rate limiters live in process memory; with several instances, recovery on one instance can fail deliveries another is still sending, and rate limits multiply by the instance count.
-- **Not yet implemented**: scheduled sends, per-recipient personalization, unsubscribe links, and open/click/bounce tracking.
+### 1️⃣ Get the code
 
----
+```bash
+git clone https://github.com/Denish2410/mailPulse.git
+cd mailPulse
+```
 
-## Analytics
-
-`GET /api/v1/analytics/overview?days=7|30|90` returns an owner-scoped summary: contact and campaign counts, delivery totals, a zero-filled daily series of accepted/failed sends (UTC days), failure reasons, and the five most recent sent campaigns with their acceptance rate.
-
-- **Analytics page** (`/analytics`): range switcher, KPI cards, a stacked daily bar chart (Recharts), recent campaigns table and failure-reason breakdown.
-- **Dashboard**: the campaign card now shows live 30-day numbers instead of placeholders.
-- "Accepted" means the SMTP provider accepted the message; opens, clicks and bounces are not tracked yet.
-
-## Quick-Start Guide
-
-### 1. Prerequisites
-- **Node.js**: v20+ or v22+ (LTS recommended)
-- **npm**: v10+
-- **MongoDB**: Local instance running on `mongodb://localhost:27017` or a MongoDB Atlas URI
-
-### 2. Installation
-From the project root directory, install dependencies across both `client` and `server` workspaces:
+### 2️⃣ Install everything (one command, both apps)
 
 ```bash
 npm install
 ```
 
-### 3. Environment Setup
+### 3️⃣ Create your settings files
 
-#### Backend Configuration (`server/.env`)
-Copy the backend example template:
 ```bash
 cp server/.env.example server/.env
-```
-Default configuration values in `server/.env`:
-```env
-NODE_ENV=development
-PORT=5000
-CLIENT_URL=http://localhost:5173
-MONGODB_URI=mongodb://localhost:27017/mailpulse
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX=100
-```
-
-#### Frontend Configuration (`client/.env`)
-Copy the frontend example template:
-```bash
 cp client/.env.example client/.env
 ```
-Default configuration values in `client/.env`:
-```env
-# Backend API Base URL (must use VITE_ prefix to be exposed to Vite browser code)
-VITE_API_BASE_URL=http://localhost:5000/api/v1
-```
 
-> **Security Note**:
-> - Only environment variables prefixed with `VITE_` are exposed to the browser.
-> - Never store database credentials, server private keys, or secrets in `client/.env`.
-> - All `.env` files are ignored by git in `.gitignore`.
+✅ The defaults work out of the box for local development. Using MongoDB Atlas? Just paste your URI into `MONGODB_URI` in `server/.env`.
 
-### 4. Starting Frontend and Backend Concurrently
-Start both applications simultaneously with colored prefixes and unified process lifecycle management:
+### 4️⃣ Launch 🎉
 
 ```bash
 npm run dev
 ```
-- Frontend starts on: `http://localhost:5173`
-- Backend API starts on: `http://localhost:5000` (Health check at `http://localhost:5000/api/v1/health`)
-- Stopping the process with `Ctrl+C` cleanly terminates both child processes without leaving orphaned background services.
 
-### 5. Starting Applications Separately
+| What | Where |
+|---|---|
+| 🖥️ App | **http://localhost:5173** |
+| ⚙️ API | http://localhost:5000 |
+| ❤️ Health check | http://localhost:5000/api/v1/health |
 
-```bash
-# Start only the Express backend (nodemon with auto-reload)
-npm run dev:server
+Press `Ctrl + C` to stop both — nothing is left running in the background.
 
-# Start only the Vite frontend dev server
-npm run dev:client
-```
-
-### 6. Running Automated Tests
-
-MailPulse uses Node.js's native test runner (`node:test`) for lightweight, zero-dependency testing.
-
-```bash
-# Run all project test suites sequentially (fails if either suite fails)
-npm test
-
-# Run backend tests only (36 tests across 5 suites)
-npm run test:server
-
-# Run frontend tests only (15 tests covering API client & health probes)
-npm run test:client
-```
-
-### 7. Building the Frontend for Production
-
-```bash
-# Build the production bundle into client/dist/
-npm run build
-
-# Direct workspace alias
-npm run build:client
-```
+> 💌 **Want to actually send emails?** Fill in the SMTP settings in `server/.env` (see `server/.env.example`). Without them, sending is safely disabled and you'll get a clear message instead of a crash.
 
 ---
 
-## Root Script Reference
+## ✨ What MailPulse does
 
-| Command | Action | Implementation Details |
-| :--- | :--- | :--- |
-| `npm run dev` | Starts server & client concurrently | Uses `concurrently -k` with colored prefixes (`[server]`, `[client]`). Automatically terminates child processes on exit. |
-| `npm run dev:server` | Starts Express backend | Runs `nodemon src/server.js` in `server/`. |
-| `npm run dev:client` | Starts Vite frontend | Runs `vite` in `client/` on port `5173`. |
-| `npm test` | Runs all test suites | Executes `npm run test:server && npm run test:client`. Exits non-zero if either suite fails. |
-| `npm run test:server` | Runs backend test suite | Runs `node --test tests/**/*.test.js` in `server/`. |
-| `npm run test:client` | Runs frontend test suite | Runs `node --test tests/**/*.test.js` in `client/`. |
-| `npm run build` | Builds frontend production bundle | Calls `npm run build:client` -> `vite build` in `client/`. |
-| `npm run build:client` | Explicit build script alias | Runs `npm --prefix client run build`. |
-| `npm run start:server` | Starts backend in production mode | Runs `node src/server.js` in `server/`. |
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### ✍️ Campaigns
+Create, search, edit and delete drafts. Pick recipients straight from your contact list.
+
+</td>
+<td width="50%" valign="top">
+
+### 🔍 Safe Preview
+See your email exactly as it'll look, in a locked-down sandbox — no scripts, no surprises.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ✅ Readiness Check
+Before sending, MailPulse confirms your subject, content and recipients are all good to go.
+
+</td>
+<td valign="top">
+
+### 🧪 Test Emails
+Send a `[TEST]` copy to **only yourself** with one click. Real recipients are never touched.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🚀 One-Time Sending
+Confirm and launch. Live progress, a per-recipient report, and a guarantee nobody gets it twice.
+
+</td>
+<td valign="top">
+
+### 📊 Analytics
+KPI cards, daily charts, failure reasons and recent campaigns — for the last 7, 30 or 90 days.
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>🔎 Under the hood — how sending works (click to expand)</b></summary>
+
+<br>
+
+- **Atomic launch:** a campaign moves `draft → sending` in a single step, so it can never be sent twice.
+- **Background delivery** with bounded concurrency and one delivery record per recipient.
+- **Crash-safe:** interrupted sends resume on restart without re-sending, and a watchdog recovers stalled campaigns.
+- **Locked after sending:** sent campaigns can't be edited or deleted.
+- **At most once per recipient.** "Sent" means *accepted by your SMTP provider*, not opened or delivered — so treat counts as a lower bound.
+- **Limits:** up to **5,000 recipients** per campaign. Test emails are rate-limited per user.
+- ⚠️ **Run a single server instance.** Delivery bookkeeping and rate limits live in memory.
+
+**Key endpoints**
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/campaigns/:id/readiness` | Is this draft ready to send? |
+| `POST` | `/api/v1/campaigns/:id/test-email` | Send a test copy to yourself |
+| `POST` | `/api/v1/campaigns/:id/send` | Send it (body: `{ "confirm": true }`) |
+| `GET` | `/api/v1/campaigns/:id/deliveries` | Per-recipient delivery log |
+| `GET` | `/api/v1/analytics/overview?days=7\|30\|90` | Analytics summary |
+
+</details>
+
+### 🛣️ Coming soon
+
+`⏰ Scheduled sends` · `👤 Personalization` · `🔕 Unsubscribe links` · `👀 Open / click / bounce tracking`
 
 ---
 
-## Troubleshooting Guide
+## 🧰 Handy commands
 
-### 1. MongoDB Connection Errors
-- **Symptom**: `[Server Error] Startup failed: Connection refused to MongoDB host` or Readiness returns `503 Not Ready`.
-- **Cause**: The MongoDB daemon is not running locally or the connection URI is wrong.
-- **Solution**:
-  - macOS (Homebrew): `brew services start mongodb-community`
-  - Linux: `sudo systemctl start mongod`
-  - Verify MongoDB status: `mongosh --eval "db.adminCommand('ping')"`
-  - Check `MONGODB_URI` in `server/.env`.
+Run these from the project root.
 
-### 2. Occupied Ports (`EADDRINUSE`)
-- **Symptom**: `Startup failed: listen EADDRINUSE: address already in use :::5000`.
-- **Causes**:
-  - **macOS AirPlay Receiver**: On macOS Monterey, Ventura, Sonoma, and Sequoia, macOS ControlCenter listens on port 5000 by default for AirPlay Receiver (`commplex-main`).
-    - *Fix A*: Turn off AirPlay Receiver in **System Settings > General > AirDrop & AirPlay > AirPlay Receiver (Toggle Off)**.
-    - *Fix B*: Change `PORT=5005` in `server/.env` and update `VITE_API_BASE_URL=http://localhost:5005/api/v1` in `client/.env`.
-  - **Stray process**: Check which process is occupying the port with `lsof -i :5000` and stop the conflicting process.
-
-### 3. Missing or Misconfigured Environment Variables
-- **Symptom**: Warning in browser console: `[MailPulse API] VITE_API_BASE_URL is not set...` or backend fails with missing config.
-- **Cause**: `.env` file was not created or lacks required keys.
-- **Solution**:
-  - Verify `server/.env` exists and has `PORT`, `CLIENT_URL`, `MONGODB_URI`.
-  - Verify `client/.env` exists and contains `VITE_API_BASE_URL=http://localhost:5000/api/v1` (ensure the `VITE_` prefix is present).
-
-### 4. Frontend API Connectivity & CORS Failures
-- **Symptom**: In-app connectivity check turns red with `Backend server not detected` or browser console reports `Blocked by CORS policy`.
-- **Cause**: Backend is stopped, port numbers do not match, or CORS origin differs from the Vite dev server origin.
-- **Solution**:
-  - Ensure the backend is running (`npm run dev:server`).
-  - Verify `CLIENT_URL` in `server/.env` matches the frontend URL (`http://localhost:5173`).
-  - Verify `VITE_API_BASE_URL` in `client/.env` matches the backend host and port (`http://localhost:5000/api/v1`).
-  - Use the in-app **"Re-check"** button in `ConnectivityCheck` to verify once resolved
+| Command | What it does |
+|---|---|
+| `npm run dev` | 🚀 Start frontend + backend together |
+| `npm run dev:server` | ⚙️ Start only the backend (auto-reload) |
+| `npm run dev:client` | 🖥️ Start only the frontend |
+| `npm test` | 🧪 Run all tests |
+| `npm run test:server` | 🧪 Backend tests only |
+| `npm run test:client` | 🧪 Frontend tests only |
+| `npm run build` | 📦 Build the frontend for production (`client/dist/`) |
+| `npm run start:server` | 🏁 Run the backend in production mode |
 
 ---
 
-## Documentation
+## 🩺 Something not working?
 
-- [Architecture Overview](file:///Users/denishahalpara/Desktop/MailPulse/docs/architecture.md)
-- [API Specifications](file:///Users/denishahalpara/Desktop/MailPulse/docs/api.md)
+<details>
+<summary><b>🍃 "Connection refused" / can't reach MongoDB</b></summary>
+
+<br>
+
+MongoDB isn't running, or the URI is wrong.
+
+```bash
+brew services start mongodb-community   # macOS
+sudo systemctl start mongod             # Linux
+mongosh --eval "db.adminCommand('ping')" # check it's alive
+```
+
+Then double-check `MONGODB_URI` in `server/.env`.
+</details>
+
+<details>
+<summary><b>🔌 "EADDRINUSE: address already in use :::5000"</b></summary>
+
+<br>
+
+Something else is using port 5000. **On a Mac it's usually AirPlay Receiver.**
+
+- **Easy fix:** System Settings → General → AirDrop & AirPlay → turn off **AirPlay Receiver**.
+- **Or change the port:** set `PORT=5005` in `server/.env` and `VITE_API_BASE_URL=http://localhost:5005/api/v1` in `client/.env`.
+- **Find the culprit:** `lsof -i :5000`
+</details>
+
+<details>
+<summary><b>⚙️ "VITE_API_BASE_URL is not set" / missing config</b></summary>
+
+<br>
+
+You probably skipped step 3. Make sure both files exist:
+
+- `server/.env` → has `PORT`, `CLIENT_URL`, `MONGODB_URI`
+- `client/.env` → has `VITE_API_BASE_URL=http://localhost:5000/api/v1` (the `VITE_` prefix matters!)
+</details>
+
+<details>
+<summary><b>🚫 "Backend server not detected" / CORS errors</b></summary>
+
+<br>
+
+- Is the backend running? → `npm run dev:server`
+- `CLIENT_URL` in `server/.env` should be `http://localhost:5173`
+- `VITE_API_BASE_URL` in `client/.env` should point to the backend's host and port
+- Hit **Re-check** in the app's connectivity banner once fixed ✅
+</details>
+
+> 🔐 **Security tip:** only `VITE_`-prefixed variables reach the browser. Never put secrets in `client/.env`. All `.env` files are git-ignored.
+
+---
+
+## 🗂️ Project layout
+
+```
+mailPulse/
+├── 🖥️ client/     React 19 + Vite + Tailwind + Recharts
+├── ⚙️ server/     Express + MongoDB (Mongoose) + Zod
+├── 📚 docs/       Architecture & API docs
+└── 📦 package.json  npm workspaces — one install, one command
+```
+
+<details>
+<summary><b>🧱 Full tech stack</b></summary>
+
+<br>
+
+**Frontend:** React 19 · Vite · Tailwind CSS · React Router · Axios · Recharts
+**Backend:** Node.js (ES modules) · Express · MongoDB + Mongoose · Zod · Helmet · CORS · Morgan · express-rate-limit · dotenv · nodemon
+**Testing:** Node's built-in `node:test` runner — zero extra dependencies
+
+</details>
+
+---
+
+## 📚 Learn more
+
+- 🏗️ [Architecture overview](docs/architecture.md)
+- 🔌 [API reference](docs/api.md)
+
+---
+
+<div align="center">
+
+**Made with ☕ and 💌 by [Denish](https://github.com/Denish2410)**
+
+If MailPulse helped you, drop a ⭐ — it really makes a difference!
+
+</div>
