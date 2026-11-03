@@ -8,6 +8,7 @@ import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import ContactsPage from './pages/contacts/ContactsPage.jsx';
 import CampaignsPage from './pages/campaigns/CampaignsPage.jsx';
 import AnalyticsPage from './pages/analytics/AnalyticsPage.jsx';
+import TemplatesPage from './pages/templates/TemplatesPage.jsx';
 
 export function App() {
   return (
@@ -26,6 +27,7 @@ export function App() {
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/templates" element={<TemplatesPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}
