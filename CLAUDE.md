@@ -8,8 +8,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Frontend (`client/`)**: React 19, Vite, Tailwind CSS, React Router v6, Axios, Recharts.
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
-- **Latest Commit**: see `git log` (Phase 10 work lives on branch `phase10/personalization`)
-- **Testing Baseline**: **673 automated tests** (403 server, 270 client), 0 failures, 0 skipped.
+- **Latest Commit**: see `git log` (Phase 11 work lives on branch `phase11/segmentation`)
+- **Testing Baseline**: **703 automated tests** (427 server, 276 client), 0 failures, 0 skipped.
 
 ---
 
@@ -19,7 +19,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
    - Run **exactly one application server instance**.
    - Dispatch concurrency tracking (`activeDispatches`), memory rate limiters, and the background scheduler timer live in-process memory.
 2. **Tenant Isolation**:
-   - Every user-owned document (`Contact`, `Campaign`, `Delivery`, `Suppression`, `TrackingEvent`) MUST be scoped strictly to `{ _id: id, userId }`.
+   - Every user-owned document (`Contact`, `Campaign`, `Delivery`, `Suppression`, `Template`, `Segment`; `TrackingEvent` via its owner's campaigns) MUST be scoped strictly to `{ _id: id, userId }`.
    - Never expose raw database IDs or sensitive internal fields in safe formatting functions.
 3. **Fail-Closed Security**:
    - Verify SMTP configuration before locking drafts (`503 Service Unavailable` if unconfigured).
@@ -39,7 +39,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 ---
 
-## 3. Completed Phases Summary (Phases 1 – 10)
+## 3. Completed Phases Summary (Phases 1 – 11)
 
 ### Phase 1: Core Infrastructure & Security
 - Monorepo setup, centralized Express error handling, Helmet, CORS, morgan logging.
@@ -101,6 +101,13 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - `Template` model + `/api/v1/templates` CRUD (tenant-scoped, unique name per user, 200 per user).
 - Client: `/templates` library page, "Start from template" in the campaign form (copy, not link), merge tag toolbar.
 
+### Phase 11: Contact Segmentation & Tagging
+- Contact `tags` (lowercase, de-duplicated, max 20 per contact, 30 chars each; `server/src/utils/tags.js`), `?tag=` list filter, `GET /contacts/tags` counts.
+- `segment.service.js`: rules `tagsAny`/`tagsAll`/`tagsNone`, engagement (`opened`/`clicked`/`not_opened` in last N days, owner campaigns only), `createdWithinDays`; combined with AND, unsubscribed always excluded, at least one rule required.
+- `Segment` model + `/api/v1/segments` CRUD with `GET /:id/preview` and `POST /preview` (exact count + 10-contact sample).
+- `POST /campaigns/:id/audience` (`{ tags | segmentId, mode: 'replace' | 'add' }`) snapshots the audience into a draft's `recipientIds` (409 if not draft, 422 above 5,000).
+- Client: tags in the contact form/table/filter, `/segments` page with live preview, audience picker in the campaign form.
+
 ---
 
 ## 4. Key Data Models (Mongoose)
@@ -108,8 +115,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **User** (`server/src/models/User.js`):
   - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`).
 - **Contact** (`server/src/models/Contact.js`):
-  - Fields: `userId`, `name`, `email`, `isUnsubscribed`, `unsubscribedAt`.
-  - Indexes: `{ userId: 1, email: 1 }` (unique).
+  - Fields: `userId`, `name`, `email`, `tags`, `isUnsubscribed`, `unsubscribedAt`.
+  - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
 - **Campaign** (`server/src/models/Campaign.js`):
   - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`).
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
@@ -117,6 +124,9 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
 - **Template** (`server/src/models/Template.js`):
   - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`.
+  - Indexes: `{ userId: 1, name: 1 }` (unique), `{ userId: 1, updatedAt: -1 }`.
+- **Segment** (`server/src/models/Segment.js`):
+  - Fields: `userId`, `name`, `description`, `criteria` (`tagsAny`, `tagsAll`, `tagsNone`, `engagement`, `createdWithinDays`).
   - Indexes: `{ userId: 1, name: 1 }` (unique), `{ userId: 1, updatedAt: -1 }`.
 - **Suppression** (`server/src/models/Suppression.js`):
   - Fields: `userId`, `email`, `reason`, `source`, `createdAt`.
@@ -138,6 +148,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/contacts` | GET, POST | Protected | List and create contacts |
 | `/api/v1/contacts/:id` | GET, PUT, DELETE | Protected | Contact CRUD |
 | `/api/v1/contacts/import` | POST | Protected | Bulk CSV import |
+| `/api/v1/contacts/tags` | GET | Protected | Tags with contact counts |
 | `/api/v1/campaigns` | GET, POST | Protected | List and draft campaigns |
 | `/api/v1/campaigns/:id` | GET, PATCH, DELETE | Protected | Campaign CRUD (locked if scheduled/sent) |
 | `/api/v1/campaigns/:id/readiness` | GET | Protected | Pre-send readiness check |
@@ -145,10 +156,15 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/campaigns/:id/send` | POST | Protected | Dispatch campaign (`{ confirm: true }`) |
 | `/api/v1/campaigns/:id/schedule` | POST | Protected | Schedule campaign (`{ scheduledAt }`) |
 | `/api/v1/campaigns/:id/cancel-schedule` | POST | Protected | Cancel schedule, revert to draft |
+| `/api/v1/campaigns/:id/audience` | POST | Protected | Fill draft recipients by tag or segment |
 | `/api/v1/campaigns/:id/deliveries` | GET | Protected | Delivery audit log |
 | `/api/v1/campaigns/:id/analytics` | GET | Protected | Open/click engagement analytics |
 | `/api/v1/templates` | GET, POST | Protected | List and create templates |
 | `/api/v1/templates/:id` | GET, PATCH, DELETE | Protected | Template CRUD |
+| `/api/v1/segments` | GET, POST | Protected | List and create segments |
+| `/api/v1/segments/preview` | POST | Protected | Preview unsaved criteria |
+| `/api/v1/segments/:id` | GET, PATCH, DELETE | Protected | Segment CRUD |
+| `/api/v1/segments/:id/preview` | GET | Protected | Count + sample for a saved segment |
 | `/api/v1/analytics/overview` | GET | Protected | Overview metrics (`?days=7\|30\|90`) |
 | `/api/v1/tracking/open/:token` | GET | Public | Transparent 1x1 GIF tracking pixel |
 | `/api/v1/tracking/click/:token` | GET | Public | Click tracking redirect |
@@ -179,9 +195,6 @@ git diff --check
 
 ## 7. Future Phases Roadmap
 
-- **Phase 11: Contact Segmentation & Tagging**:
-  - Tags (`VIP`, `Lead`) and smart dynamic filters (e.g., opened in last 30 days).
-  - Target campaigns directly by tag or segment criteria.
 - **Phase 12: Inbound Bounce & Complaint Processing (Webhooks)**:
   - ESP webhook ingress (SES, SendGrid, Mailgun) for hard/soft bounces and spam complaints.
   - Automatic suppression of hard bounces.
