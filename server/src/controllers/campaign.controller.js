@@ -18,6 +18,8 @@ import {
 } from '../services/campaignDispatch.service.js';
 import { getCampaignTrackingSummary } from '../services/tracking.service.js';
 import { personalizeMessage } from '../services/personalization.service.js';
+import { resolveSegment } from '../services/segment.service.js';
+import Segment from '../models/Segment.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -799,6 +801,75 @@ export const cancelScheduledCampaign = asyncHandler(async (req, res) => {
     message: 'Campaign schedule canceled successfully',
     data: {
       campaign: formatSafeCampaign(updatedCampaign),
+    },
+  });
+});
+
+/**
+ * Fill a draft campaign's recipients from tags or a saved segment.
+ *
+ * The audience is resolved once, at this call, and stored as the campaign's recipient list
+ * (a snapshot), so the existing readiness, suppression and at-most-once guarantees apply
+ * unchanged. Unsubscribed contacts are never added.
+ *
+ * Route: POST /api/v1/campaigns/:id/audience
+ * Access: Protected (Bearer JWT)
+ */
+export const applyCampaignAudience = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+  const { tags, segmentId, mode } = req.body;
+
+  const campaign = await Campaign.findOne({ _id: id, userId });
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+  if (campaign.status !== 'draft') {
+    throw new AppError('Only draft campaigns can be edited.', 409);
+  }
+
+  let criteria;
+  if (segmentId) {
+    const segment = await Segment.findOne({ _id: segmentId, userId }).lean();
+    if (!segment) {
+      throw new AppError('Segment not found.', 404);
+    }
+    criteria = segment.criteria;
+  } else {
+    criteria = { tagsAny: tags };
+  }
+
+  const { total, contacts } = await resolveSegment(userId, criteria, {
+    limit: MAX_CAMPAIGN_RECIPIENTS + 1,
+  });
+
+  const matchedIds = contacts.map((contact) => String(contact._id));
+  const existingIds = mode === 'add' ? campaign.recipientIds.map(String) : [];
+  const merged = [...new Set([...existingIds, ...matchedIds])];
+
+  if (total > MAX_CAMPAIGN_RECIPIENTS || merged.length > MAX_CAMPAIGN_RECIPIENTS) {
+    throw new AppError('Audience is too large for one campaign.', 422, [
+      {
+        path: 'audience',
+        message: `A campaign cannot target more than ${MAX_CAMPAIGN_RECIPIENTS} recipients.`,
+      },
+    ]);
+  }
+
+  campaign.recipientIds = merged;
+  await campaign.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign audience applied',
+    data: {
+      campaign: formatSafeCampaign(campaign),
+      matched: total,
+      recipientsCount: merged.length,
     },
   });
 });

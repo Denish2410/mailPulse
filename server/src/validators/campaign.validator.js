@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { MAX_CAMPAIGN_RECIPIENTS } from '../models/Campaign.js';
+import { normalizeTag, MAX_TAG_LENGTH } from '../utils/tags.js';
 
 /**
  * Campaign Request Validation Schemas
@@ -308,4 +309,52 @@ export const scheduleCampaignSchema = z.object({
         }),
     })
     .strict(),
+});
+
+/**
+ * Schema for POST /api/v1/campaigns/:id/audience (Phase 11)
+ *
+ * Exactly one audience source: a list of tags (contacts having ANY of them) or a saved segment.
+ * `mode` 'replace' (default) overwrites the recipient list; 'add' merges into it.
+ */
+export const applyAudienceSchema = z.object({
+  params: z
+    .object({
+      id: z
+        .string({ required_error: 'Campaign ID is required' })
+        .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
+    })
+    .strict(),
+  body: z
+    .object({
+      tags: z
+        .array(z.string())
+        .min(1, 'Provide at least one tag')
+        .max(20, 'At most 20 tags')
+        .transform((values, ctx) => {
+          const result = [];
+          for (const value of values) {
+            const tag = normalizeTag(value);
+            if (!tag) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Tags must be 1-${MAX_TAG_LENGTH} characters: letters, numbers, spaces, hyphens or underscores`,
+              });
+              return z.NEVER;
+            }
+            if (!result.includes(tag)) result.push(tag);
+          }
+          return result;
+        })
+        .optional(),
+      segmentId: z
+        .string()
+        .refine(isValidObjectId, { message: 'Invalid segment ID format' })
+        .optional(),
+      mode: z.enum(['replace', 'add']).optional().default('replace'),
+    })
+    .strict()
+    .refine((body) => (body.tags !== undefined) !== (body.segmentId !== undefined), {
+      message: 'Provide exactly one of tags or segmentId',
+    }),
 });
