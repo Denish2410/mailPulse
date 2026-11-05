@@ -10,6 +10,7 @@ import {
   sendCampaign,
   scheduleCampaign,
   cancelScheduledCampaign,
+  applyCampaignAudience,
   getCampaignDeliveries,
   getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
@@ -25,6 +26,7 @@ import {
   sendTestEmailSchema,
   sendCampaignSchema,
   scheduleCampaignSchema,
+  applyAudienceSchema,
   getCampaignDeliveriesSchema,
 } from '../validators/campaign.validator.js';
 
@@ -128,5 +130,12 @@ router.patch('/:id', validate(updateCampaignSchema), updateCampaign);
  * @access  Protected
  */
 router.delete('/:id', validate(campaignIdParamSchema), deleteCampaign);
+
+/**
+ * @route   POST /api/v1/campaigns/:id/audience
+ * @desc    Fill a draft's recipients from tags or a saved segment (Phase 11)
+ * @access  Protected
+ */
+router.post('/:id/audience', validate(applyAudienceSchema), applyCampaignAudience);
 
 export default router;

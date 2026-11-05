@@ -10,6 +10,7 @@ import {
   createContact,
   updateContact,
   deleteContact,
+  getContactTags,
   getErrorMessage,
 } from '../../api/contacts.js';
 import {
@@ -31,6 +32,8 @@ export const ContactsPage = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [domainInput, setDomainInput] = useState('');
   const [debouncedDomain, setDebouncedDomain] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [tagOptions, setTagOptions] = useState([]);
 
   // Server data state
   const [contacts, setContacts] = useState([]);
@@ -84,6 +87,7 @@ export const ContactsPage = () => {
         limit,
         search: debouncedSearch,
         emailDomain: debouncedDomain,
+        tag: tagFilter,
       },
       { signal: controller.signal }
     )
@@ -118,7 +122,16 @@ export const ContactsPage = () => {
       isMounted = false;
       controller.abort();
     };
-  }, [page, limit, debouncedSearch, debouncedDomain, refreshTrigger]);
+  }, [page, limit, debouncedSearch, debouncedDomain, tagFilter, refreshTrigger]);
+
+  // 4. Load the user's tags for the filter (non-critical; failures just hide the filter)
+  useEffect(() => {
+    const controller = new AbortController();
+    getContactTags({ signal: controller.signal })
+      .then((tags) => setTagOptions(tags))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [refreshTrigger]);
 
   // Clear notification banner after 4 seconds
   useEffect(() => {
@@ -140,7 +153,13 @@ export const ContactsPage = () => {
     setPage(1);
   };
 
+  const handleTagChange = (val) => {
+    setTagFilter(val);
+    setPage(1);
+  };
+
   const handleResetFilters = () => {
+    setTagFilter('');
     setSearchInput('');
     setDebouncedSearch('');
     setDomainInput('');
@@ -325,6 +344,9 @@ export const ContactsPage = () => {
               onSearchChange={handleSearchChange}
               domain={domainInput}
               onDomainChange={handleDomainChange}
+              tag={tagFilter}
+              tagOptions={tagOptions}
+              onTagChange={handleTagChange}
               onReset={handleResetFilters}
               disabled={isLoading && contacts.length === 0}
             />

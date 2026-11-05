@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { validateContactForm } from '../../utils/validation.js';
 import { getErrorMessage } from '../../lib/api.js';
+import { parseTagInput, validateContactTags } from '../../utils/segmentHelpers.js';
 
 /**
  * ContactFormModal Component
@@ -19,6 +20,7 @@ export const ContactFormModal = ({
   const [formData, setFormData] = useState({
     name: contact?.name || '',
     email: contact?.email || '',
+    tags: Array.isArray(contact?.tags) ? contact.tags.join(', ') : '',
   });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
@@ -64,6 +66,19 @@ export const ContactFormModal = ({
       return;
     }
 
+    const parsedTags = parseTagInput(formData.tags);
+    if (parsedTags.invalid.length > 0) {
+      setErrors({
+        tags: `Invalid tags: ${parsedTags.invalid.join(', ')}. Use letters, numbers, spaces, hyphens or underscores (max 30 characters).`,
+      });
+      return;
+    }
+    const tagsError = validateContactTags(parsedTags.tags);
+    if (tagsError) {
+      setErrors({ tags: tagsError });
+      return;
+    }
+
     setErrors({});
     setServerError(null);
     setIsSubmitting(true);
@@ -72,6 +87,7 @@ export const ContactFormModal = ({
       await onSubmit({
         name: formData.name.trim(),
         email: formData.email.trim(),
+        tags: parsedTags.tags,
       });
       onClose();
     } catch (err) {
@@ -228,6 +244,30 @@ export const ContactFormModal = ({
             />
             {errors.email && (
               <p className="mt-1 text-xs text-rose-400 font-medium">{errors.email}</p>
+            )}
+          </div>
+
+          {/* Tags Field */}
+          <div>
+            <label htmlFor="contact-tags" className="block text-xs font-medium text-slate-300 mb-1.5">
+              Tags <span className="text-slate-500 font-normal">(comma separated, optional)</span>
+            </label>
+            <input
+              id="contact-tags"
+              name="tags"
+              type="text"
+              value={formData.tags}
+              onChange={handleChange}
+              disabled={isSubmitting}
+              placeholder="e.g. vip, lead, newsletter"
+              className={`w-full px-3.5 py-2.5 bg-slate-950/80 border rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 transition-colors disabled:opacity-60 ${
+                errors.tags
+                  ? 'border-rose-500/60 focus:ring-rose-500/40'
+                  : 'border-slate-800 focus:border-indigo-500 focus:ring-indigo-500/40'
+              }`}
+            />
+            {errors.tags && (
+              <p className="mt-1 text-xs text-rose-400 font-medium">{errors.tags}</p>
             )}
           </div>
 

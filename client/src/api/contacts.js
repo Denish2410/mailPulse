@@ -56,6 +56,14 @@ export const getContacts = async (params = {}, config = {}) => {
     }
   }
 
+  // 5. Tag: non-empty trimmed string (normalized server-side)
+  if (typeof params.tag === 'string') {
+    const trimmed = params.tag.trim().toLowerCase();
+    if (trimmed.length > 0) {
+      queryParams.tag = trimmed;
+    }
+  }
+
   const response = await apiClient.get('/contacts', {
     params: queryParams,
     ...config,
@@ -72,12 +80,13 @@ export const getContacts = async (params = {}, config = {}) => {
  * @param {import('axios').AxiosRequestConfig} [config={}]
  * @returns {Promise<object>} Safe contact object
  */
-export const createContact = async ({ name, email } = {}, config = {}) => {
+export const createContact = async ({ name, email, tags } = {}, config = {}) => {
   const response = await apiClient.post(
     '/contacts',
     {
       name: typeof name === 'string' ? name.trim() : name,
       email: typeof email === 'string' ? email.trim() : email,
+      ...(Array.isArray(tags) && { tags }),
     },
     config
   );
@@ -102,6 +111,10 @@ export const updateContact = async (id, payload = {}, config = {}) => {
     body.email = typeof payload.email === 'string' ? payload.email.trim() : payload.email;
   }
 
+  if (Array.isArray(payload.tags)) {
+    body.tags = payload.tags;
+  }
+
   const response = await apiClient.patch(`/contacts/${id}`, body, config);
   return response.data?.data?.contact;
 };
@@ -118,6 +131,17 @@ export const deleteContact = async (id, config = {}) => {
   return response.data;
 };
 
+/**
+ * Retrieve the user's tags with contact counts (Phase 11).
+ *
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<Array<{ tag: string, count: number }>>}
+ */
+export const getContactTags = async (config = {}) => {
+  const response = await apiClient.get('/contacts/tags', config);
+  return response.data?.data?.tags ?? [];
+};
+
 export { getErrorMessage };
 
 export default {
@@ -125,5 +149,6 @@ export default {
   createContact,
   updateContact,
   deleteContact,
+  getContactTags,
   getErrorMessage,
 };

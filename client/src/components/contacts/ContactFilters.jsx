@@ -9,10 +9,13 @@ export const ContactFilters = ({
   onSearchChange,
   domain = '',
   onDomainChange,
+  tag = '',
+  tagOptions = [],
+  onTagChange,
   onReset,
   disabled = false,
 }) => {
-  const hasActiveFilters = Boolean(search.trim() || domain.trim());
+  const hasActiveFilters = Boolean(search.trim() || domain.trim() || tag);
 
   return (
     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
@@ -79,6 +82,29 @@ export const ContactFilters = ({
           className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors disabled:opacity-60"
         />
       </div>
+
+      {/* Tag Filter */}
+      {onTagChange && tagOptions.length > 0 && (
+        <div className="sm:w-48">
+          <label htmlFor="contact-tag-select" className="sr-only">
+            Filter by tag
+          </label>
+          <select
+            id="contact-tag-select"
+            value={tag}
+            onChange={(e) => onTagChange(e.target.value)}
+            disabled={disabled}
+            className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+          >
+            <option value="">All tags</option>
+            {tagOptions.map((option) => (
+              <option key={option.tag} value={option.tag}>
+                {option.tag} ({option.count})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Reset Action */}
       {hasActiveFilters && (

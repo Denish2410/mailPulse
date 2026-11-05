@@ -139,6 +139,18 @@ export const ContactsTable = ({
                       <div className="md:hidden text-xs text-slate-400 font-mono mt-0.5">
                         {contact.email}
                       </div>
+                      {Array.isArray(contact.tags) && contact.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {contact.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </td>

@@ -17,6 +17,7 @@ export const formatSafeContact = (contact) => {
     id: idStr,
     name: doc.name,
     email: doc.email,
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -34,7 +35,7 @@ export const createContact = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  const { name, email } = req.body;
+  const { name, email, tags = [] } = req.body;
   const normalizedEmail = email.trim().toLowerCase();
 
   // 1. Proactively check if a contact with this email already exists for this owner
@@ -50,6 +51,7 @@ export const createContact = asyncHandler(async (req, res) => {
       userId,
       name: name.trim(),
       email: normalizedEmail,
+      tags,
     });
   } catch (err) {
     if (err.code === 11000) {
@@ -89,7 +91,7 @@ export const getContacts = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  const { page = 1, limit = 20, search, emailDomain } = req.query;
+  const { page = 1, limit = 20, search, emailDomain, tag } = req.query;
 
   // Build filter scoped strictly to the authenticated owner
   const filter = { userId };
@@ -107,6 +109,11 @@ export const getContacts = asyncHandler(async (req, res) => {
   if (emailDomain && typeof emailDomain === 'string' && emailDomain.trim().length > 0) {
     const domainRegex = new RegExp(`@${escapeRegex(emailDomain.trim().toLowerCase())}$`, 'i');
     conditions.push({ email: domainRegex });
+  }
+
+  // 3. Optional tag filter (exact, normalized tag)
+  if (tag && typeof tag === 'string') {
+    conditions.push({ tags: tag });
   }
 
   if (conditions.length === 1) {
@@ -167,7 +174,7 @@ export const updateContact = asyncHandler(async (req, res) => {
   }
 
   const { id } = req.params;
-  const { name, email } = req.body;
+  const { name, email, tags } = req.body;
 
   // 1. Query using BOTH contact ID and authenticated owner's ID
   // Returning 404 for unowned contacts prevents ownership enumeration attacks
@@ -196,6 +203,11 @@ export const updateContact = asyncHandler(async (req, res) => {
   // 3. Update name if provided
   if (name !== undefined) {
     contact.name = name.trim();
+  }
+
+  // 3b. Replace tags if provided (already normalized by validation)
+  if (tags !== undefined) {
+    contact.tags = tags;
   }
 
   // 4. Save updated document, preserving existing record if error occurs
@@ -250,3 +262,30 @@ export default {
   deleteContact,
   formatSafeContact,
 };
+
+/**
+ * List the authenticated user's tags with contact counts.
+ *
+ * Route: GET /api/v1/contacts/tags
+ * Access: Protected (Bearer JWT)
+ */
+export const getContactTags = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const rows = await Contact.aggregate([
+    { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+    { $unwind: '$tags' },
+    { $group: { _id: '$tags', count: { $sum: 1 } } },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: 500 },
+  ]);
+
+  res.status(200).json({
+    success: true,
+    message: 'Tags retrieved successfully',
+    data: { tags: rows.map((row) => ({ tag: row._id, count: row.count })) },
+  });
+});
