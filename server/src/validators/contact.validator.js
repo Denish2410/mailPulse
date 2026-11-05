@@ -11,6 +11,28 @@ import mongoose from 'mongoose';
  * - contactIdParamSchema: Validates that the route parameter is a valid 24-hex-character MongoDB ObjectId.
  */
 
+import { normalizeTag, MAX_TAGS_PER_CONTACT, MAX_TAG_LENGTH } from '../utils/tags.js';
+
+// Tags are normalized (trimmed, lowercased, de-duplicated); invalid tags are rejected, not dropped
+const tagsField = z
+  .array(z.string(), { invalid_type_error: 'Tags must be an array of strings' })
+  .max(MAX_TAGS_PER_CONTACT, `A contact cannot have more than ${MAX_TAGS_PER_CONTACT} tags`)
+  .transform((values, ctx) => {
+    const result = [];
+    for (const value of values) {
+      const tag = normalizeTag(value);
+      if (!tag) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Tags must be 1-${MAX_TAG_LENGTH} characters: letters, numbers, spaces, hyphens or underscores`,
+        });
+        return z.NEVER;
+      }
+      if (!result.includes(tag)) result.push(tag);
+    }
+    return result;
+  });
+
 // Helper to validate MongoDB ObjectId format
 const isValidObjectId = (val) => mongoose.isValidObjectId(val);
 
@@ -44,6 +66,7 @@ export const createContactSchema = z.object({
         .toLowerCase()
         .max(254, 'Contact email cannot exceed 254 characters')
         .email('Please provide a valid email address'),
+      tags: tagsField.optional(),
     })
     .strict(),
 });
@@ -74,10 +97,11 @@ export const updateContactSchema = z.object({
         .max(254, 'Contact email cannot exceed 254 characters')
         .email('Please provide a valid email address')
         .optional(),
+      tags: tagsField.optional(),
     })
     .strict()
-    .refine((data) => data.name !== undefined || data.email !== undefined, {
-      message: 'At least one field (name or email) must be provided for update',
+    .refine((data) => data.name !== undefined || data.email !== undefined || data.tags !== undefined, {
+      message: 'At least one field (name, email or tags) must be provided for update',
     }),
 });
 
@@ -140,6 +164,10 @@ export const getContactsSchema = z.object({
               'Invalid email domain format'
             )
             .optional()),
+      tag: z
+        .preprocess((val) => (typeof val === 'string' ? normalizeTag(val) ?? '__invalid__' : val),
+          z.string({ invalid_type_error: 'Tag must be a string' }).optional())
+        .refine((val) => val !== '__invalid__', { message: 'Invalid tag' }),
     })
     .strict(),
 });

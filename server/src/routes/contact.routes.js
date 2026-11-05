@@ -4,6 +4,7 @@ import {
   getContacts,
   updateContact,
   deleteContact,
+  getContactTags,
 } from '../controllers/contact.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
@@ -35,6 +36,13 @@ router.post('/', validate(createContactSchema), createContact);
  * @access  Protected
  */
 router.get('/', validate(getContactsSchema), getContacts);
+
+/**
+ * @route   GET /api/v1/contacts/tags
+ * @desc    List the authenticated user's tags with contact counts
+ * @access  Protected
+ */
+router.get('/tags', getContactTags);
 
 /**
  * @route   PATCH /api/v1/contacts/:id

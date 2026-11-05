@@ -47,6 +47,20 @@ const contactSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    tags: {
+      type: [String],
+      default: [],
+      validate: [
+        {
+          validator: (tags) => tags.length <= 20,
+          message: 'A contact cannot have more than 20 tags',
+        },
+        {
+          validator: (tags) => tags.every((tag) => typeof tag === 'string' && tag.length >= 1 && tag.length <= 30),
+          message: 'Each tag must be 1-30 characters long',
+        },
+      ],
+    },
     unsubscribeReason: {
       type: String,
       default: null,
@@ -74,6 +88,11 @@ contactSchema.index({ userId: 1, createdAt: -1 });
  * Compound query index: Optimizes filtering of subscribed vs. unsubscribed contacts per owner.
  */
 contactSchema.index({ userId: 1, isUnsubscribed: 1 });
+
+/**
+ * Multikey index: Optimizes tag filtering and segment evaluation per owner.
+ */
+contactSchema.index({ userId: 1, tags: 1 });
 
 // Prevent model overwrite in development watch and test runners
 const Contact = mongoose.models.Contact || mongoose.model('Contact', contactSchema);
