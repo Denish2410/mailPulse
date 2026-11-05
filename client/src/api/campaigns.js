@@ -286,6 +286,22 @@ export const cancelScheduledCampaign = async (id, config = {}) => {
 };
 
 /**
+ * Fill a draft campaign's recipients from tags or a saved segment (Phase 11).
+ *
+ * @param {string} id - Campaign ID
+ * @param {{ tags?: string[], segmentId?: string, mode?: 'replace'|'add' }} source
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaign: object, matched: number, recipientsCount: number }>}
+ */
+export const applyCampaignAudience = async (id, { tags, segmentId, mode = 'replace' } = {}, config = {}) => {
+  const body = { mode };
+  if (segmentId) body.segmentId = segmentId;
+  else body.tags = tags;
+  const response = await apiClient.post(`/campaigns/${id}/audience`, body, config);
+  return response.data?.data;
+};
+
+/**
  * Retrieve tracking analytics metrics for a campaign by ID.
  * Returns open rates, click rates, link performance, and recent activity.
  *
@@ -311,6 +327,7 @@ export default {
   sendCampaign,
   scheduleCampaign,
   cancelScheduledCampaign,
+  applyCampaignAudience,
   getCampaignDeliveries,
   getCampaignAnalytics,
   getErrorMessage,
