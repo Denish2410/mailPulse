@@ -4,6 +4,7 @@ import { getErrorMessage } from '../../lib/api.js';
 import { RecipientSelector } from './RecipientSelector.jsx';
 import TemplatePicker from '../templates/TemplatePicker.jsx';
 import MergeTagToolbar from '../templates/MergeTagToolbar.jsx';
+import AudiencePicker from '../segments/AudiencePicker.jsx';
 import { insertAtSelection, templateToCampaignFields } from '../../utils/templateHelpers.js';
 
 /**
@@ -472,6 +473,14 @@ export const CampaignFormDialog = ({
                 <span className="text-xs font-semibold text-slate-300">
                   Select Recipients
                 </span>
+                {isEditing && (
+                  <AudiencePicker
+                    campaignId={campaign.id}
+                    currentRecipientIds={recipientIds}
+                    onApplied={handleRecipientsChange}
+                    disabled={isSubmitting}
+                  />
+                )}
                 <RecipientSelector
                   selectedIds={recipientIds}
                   onChange={handleRecipientsChange}
