@@ -341,6 +341,7 @@ export const createMockTransport = (options = {}) => {
         subject: mailOptions.subject,
         text: mailOptions.text ?? '',
         html: mailOptions.html ?? '',
+        headers: mailOptions.headers ?? {},
         messageId,
         sentAt: new Date().toISOString(),
       };
