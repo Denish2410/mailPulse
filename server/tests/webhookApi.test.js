@@ -226,6 +226,38 @@ describe('ESP webhook endpoints', () => {
     assert.equal((await Suppression.findOne({ userId: owner._id }).lean()).source, 'bounce');
   });
 
+  it('exposes a tenant-scoped bounce summary for the campaign', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    await sendgridRequest([
+      { email: alice.email, event: 'bounce', status: '5.1.1', reason: 'no such user', sg_event_id: `b1-${prefix}`, [DELIVERY_TAG]: String(delivery._id) },
+      { email: alice.email, event: 'blocked', sg_event_id: `b2-${prefix}`, [DELIVERY_TAG]: String(delivery._id) },
+      { email: alice.email, event: 'spamreport', sg_event_id: `b3-${prefix}`, [DELIVERY_TAG]: String(delivery._id) },
+    ]);
+    const get = (id, tok = token) =>
+      fetch(`${baseUrl}/api/v1/campaigns/${id}/bounces`, { headers: { Authorization: `Bearer ${tok}` } });
+
+    const res = await get(delivery.campaignId);
+    assert.equal(res.status, 200);
+    const { summary, events } = (await res.json()).data;
+    assert.deepEqual(summary, { hardBounces: 1, softBounces: 1, complaints: 1, total: 3 });
+    assert.equal(events.length, 3);
+    assert.ok(events.every((e) => e.email === alice.email && e.provider === 'sendgrid'));
+
+    assert.equal((await get(delivery.campaignId, 'bad-token')).status, 401);
+    const stranger = await User.create({
+      name: 'Stranger',
+      email: `${prefix}-s@example.com`,
+      passwordHash: await hashPassword('StrongPassword123!'),
+    });
+    try {
+      assert.equal((await get(delivery.campaignId, signAccessToken(stranger))).status, 404);
+    } finally {
+      await User.deleteMany({ _id: stranger._id });
+    }
+    assert.equal((await get('not-an-id')).status, 400);
+    await Contact.updateOne({ _id: alice._id }, { $set: { isUnsubscribed: false } });
+  });
+
   it('rejects empty bodies and does not leak payload details', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const res = await fetch(`${baseUrl}/api/v1/webhooks/sendgrid`, { method: 'POST' });

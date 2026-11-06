@@ -11,6 +11,7 @@ import {
   scheduleCampaign,
   cancelScheduledCampaign,
   applyCampaignAudience,
+  getCampaignBounces,
   getCampaignDeliveries,
   getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
@@ -137,5 +138,12 @@ router.delete('/:id', validate(campaignIdParamSchema), deleteCampaign);
  * @access  Protected
  */
 router.post('/:id/audience', validate(applyAudienceSchema), applyCampaignAudience);
+
+/**
+ * @route   GET /api/v1/campaigns/:id/bounces
+ * @desc    Bounce and complaint summary with recent events (Phase 12)
+ * @access  Protected
+ */
+router.get('/:id/bounces', validate(campaignIdParamSchema), getCampaignBounces);
 
 export default router;
