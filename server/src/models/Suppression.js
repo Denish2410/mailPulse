@@ -48,8 +48,9 @@ const suppressionSchema = new mongoose.Schema(
     source: {
       type: String,
       enum: {
-        values: ['link', 'one-click-header', 'admin', 'import'],
-        message: 'Suppression source must be link, one-click-header, admin, or import',
+        values: ['link', 'one-click-header', 'admin', 'import', 'bounce', 'complaint'],
+        message:
+          'Suppression source must be link, one-click-header, admin, import, bounce, or complaint',
       },
       default: 'link',
     },
