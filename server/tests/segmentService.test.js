@@ -15,6 +15,7 @@ import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
+import Suppression from '../src/models/Suppression.js';
 import { connectDB } from '../src/config/db.js';
 import { hashPassword } from '../src/services/password.service.js';
 import { normalizeCriteria, hasCriteria, resolveSegment } from '../src/services/segment.service.js';
@@ -136,6 +137,19 @@ describe('Segment resolution', () => {
       ['Alice', 'Bobby']
     );
     assert.deepEqual(emailsOf(await resolveSegment(owner._id, { tagsNone: ['vip'] })), ['Carol', 'Dave']);
+  });
+
+  it('excludes suppressed addresses such as bounces and complaints', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    await Suppression.create({ userId: owner._id, email: byName.Bobby.email, source: 'bounce', reason: 'Hard bounce' });
+    await Suppression.create({ userId: other._id, email: byName.Alice.email, source: 'bounce' });
+    try {
+      // Bobby is suppressed for the owner; the foreign suppression of Alice's address is irrelevant
+      assert.deepEqual(emailsOf(await resolveSegment(owner._id, { tagsAny: ['vip'] })), ['Alice']);
+    } finally {
+      await Suppression.deleteMany({ userId: { $in: [owner._id, other._id] } });
+    }
+    assert.deepEqual(emailsOf(await resolveSegment(owner._id, { tagsAny: ['vip'] })), ['Alice', 'Bobby']);
   });
 
   it('matches engagement windows using only the owner campaigns', async (t) => {
