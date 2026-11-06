@@ -8,8 +8,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Frontend (`client/`)**: React 19, Vite, Tailwind CSS, React Router v6, Axios, Recharts.
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
-- **Latest Commit**: see `git log` (Phase 11 work lives on branch `phase11/segmentation`)
-- **Testing Baseline**: **703 automated tests** (427 server, 276 client), 0 failures, 0 skipped.
+- **Latest Commit**: see `git log`
+- **Testing Baseline**: **741 automated tests** (461 server, 280 client), 0 failures, 0 skipped.
 
 ---
 
@@ -39,7 +39,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 ---
 
-## 3. Completed Phases Summary (Phases 1 – 11)
+## 3. Completed Phases Summary (Phases 1 – 12)
 
 ### Phase 1: Core Infrastructure & Security
 - Monorepo setup, centralized Express error handling, Helmet, CORS, morgan logging.
@@ -108,6 +108,12 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - `POST /campaigns/:id/audience` (`{ tags | segmentId, mode: 'replace' | 'add' }`) snapshots the audience into a draft's `recipientIds` (409 if not draft, 422 above 5,000).
 - Client: tags in the contact form/table/filter, `/segments` page with live preview, audience picker in the campaign form.
 
+### Phase 12: Inbound Bounce & Complaint Processing (Webhooks)
+- `POST /api/v1/webhooks/{sendgrid,mailgun,ses}`: mounted before the JSON parser (raw body for signatures). SendGrid = ECDSA, Mailgun = HMAC-SHA256, SES = SNS RSA signature + allow-listed `SES_SNS_TOPIC_ARNS` + trusted `sns.*.amazonaws.com` cert host. A provider without its secret answers 404 (fail closed). See `server/.env.example`.
+- `webhookProviders.service.js` authenticates and normalizes events to `hard_bounce` | `soft_bounce` | `complaint`; dispatch tags every message with `mailpulse_delivery_id` via each enabled provider's custom-args header (`X-SMTPAPI`, `X-Mailgun-Variables`, `X-SES-MESSAGE-TAGS`).
+- `bounceProcessing.service.js`: events are matched to our own `Delivery` (tag, then message id; address must match) so the owner never comes from the payload; unmatched events are dropped. Hard bounce -> `Suppression` (`source: 'bounce'`); complaint -> suppression + contact unsubscribed; 3 soft bounces in 30 days -> suppression. Idempotent on `{ provider, providerEventId }`.
+- Suppressed addresses are excluded from segments/tag audiences. `GET /campaigns/:id/bounces` + Bounces & Complaints panel in the analytics dialog.
+
 ---
 
 ## 4. Key Data Models (Mongoose)
@@ -128,8 +134,11 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Segment** (`server/src/models/Segment.js`):
   - Fields: `userId`, `name`, `description`, `criteria` (`tagsAny`, `tagsAll`, `tagsNone`, `engagement`, `createdWithinDays`).
   - Indexes: `{ userId: 1, name: 1 }` (unique), `{ userId: 1, updatedAt: -1 }`.
+- **BounceEvent** (`server/src/models/BounceEvent.js`):
+  - Fields: `userId`, `campaignId`, `deliveryId`, `contactId`, `email`, `provider`, `eventType`, `reason`, `providerEventId`, `occurredAt`.
+  - Indexes: `{ provider: 1, providerEventId: 1 }` (unique), `{ userId: 1, email: 1, eventType: 1, occurredAt: -1 }`, `{ campaignId: 1, eventType: 1 }`.
 - **Suppression** (`server/src/models/Suppression.js`):
-  - Fields: `userId`, `email`, `reason`, `source`, `createdAt`.
+  - Fields: `userId`, `email`, `reason`, `source` (`link`, `one-click-header`, `admin`, `import`, `bounce`, `complaint`), `campaignId`, `createdAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique).
 - **TrackingEvent** (`server/src/models/TrackingEvent.js`):
   - Fields: `campaignId`, `userId`, `contactId`, `eventType` (`'open'`, `'click'`, `'unsubscribe'`), `targetUrl`, `userAgent`, `ipHash`, `createdAt`.
@@ -158,6 +167,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/campaigns/:id/cancel-schedule` | POST | Protected | Cancel schedule, revert to draft |
 | `/api/v1/campaigns/:id/audience` | POST | Protected | Fill draft recipients by tag or segment |
 | `/api/v1/campaigns/:id/deliveries` | GET | Protected | Delivery audit log |
+| `/api/v1/campaigns/:id/bounces` | GET | Protected | Bounce/complaint summary + recent events |
 | `/api/v1/campaigns/:id/analytics` | GET | Protected | Open/click engagement analytics |
 | `/api/v1/templates` | GET, POST | Protected | List and create templates |
 | `/api/v1/templates/:id` | GET, PATCH, DELETE | Protected | Template CRUD |
@@ -166,6 +176,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/segments/:id` | GET, PATCH, DELETE | Protected | Segment CRUD |
 | `/api/v1/segments/:id/preview` | GET | Protected | Count + sample for a saved segment |
 | `/api/v1/analytics/overview` | GET | Protected | Overview metrics (`?days=7\|30\|90`) |
+| `/api/v1/webhooks/sendgrid`, `/mailgun`, `/ses` | POST | Signed (ESP) | Bounce & complaint ingestion |
 | `/api/v1/tracking/open/:token` | GET | Public | Transparent 1x1 GIF tracking pixel |
 | `/api/v1/tracking/click/:token` | GET | Public | Click tracking redirect |
 | `/api/v1/tracking/unsubscribe/:token` | GET, POST | Public | Web landing page & RFC 8058 1-click |
@@ -195,9 +206,6 @@ git diff --check
 
 ## 7. Future Phases Roadmap
 
-- **Phase 12: Inbound Bounce & Complaint Processing (Webhooks)**:
-  - ESP webhook ingress (SES, SendGrid, Mailgun) for hard/soft bounces and spam complaints.
-  - Automatic suppression of hard bounces.
 - **Phase 13: Distributed Queue & Multi-Instance Scaling (BullMQ / Redis)**:
   - Remove single-instance constraint by replacing memory queues with Redis + BullMQ.
   - Enable multiple server replicas behind load balancers.
