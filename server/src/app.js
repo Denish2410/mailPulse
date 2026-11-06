@@ -12,6 +12,7 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import trackingRoutes from './routes/tracking.routes.js';
 import templateRoutes from './routes/template.routes.js';
 import segmentRoutes from './routes/segment.routes.js';
+import webhookRoutes from './routes/webhook.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -43,6 +44,10 @@ app.use(
     credentials: true,
   })
 );
+
+// 2b. ESP webhooks need the raw request body for signature verification, so they are mounted
+// before the JSON body parser. Every handler authenticates the request before reading it.
+app.use('/api/v1/webhooks', webhookRoutes);
 
 // 3. Request body parsing with appropriate size limits
 // 1mb limit protects against payload exhaustion attacks; file uploads will use dedicated multipart streams

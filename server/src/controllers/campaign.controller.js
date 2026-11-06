@@ -20,6 +20,7 @@ import { getCampaignTrackingSummary } from '../services/tracking.service.js';
 import { personalizeMessage } from '../services/personalization.service.js';
 import { resolveSegment } from '../services/segment.service.js';
 import Segment from '../models/Segment.js';
+import BounceEvent from '../models/BounceEvent.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -870,6 +871,55 @@ export const applyCampaignAudience = asyncHandler(async (req, res) => {
       campaign: formatSafeCampaign(campaign),
       matched: total,
       recipientsCount: merged.length,
+    },
+  });
+});
+
+/**
+ * Bounce and complaint summary for a campaign (Phase 12).
+ *
+ * Route: GET /api/v1/campaigns/:id/bounces
+ * Access: Protected (Bearer JWT)
+ */
+export const getCampaignBounces = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const { id } = req.params;
+  const campaign = await Campaign.findOne({ _id: id, userId }).select('_id').lean();
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  const scope = { userId: new mongoose.Types.ObjectId(userId), campaignId: campaign._id };
+  const [grouped, recent] = await Promise.all([
+    BounceEvent.aggregate([{ $match: scope }, { $group: { _id: '$eventType', count: { $sum: 1 } } }]),
+    BounceEvent.find(scope).sort({ occurredAt: -1, _id: -1 }).limit(50).lean(),
+  ]);
+
+  const count = (type) => grouped.find((row) => row._id === type)?.count ?? 0;
+  const summary = {
+    hardBounces: count('hard_bounce'),
+    softBounces: count('soft_bounce'),
+    complaints: count('complaint'),
+  };
+  summary.total = summary.hardBounces + summary.softBounces + summary.complaints;
+
+  res.status(200).json({
+    success: true,
+    message: 'Campaign bounces retrieved successfully',
+    data: {
+      summary,
+      events: recent.map((event) => ({
+        id: String(event._id),
+        email: event.email,
+        eventType: event.eventType,
+        reason: event.reason ?? null,
+        provider: event.provider,
+        occurredAt: event.occurredAt,
+      })),
     },
   });
 });

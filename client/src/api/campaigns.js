@@ -302,6 +302,18 @@ export const applyCampaignAudience = async (id, { tags, segmentId, mode = 'repla
 };
 
 /**
+ * Retrieve a campaign's bounce and complaint summary with recent events (Phase 12).
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ summary: object, events: Array<object> }>}
+ */
+export const getCampaignBounces = async (id, config = {}) => {
+  const response = await apiClient.get(`/campaigns/${id}/bounces`, config);
+  return response.data?.data;
+};
+
+/**
  * Retrieve tracking analytics metrics for a campaign by ID.
  * Returns open rates, click rates, link performance, and recent activity.
  *
@@ -328,6 +340,7 @@ export default {
   scheduleCampaign,
   cancelScheduledCampaign,
   applyCampaignAudience,
+  getCampaignBounces,
   getCampaignDeliveries,
   getCampaignAnalytics,
   getErrorMessage,

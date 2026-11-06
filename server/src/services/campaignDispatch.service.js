@@ -15,6 +15,7 @@ import {
   injectUnsubscribeLinks,
 } from './tracking.service.js';
 import { personalizeMessage } from './personalization.service.js';
+import { getDeliveryTagHeaders } from './webhookProviders.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -330,6 +331,10 @@ export const processNextDelivery = async (campaignId, message, emailService, log
       );
     }
   }
+
+  // 2b. Tag the message with our Delivery ID for configured ESPs, so bounce and complaint
+  //     webhooks can be matched back to this exact delivery (and owner)
+  customHeaders = { ...customHeaders, ...getDeliveryTagHeaders(delivery._id) };
 
   // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
   //    recipient values can never alter tracking links)

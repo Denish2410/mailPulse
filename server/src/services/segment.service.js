@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
 import Campaign from '../models/Campaign.js';
 import TrackingEvent from '../models/TrackingEvent.js';
+import Suppression from '../models/Suppression.js';
 import { normalizeTags } from '../utils/tags.js';
 
 /**
@@ -16,7 +17,8 @@ import { normalizeTags } from '../utils/tags.js';
  *   engagement: { type: 'opened' | 'clicked' | 'not_opened', days: 1..365 }
  *   createdWithinDays: contact was created in the last N days
  *
- * Unsubscribed contacts are never part of a segment. Everything is scoped to `userId`; engagement
+ * Unsubscribed and suppressed (unsubscribed, bounced or complained) contacts are never part of a
+ * segment. Everything is scoped to `userId`; engagement
  * is derived only from tracking events of campaigns the user owns.
  */
 
@@ -89,6 +91,10 @@ export const buildSegmentFilter = async (userId, rawCriteria, { now = new Date()
   const criteria = normalizeCriteria(rawCriteria);
   const filter = { userId: new mongoose.Types.ObjectId(String(userId)), isUnsubscribed: { $ne: true } };
   const and = [];
+
+  // Addresses suppressed for this owner (unsubscribe, hard bounce, complaint) are excluded
+  const suppressedEmails = await Suppression.distinct('email', { userId: filter.userId });
+  if (suppressedEmails.length > 0) and.push({ email: { $nin: suppressedEmails } });
 
   if (criteria.tagsAny.length > 0) and.push({ tags: { $in: criteria.tagsAny } });
   if (criteria.tagsAll.length > 0) and.push({ tags: { $all: criteria.tagsAll } });
