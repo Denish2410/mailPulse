@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { importContactsFromCsv, ImportError } from '../services/contactImport.service.js';
 
 /**
  * Format a Mongoose Contact document into a safe, client-facing representation.
@@ -287,5 +288,34 @@ export const getContactTags = asyncHandler(async (req, res) => {
     success: true,
     message: 'Tags retrieved successfully',
     data: { tags: rows.map((row) => ({ tag: row._id, count: row.count })) },
+  });
+});
+
+/**
+ * Bulk-create contacts from CSV text for the authenticated user.
+ *
+ * Route: POST /api/v1/contacts/import
+ * Access: Protected (Bearer JWT)
+ */
+export const importContacts = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  let result;
+  try {
+    result = await importContactsFromCsv(userId, req.body.csv);
+  } catch (err) {
+    if (err instanceof ImportError) {
+      throw new AppError(err.message, 400, null, { expose: true });
+    }
+    throw err;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Contact import finished',
+    data: result,
   });
 });

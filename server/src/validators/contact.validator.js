@@ -172,7 +172,23 @@ export const getContactsSchema = z.object({
     .strict(),
 });
 
+/**
+ * Schema for POST /api/v1/contacts/import
+ * The CSV is sent as text inside JSON (bounded by the 1mb body limit).
+ */
+export const importContactsSchema = z.object({
+  body: z
+    .object({
+      csv: z
+        .string({ required_error: 'CSV content is required' })
+        .min(1, 'CSV content is required')
+        .max(900000, 'CSV content is too large'),
+    })
+    .strict(),
+});
+
 export default {
+  importContactsSchema,
   contactIdParamSchema,
   createContactSchema,
   updateContactSchema,
