@@ -1,12 +1,15 @@
 import Contact from '../models/Contact.js';
 import { parseCsv, CsvError } from '../utils/csv.js';
 import { normalizeTags, MAX_TAGS_PER_CONTACT } from '../utils/tags.js';
+import { normalizeCustomFields, normalizeCustomKey } from '../utils/customFields.js';
 
 /**
  * Bulk contact import from CSV text (Phase 3 gap fix).
  *
  * Columns (header required, case-insensitive): `email` (required), `name`, `tags` (separated by
- * `;` or `|`). A missing name falls back to the email's local part. Existing contacts and
+ * `;` or `|`). Any other column is imported as a custom field (header lower-cased, spaces and
+ * punctuation turned into `_`; `custom:<key>` also works). The `status` and `created` columns written
+ * by the export are ignored. A missing name falls back to the email's local part. Existing contacts and
  * duplicate rows are skipped (never overwritten). Everything is scoped to `userId`.
  */
 
@@ -14,6 +17,19 @@ export const MAX_IMPORT_ROWS = 5000;
 const MAX_REPORTED_ERRORS = 50;
 const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const INSERT_CHUNK = 500;
+export const RESERVED_COLUMNS = ['email', 'name', 'tags', 'status', 'created'];
+
+/**
+ * Maps a CSV header to a custom field key, or null when it should be ignored.
+ */
+export const headerToCustomKey = (header) => {
+  const text = String(header ?? '').trim().toLowerCase();
+  if (!text) return null;
+  const explicit = text.startsWith('custom:') ? text.slice('custom:'.length).trim() : null;
+  if (explicit !== null) return normalizeCustomKey(explicit);
+  if (RESERVED_COLUMNS.includes(text)) return null;
+  return normalizeCustomKey(text.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''));
+};
 
 export class ImportError extends Error {
   constructor(message) {
@@ -49,9 +65,23 @@ export const importContactsFromCsv = async (userId, csvText) => {
     const index = header.indexOf(key);
     if (index !== -1) columns[key] = index;
   }
+  const customColumns = [];
+  const usedKeys = new Set();
+  const ignoredColumns = [];
+  rows[0].forEach((rawHeader, index) => {
+    const lowered = rawHeader.trim().toLowerCase();
+    if (['email', 'name', 'tags'].includes(lowered)) return;
+    const key = headerToCustomKey(rawHeader);
+    if (key && !usedKeys.has(key)) {
+      usedKeys.add(key);
+      customColumns.push({ key, index });
+    } else if (!RESERVED_COLUMNS.includes(lowered) && rawHeader.trim()) {
+      ignoredColumns.push(rawHeader.trim().slice(0, 40));
+    }
+  });
   if (columns.email === undefined) throw new ImportError('The CSV must have an "email" column header.');
 
-  const result = { total: rows.length - 1, created: 0, skipped: 0, invalid: 0, errors: [] };
+  const result = { total: rows.length - 1, created: 0, skipped: 0, invalid: 0, errors: [], ignoredColumns };
   const reject = (rowNumber, email, message) => {
     result.invalid += 1;
     if (result.errors.length < MAX_REPORTED_ERRORS) result.errors.push({ row: rowNumber, email, message });
@@ -79,12 +109,20 @@ export const importContactsFromCsv = async (userId, csvText) => {
       return reject(rowNumber, email, `At most ${MAX_TAGS_PER_CONTACT} tags per contact.`);
     }
 
+    const customInput = {};
+    for (const { key, index } of customColumns) {
+      const value = (row[index] ?? '').trim();
+      if (value) customInput[key] = value;
+    }
+    const { fields: customFields, error: customError } = normalizeCustomFields(customInput);
+    if (customError) return reject(rowNumber, email, customError);
+
     if (seen.has(email)) {
       result.skipped += 1;
       return undefined;
     }
     seen.add(email);
-    candidates.push({ email, name, tags });
+    candidates.push({ email, name, tags, ...(Object.keys(customFields).length > 0 && { customFields }) });
     return undefined;
   });
 

@@ -350,18 +350,28 @@ export const exportContacts = asyncHandler(async (req, res) => {
   const contacts = await Contact.find(filter)
     .sort({ createdAt: 1, _id: 1 })
     .limit(MAX_EXPORT_ROWS)
-    .select('name email tags isUnsubscribed createdAt')
+    .select('name email tags customFields isUnsubscribed createdAt')
     .lean();
 
+  // One column per custom field key in use; keys that clash with a standard column are written
+  // as `custom:<key>`, which the importer understands.
+  const keys = [...new Set(contacts.flatMap((c) => Object.keys(toPlainCustomFields(c.customFields))))].sort();
+  const baseHeader = ['name', 'email', 'tags', 'status', 'created'];
+  const customHeader = keys.map((key) => (baseHeader.includes(key) ? `custom:${key}` : key));
+
   const csv = toCsv(
-    ['name', 'email', 'tags', 'status', 'created'],
-    contacts.map((c) => [
-      c.name,
-      c.email,
-      (c.tags || []).join(';'),
-      c.isUnsubscribed ? 'unsubscribed' : 'subscribed',
-      c.createdAt ? new Date(c.createdAt).toISOString() : '',
-    ])
+    [...baseHeader, ...customHeader],
+    contacts.map((c) => {
+      const fields = toPlainCustomFields(c.customFields);
+      return [
+        c.name,
+        c.email,
+        (c.tags || []).join(';'),
+        c.isUnsubscribed ? 'unsubscribed' : 'subscribed',
+        c.createdAt ? new Date(c.createdAt).toISOString() : '',
+        ...keys.map((key) => fields[key] ?? ''),
+      ];
+    })
   );
 
   res.status(200);
