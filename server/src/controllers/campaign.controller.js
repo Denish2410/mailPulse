@@ -40,6 +40,7 @@ export const formatSafeCampaign = (campaign) => {
     id: idStr,
     name: doc.name,
     subject: doc.subject,
+    subjectB: doc.subjectB ?? '',
     textContent: doc.textContent ?? '',
     htmlContent: doc.htmlContent ?? '',
     status: doc.status,
@@ -110,7 +111,7 @@ export const createCampaign = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  const { name, subject, textContent = '', htmlContent = '', recipientIds = [] } = req.body;
+  const { name, subject, subjectB = '', textContent = '', htmlContent = '', recipientIds = [] } = req.body;
 
   // Validate recipient ownership and deduplicate
   const verifiedRecipientIds = await validateAndDeduplicateRecipients(recipientIds, userId);
@@ -119,6 +120,7 @@ export const createCampaign = asyncHandler(async (req, res) => {
     userId,
     name: name.trim(),
     subject: subject.trim(),
+    subjectB: subjectB.trim(),
     textContent,
     htmlContent,
     status: 'draft',
@@ -246,7 +248,7 @@ export const updateCampaign = asyncHandler(async (req, res) => {
   }
 
   const { id } = req.params;
-  const { name, subject, textContent, htmlContent, recipientIds } = req.body;
+  const { name, subject, subjectB, textContent, htmlContent, recipientIds } = req.body;
 
   // Query scoped strictly to owner
   const campaign = await Campaign.findOne({ _id: id, userId });
@@ -267,6 +269,11 @@ export const updateCampaign = asyncHandler(async (req, res) => {
   // Update subject if provided
   if (subject !== undefined) {
     campaign.subject = subject.trim();
+  }
+
+  // Update the A/B variant subject if provided ('' turns the test off)
+  if (subjectB !== undefined) {
+    campaign.subjectB = subjectB.trim();
   }
 
   // Update textContent if provided (allows explicit '' to clear content)
@@ -902,6 +909,7 @@ export const duplicateCampaign = asyncHandler(async (req, res) => {
     userId,
     name,
     subject: source.subject,
+    subjectB: source.subjectB ?? '',
     textContent: source.textContent ?? '',
     htmlContent: source.htmlContent ?? '',
     recipientIds: (source.recipientIds || []).slice(0, MAX_CAMPAIGN_RECIPIENTS),
