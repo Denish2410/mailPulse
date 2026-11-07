@@ -11,6 +11,9 @@ import {
   hashResetToken,
   buildResetLink,
   buildResetEmail,
+  createVerificationToken,
+  buildVerificationLink,
+  buildVerificationEmail,
 } from '../services/passwordReset.service.js';
 
 /**
@@ -35,9 +38,31 @@ const formatSafeUser = (user) => ({
   name: user.name,
   email: user.email,
   status: user.status,
+  emailVerified: Boolean(user.emailVerifiedAt),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
+
+/**
+ * Creates a verification token for the user and emails the link in the background.
+ * Failures never affect the caller; the token and link are never logged.
+ */
+const issueVerificationEmail = async (req, user) => {
+  const { token, tokenHash, expiresAt } = createVerificationToken();
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { emailVerificationTokenHash: tokenHash, emailVerificationExpiresAt: expiresAt } }
+  );
+  const link = buildVerificationLink(token);
+  const emailService = req.app?.locals?.emailService || getDefaultEmailService();
+  emailService
+    .sendEmail({ to: user.email, ...buildVerificationEmail({ name: user.name, link }) })
+    .catch(() => {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`[Auth] Verification email could not be sent (dev only) link: ${link}`);
+      }
+    });
+};
 
 /**
  * Register a new user account.
@@ -72,6 +97,9 @@ export const register = asyncHandler(async (req, res) => {
     }
     throw err;
   }
+
+  // 3b. Send the verification email in the background (never blocks or fails registration)
+  issueVerificationEmail(req, user).catch(() => {});
 
   // 4. Issue initial short-lived JWT access token
   const token = signAccessToken(user);
@@ -248,5 +276,61 @@ export const resetPassword = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Password updated. You can now sign in with your new password.',
+  });
+});
+
+/**
+ * Confirm an email address with the emailed single-use token.
+ *
+ * Route: POST /api/v1/auth/verify-email
+ * Access: Public
+ */
+export const verifyEmail = asyncHandler(async (req, res) => {
+  const user = await User.findOneAndUpdate(
+    {
+      emailVerificationTokenHash: hashResetToken(req.body.token),
+      emailVerificationExpiresAt: { $gt: new Date() },
+    },
+    {
+      $set: { emailVerifiedAt: new Date() },
+      $unset: { emailVerificationTokenHash: '', emailVerificationExpiresAt: '' },
+    },
+    { new: true }
+  );
+
+  if (!user) {
+    throw new AppError('Invalid or expired verification link.', 400, null, { expose: true });
+  }
+
+  res.status(200).json({ success: true, message: 'Email address verified.' });
+});
+
+/**
+ * Send a fresh verification email to the authenticated user.
+ *
+ * Route: POST /api/v1/auth/resend-verification
+ * Access: Protected (Bearer JWT)
+ */
+export const resendVerification = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+  const user = await User.findById(userId);
+  if (!user) throw new AppError('User account not found.', 401);
+  if (user.status === 'suspended') {
+    throw new AppError('Your account has been suspended. Please contact support.', 403);
+  }
+
+  if (!user.emailVerifiedAt) {
+    await issueVerificationEmail(req, user);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: user.emailVerifiedAt
+      ? 'Your email address is already verified.'
+      : 'Verification email sent.',
+    data: { emailVerified: Boolean(user.emailVerifiedAt) },
   });
 });

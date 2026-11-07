@@ -32,6 +32,21 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password hash is required'],
       select: false,
     },
+    // Email verification (only the SHA-256 hash of the emailed token is stored)
+    emailVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     // Password reset (single-use; only the SHA-256 hash of the emailed token is stored)
     passwordResetTokenHash: {
       type: String,

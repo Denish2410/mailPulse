@@ -44,3 +44,33 @@ export const buildResetEmail = ({ name, link }) => {
       '<p>If you did not request this, you can ignore this email; your password will not change.</p>',
   };
 };
+
+/**
+ * Email verification reuses the same token scheme with a 24 hour lifetime.
+ */
+export const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const createVerificationToken = (now = new Date()) => {
+  const { token, tokenHash } = createResetToken(now);
+  return { token, tokenHash, expiresAt: new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS) };
+};
+
+export const buildVerificationLink = (token, env = process.env) => {
+  const origin = (env.CLIENT_URL || 'http://localhost:5173').split(',')[0].trim().replace(/\/+$/, '');
+  return `${origin}/verify-email?token=${token}`;
+};
+
+export const buildVerificationEmail = ({ name, link }) => {
+  const safeName = String(name || 'there').replace(/[<>&"']/g, '');
+  return {
+    subject: 'Verify your MailPulse email address',
+    text:
+      `Hi ${safeName},\n\nConfirm your email address to finish setting up MailPulse. ` +
+      `This link works for 24 hours:\n\n${link}\n\n` +
+      'If you did not create this account, you can ignore this email.\n',
+    html:
+      `<p>Hi ${safeName},</p><p>Confirm your email address to finish setting up MailPulse. ` +
+      `This link works for 24 hours:</p><p><a href="${link}">Verify your email</a></p>` +
+      '<p>If you did not create this account, you can ignore this email.</p>',
+  };
+};

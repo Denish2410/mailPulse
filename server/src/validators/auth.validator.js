@@ -70,7 +70,18 @@ export const resetPasswordSchema = z.object({
     .strict(),
 });
 
+export const verifyEmailSchema = z.object({
+  body: z
+    .object({
+      token: z
+        .string({ required_error: 'Verification token is required' })
+        .regex(/^[a-f0-9]{64}$/, 'Invalid or expired verification link.'),
+    })
+    .strict(),
+});
+
 export default {
+  verifyEmailSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   registerSchema,
