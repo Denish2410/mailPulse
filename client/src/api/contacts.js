@@ -142,6 +142,37 @@ export const getContactTags = async (config = {}) => {
   return response.data?.data?.tags ?? [];
 };
 
+/**
+ * Bulk-create contacts from CSV text (columns: email, optional name, tags).
+ *
+ * @param {string} csv - CSV file contents
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ total: number, created: number, skipped: number, invalid: number, errors: Array<object> }>}
+ */
+export const importContacts = async (csv, config = {}) => {
+  const response = await apiClient.post('/contacts/import', { csv }, config);
+  return response.data?.data;
+};
+
+/**
+ * Download the user's contacts as CSV text (optionally filtered by tag).
+ *
+ * @param {{ tag?: string }} [params]
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<string>} CSV text
+ */
+export const exportContacts = async ({ tag } = {}, config = {}) => {
+  const params = {};
+  if (typeof tag === 'string' && tag.trim()) params.tag = tag.trim().toLowerCase();
+  const response = await apiClient.get('/contacts/export', {
+    params,
+    responseType: 'text',
+    transformResponse: (data) => data,
+    ...config,
+  });
+  return response.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -150,5 +181,7 @@ export default {
   updateContact,
   deleteContact,
   getContactTags,
+  importContacts,
+  exportContacts,
   getErrorMessage,
 };

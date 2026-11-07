@@ -5,12 +5,15 @@ import ContactsTable from '../../components/contacts/ContactsTable.jsx';
 import ContactsPagination from '../../components/contacts/ContactsPagination.jsx';
 import ContactFormModal from '../../components/contacts/ContactFormModal.jsx';
 import DeleteContactDialog from '../../components/contacts/DeleteContactDialog.jsx';
+import ImportContactsDialog from '../../components/contacts/ImportContactsDialog.jsx';
+import { downloadTextFile, formatImportSummary } from '../../utils/csvHelpers.js';
 import {
   getContacts,
   createContact,
   updateContact,
   deleteContact,
   getContactTags,
+  exportContacts,
   getErrorMessage,
 } from '../../api/contacts.js';
 import {
@@ -33,6 +36,8 @@ export const ContactsPage = () => {
   const [domainInput, setDomainInput] = useState('');
   const [debouncedDomain, setDebouncedDomain] = useState('');
   const [tagFilter, setTagFilter] = useState('');
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [tagOptions, setTagOptions] = useState([]);
 
   // Server data state
@@ -153,6 +158,24 @@ export const ContactsPage = () => {
     setPage(1);
   };
 
+  const handleImported = (result) => {
+    setNotification({ type: 'success', message: `Import finished: ${formatImportSummary(result)}.` });
+    setRefreshTrigger((prev) => prev + 1);
+  };
+
+  const handleExport = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const csv = await exportContacts({ tag: tagFilter });
+      downloadTextFile('contacts.csv', csv);
+    } catch (err) {
+      setNotification({ type: 'error', message: getErrorMessage(err, 'Failed to export contacts.') });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleTagChange = (val) => {
     setTagFilter(val);
     setPage(1);
@@ -268,6 +291,21 @@ export const ContactsPage = () => {
 
             <button
               type="button"
+              onClick={() => setIsImportOpen(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              Import
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+            >
+              {isExporting ? 'Exporting…' : 'Export'}
+            </button>
+            <button
+              type="button"
               onClick={handleOpenCreateModal}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
@@ -282,8 +320,12 @@ export const ContactsPage = () => {
         {/* Success/Action Notification */}
         {notification && (
           <div
-            className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm flex items-center justify-between shadow-lg"
-            role="status"
+            className={`mb-6 p-4 rounded-xl border text-sm flex items-center justify-between shadow-lg ${
+              notification.type === 'error'
+                ? 'bg-rose-500/10 border-rose-500/20 text-rose-300'
+                : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+            }`}
+            role={notification.type === 'error' ? 'alert' : 'status'}
             aria-live="polite"
           >
             <div className="flex items-center gap-2.5">
@@ -374,6 +416,10 @@ export const ContactsPage = () => {
           )}
         </div>
       </main>
+
+      {isImportOpen && (
+        <ImportContactsDialog onClose={() => setIsImportOpen(false)} onImported={handleImported} />
+      )}
 
       {/* Create / Edit Form Modal */}
       {isFormModalOpen && (
