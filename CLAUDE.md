@@ -155,7 +155,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/auth/login` | POST | Public | Authenticate user & return JWT |
 | `/api/v1/auth/me` | GET | Protected | Get authenticated profile |
 | `/api/v1/contacts` | GET, POST | Protected | List and create contacts |
-| `/api/v1/contacts/:id` | GET, PUT, DELETE | Protected | Contact CRUD |
+| `/api/v1/contacts/:id` | PATCH, DELETE | Protected | Update and delete a contact |
 | `/api/v1/contacts/import` | POST | Protected | Bulk CSV import |
 | `/api/v1/contacts/tags` | GET | Protected | Tags with contact counts |
 | `/api/v1/campaigns` | GET, POST | Protected | List and draft campaigns |
