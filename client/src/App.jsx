@@ -14,6 +14,9 @@ import AnalyticsPage from './pages/analytics/AnalyticsPage.jsx';
 import TemplatesPage from './pages/templates/TemplatesPage.jsx';
 import SegmentsPage from './pages/segments/SegmentsPage.jsx';
 import SuppressionsPage from './pages/suppressions/SuppressionsPage.jsx';
+import SignupFormsPage from './pages/signupForms/SignupFormsPage.jsx';
+import SubscribePage from './pages/public/SubscribePage.jsx';
+import ConfirmSubscriptionPage from './pages/public/ConfirmSubscriptionPage.jsx';
 
 export function App() {
   return (
@@ -30,6 +33,8 @@ export function App() {
 
           {/* Open to everyone: the emailed link works whether or not the user is signed in */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/subscribe/:slug" element={<SubscribePage />} />
+          <Route path="/confirm-subscription" element={<ConfirmSubscriptionPage />} />
 
           {/* Protected routes: redirect to /login if unauthenticated */}
           <Route element={<ProtectedRoute />}>
@@ -40,6 +45,7 @@ export function App() {
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/segments" element={<SegmentsPage />} />
             <Route path="/suppressions" element={<SuppressionsPage />} />
+            <Route path="/signup-forms" element={<SignupFormsPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}

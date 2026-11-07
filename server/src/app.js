@@ -14,6 +14,8 @@ import templateRoutes from './routes/template.routes.js';
 import segmentRoutes from './routes/segment.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import suppressionRoutes from './routes/suppression.routes.js';
+import signupFormRoutes from './routes/signupForm.routes.js';
+import publicRoutes from './routes/public.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -94,6 +96,8 @@ app.use('/api/v1/campaigns', campaignRoutes);
 app.use('/api/v1/templates', templateRoutes);
 app.use('/api/v1/segments', segmentRoutes);
 app.use('/api/v1/suppressions', suppressionRoutes);
+app.use('/api/v1/signup-forms', signupFormRoutes);
+app.use('/api/v1/public', publicRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/tracking', trackingRoutes);
 

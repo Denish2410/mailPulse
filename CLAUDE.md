@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **796 automated tests** (499 server, 297 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **839 automated tests** (534 server, 305 client), 0 failures, 0 skipped.
 
 ---
 
@@ -39,7 +39,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 ---
 
-## 3. Completed Phases Summary (Phases 1 – 12 + gap fixes)
+## 3. Completed Phases Summary (Phases 1 – 12 + gap fixes + product additions)
 
 ### Phase 1: Core Infrastructure & Security
 - Monorepo setup, centralized Express error handling, Helmet, CORS, morgan logging.
@@ -121,6 +121,12 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - Auth: `POST /auth/forgot-password` (uniform response, background email) and `POST /auth/reset-password` (hashed, 1h, single-use token); `POST /auth/verify-email` and `POST /auth/resend-verification` (hashed, 24h token); `emailVerified` on the user payload; sending is NOT gated on verification. Client pages `/forgot-password`, `/reset-password`, `/verify-email` and an unverified-email banner.
 - The lazily created send/test-email rate limiters pass `validate: { creationStack: false }`.
 
+### Product Additions (post gap fixes)
+- Send throttling: `CAMPAIGN_SEND_RATE_PER_MINUTE` (0/unset = unlimited) spaces sends evenly across all dispatch workers (`sendThrottle.service.js`); released on shutdown.
+- Custom contact fields: up to 10 `key=value` text fields per contact (`utils/customFields.js`, lowercase snake_case keys, values <= 200 chars), usable as `{{custom.<field>}}` merge tags (with `| "fallback"`), imported/exported as extra CSV columns (`custom:<key>` for names that clash with standard columns), edited in the contact form.
+- Public signup forms with double opt-in: owner CRUD at `/api/v1/signup-forms` (max 10, immutable random slug, tags applied to new subscribers); public `GET /api/v1/public/forms/:slug`, `POST /public/forms/:slug/subscribe` (uniform response, honeypot, 5-min per-address cooldown, tight IP rate limit) and `POST /public/subscriptions/confirm` (hashed 48h single-use token). On confirm: bounced/complained/owner-suppressed addresses stay blocked silently; a recipient's own earlier unsubscribe is lifted by fresh verified consent. Client pages `/signup-forms` (owner), `/subscribe/:slug` and `/confirm-subscription` (public).
+- Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
+
 ---
 
 ## 4. Key Data Models (Mongoose)
@@ -128,13 +134,15 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **User** (`server/src/models/User.js`):
   - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`), `emailVerifiedAt`, plus hashed one-time `passwordResetTokenHash`/`passwordResetExpiresAt` and `emailVerificationTokenHash`/`emailVerificationExpiresAt` (all `select: false`).
 - **Contact** (`server/src/models/Contact.js`):
-  - Fields: `userId`, `name`, `email`, `tags`, `isUnsubscribed`, `unsubscribedAt`.
+  - Fields: `userId`, `name`, `email`, `tags`, `customFields` (Map of text), `isUnsubscribed`, `unsubscribedAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
 - **Campaign** (`server/src/models/Campaign.js`):
   - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`).
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
 - **Delivery** (`server/src/models/Delivery.js`):
   - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
+- **SignupForm** (`server/src/models/SignupForm.js`): `userId`, `name`, `description`, `tags`, `slug` (unique, immutable), `enabled`.
+- **PendingSubscription** (`server/src/models/PendingSubscription.js`): `formId`, `userId`, `email`, `name`, `tokenHash` (unique), `expiresAt` (TTL), unique `{ formId, email }`.
 - **Template** (`server/src/models/Template.js`):
   - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`.
   - Indexes: `{ userId: 1, name: 1 }` (unique), `{ userId: 1, updatedAt: -1 }`.
@@ -190,6 +198,11 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/segments/:id/preview` | GET | Protected | Count + sample for a saved segment |
 | `/api/v1/suppressions` | GET, POST | Protected | List and add suppressions |
 | `/api/v1/suppressions/:id` | DELETE | Protected | Remove (admin/import/bounce only) |
+| `/api/v1/signup-forms` | GET, POST | Protected | List and create public signup forms |
+| `/api/v1/signup-forms/:id` | PATCH, DELETE | Protected | Update (enable/disable, tags) and delete a form |
+| `/api/v1/public/forms/:slug` | GET | Public | Form name and description |
+| `/api/v1/public/forms/:slug/subscribe` | POST | Public | Start double opt-in (uniform response) |
+| `/api/v1/public/subscriptions/confirm` | POST | Public | Confirm with the emailed token |
 | `/api/v1/analytics/overview` | GET | Protected | Overview metrics (`?days=7\|30\|90`) |
 | `/api/v1/webhooks/sendgrid`, `/mailgun`, `/ses` | POST | Signed (ESP) | Bounce & complaint ingestion |
 | `/api/v1/tracking/open/:token` | GET | Public | Transparent 1x1 GIF tracking pixel |

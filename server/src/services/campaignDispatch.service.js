@@ -16,6 +16,7 @@ import {
 } from './tracking.service.js';
 import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
+import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -147,6 +148,7 @@ export const waitForCampaignDispatch = (campaignId) =>
 export const stopAllDispatches = async () => {
   stopRequested = true;
   stopDispatchWatchdog();
+  cancelSharedSendThrottle();
   await Promise.allSettled([...activeDispatches.values()]);
 };
 
@@ -338,7 +340,18 @@ export const processNextDelivery = async (campaignId, message, emailService, log
 
   // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
   //    recipient values can never alter tracking links)
-  const personalized = personalizeMessage(message, { name: delivery.name, email: delivery.email });
+  let customFields;
+  if (delivery.contactId && delivery.userId && /\{\{\s*custom\./i.test(`${message.subject} ${message.text} ${message.html}`)) {
+    const contact = await Contact.findOne({ _id: delivery.contactId, userId: delivery.userId })
+      .select('customFields')
+      .lean();
+    customFields = contact?.customFields;
+  }
+  const personalized = personalizeMessage(message, {
+    name: delivery.name,
+    email: delivery.email,
+    customFields,
+  });
 
   // 3b. Inject tracking pixel, rewrite links, and add unsubscribe footers
   let htmlToSend = personalized.html;
@@ -461,8 +474,13 @@ export const processCampaignDeliveries = async (
 
     const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, MAX_SEND_CONCURRENCY));
 
+    const throttle = getSharedSendThrottle();
+
     const worker = async () => {
       while (!stopRequested) {
+        // Reserve a send slot first (no-op when CAMPAIGN_SEND_RATE_PER_MINUTE is unset)
+        await throttle.wait();
+        if (stopRequested) return;
         const hadWork = await processNextDelivery(campaignId, message, emailService, logger);
         if (!hadWork) {
           return;

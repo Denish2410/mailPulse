@@ -155,3 +155,29 @@ describe('Contact tags API', () => {
     ].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)));
   });
 });
+
+describe('Contact custom fields', () => {
+  const id = new mongoose.Types.ObjectId().toString();
+
+  it('normalizes keys and values in the validators', () => {
+    const ok = createContactSchema.safeParse({
+      body: { name: 'Ada', email: 'a@b.co', customFields: { Company: '  Acme  ', plan_tier: 'pro', empty: '   ' } },
+    });
+    assert.equal(ok.success, true);
+    assert.deepEqual(ok.data.body.customFields, { company: 'Acme', plan_tier: 'pro' });
+  });
+
+  it('rejects invalid names, values, duplicates and too many fields', () => {
+    const parse = (customFields) => createContactSchema.safeParse({ body: { name: 'Ada', email: 'a@b.co', customFields } });
+    assert.equal(parse({ '1bad': 'x' }).success, false);
+    assert.equal(parse({ 'has space': 'x' }).success, false);
+    assert.equal(parse({ 'dotted.key': 'x' }).success, false);
+    assert.equal(parse({ $where: 'x' }).success, false);
+    assert.equal(parse({ company: 5 }).success, false);
+    assert.equal(parse({ company: 'x'.repeat(201) }).success, false);
+    assert.equal(parse({ Company: 'a', company: 'b' }).success, false);
+    assert.equal(parse(Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`f${i}`, 'v']))).success, false);
+    assert.equal(parse('nope').success, false);
+    assert.equal(updateContactSchema.safeParse({ params: { id }, body: { customFields: {} } }).success, true);
+  });
+});

@@ -12,6 +12,17 @@ import mongoose from 'mongoose';
  */
 
 import { normalizeTag, MAX_TAGS_PER_CONTACT, MAX_TAG_LENGTH } from '../utils/tags.js';
+import { normalizeCustomFields } from '../utils/customFields.js';
+
+// Custom fields are normalized (lowercase keys, trimmed values, blanks dropped) or rejected
+const customFieldsField = z.record(z.string(), z.any()).transform((value, ctx) => {
+  const { fields, error } = normalizeCustomFields(value);
+  if (error) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: error });
+    return z.NEVER;
+  }
+  return fields;
+});
 
 // Tags are normalized (trimmed, lowercased, de-duplicated); invalid tags are rejected, not dropped
 const tagsField = z
@@ -67,6 +78,7 @@ export const createContactSchema = z.object({
         .max(254, 'Contact email cannot exceed 254 characters')
         .email('Please provide a valid email address'),
       tags: tagsField.optional(),
+      customFields: customFieldsField.optional(),
     })
     .strict(),
 });
@@ -98,11 +110,17 @@ export const updateContactSchema = z.object({
         .email('Please provide a valid email address')
         .optional(),
       tags: tagsField.optional(),
+      customFields: customFieldsField.optional(),
     })
     .strict()
-    .refine((data) => data.name !== undefined || data.email !== undefined || data.tags !== undefined, {
-      message: 'At least one field (name, email or tags) must be provided for update',
-    }),
+    .refine(
+      (data) =>
+        data.name !== undefined ||
+        data.email !== undefined ||
+        data.tags !== undefined ||
+        data.customFields !== undefined,
+      { message: 'At least one field (name, email, tags or customFields) must be provided for update' }
+    ),
 });
 
 /**

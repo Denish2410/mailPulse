@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
 import { validateContactForm } from '../../utils/validation.js';
 import { getErrorMessage } from '../../lib/api.js';
-import { parseTagInput, validateContactTags } from '../../utils/segmentHelpers.js';
+import {
+  parseTagInput,
+  validateContactTags,
+  parseCustomFieldsInput,
+  formatCustomFieldsInput,
+} from '../../utils/segmentHelpers.js';
 
 /**
  * ContactFormModal Component
@@ -21,6 +26,7 @@ export const ContactFormModal = ({
     name: contact?.name || '',
     email: contact?.email || '',
     tags: Array.isArray(contact?.tags) ? contact.tags.join(', ') : '',
+    customFields: formatCustomFieldsInput(contact?.customFields),
   });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
@@ -79,6 +85,12 @@ export const ContactFormModal = ({
       return;
     }
 
+    const parsedFields = parseCustomFieldsInput(formData.customFields);
+    if (parsedFields.error) {
+      setErrors({ customFields: parsedFields.error });
+      return;
+    }
+
     setErrors({});
     setServerError(null);
     setIsSubmitting(true);
@@ -88,6 +100,7 @@ export const ContactFormModal = ({
         name: formData.name.trim(),
         email: formData.email.trim(),
         tags: parsedTags.tags,
+        customFields: parsedFields.fields,
       });
       onClose();
     } catch (err) {
@@ -268,6 +281,30 @@ export const ContactFormModal = ({
             />
             {errors.tags && (
               <p className="mt-1 text-xs text-rose-400 font-medium">{errors.tags}</p>
+            )}
+          </div>
+
+          {/* Custom Fields */}
+          <div>
+            <label htmlFor="contact-custom-fields" className="block text-xs font-medium text-slate-300 mb-1.5">
+              Custom fields <span className="text-slate-500 font-normal">(one per line, key=value; use as {'{{custom.key}}'})</span>
+            </label>
+            <textarea
+              id="contact-custom-fields"
+              name="customFields"
+              rows={3}
+              value={formData.customFields}
+              onChange={handleChange}
+              disabled={isSubmitting}
+              placeholder={'company=Acme\nplan=pro'}
+              className={`w-full px-3.5 py-2.5 bg-slate-950/80 border rounded-xl text-sm font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 transition-colors disabled:opacity-60 resize-y ${
+                errors.customFields
+                  ? 'border-rose-500/60 focus:ring-rose-500/40'
+                  : 'border-slate-800 focus:border-indigo-500 focus:ring-indigo-500/40'
+              }`}
+            />
+            {errors.customFields && (
+              <p className="mt-1 text-xs text-rose-400 font-medium">{errors.customFields}</p>
             )}
           </div>
 

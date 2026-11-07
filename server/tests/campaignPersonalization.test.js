@@ -168,4 +168,28 @@ describe('Campaign personalization (dispatch and test email)', () => {
     assert.ok(mail.html.includes(user.email));
     assert.equal(transport.count, 1);
   });
+
+  it('renders custom fields per recipient and falls back when missing', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    await Contact.updateOne({ _id: named._id }, { $set: { customFields: { company: 'Acme & Sons' } } });
+    const campaign = await Campaign.create({
+      userId: user._id,
+      name: 'Custom Fields',
+      subject: 'News for {{custom.company | "your team"}}',
+      textContent: 'Company: {{custom.company | "n/a"}}',
+      htmlContent: '<p>{{custom.company | "n/a"}}</p>',
+      recipientIds: [named._id, unnamed._id],
+    });
+
+    const res = await request('POST', `/api/v1/campaigns/${campaign._id}/send`, { confirm: true });
+    assert.equal(res.status, 202);
+    await waitForCampaignDispatch(campaign._id);
+
+    const byTo = Object.fromEntries(transport.sentEmails.map((m) => [m.to, m]));
+    assert.equal(byTo[named.email].subject, 'News for Acme & Sons');
+    assert.ok(byTo[named.email].html.includes('<p>Acme &amp; Sons</p>'));
+    assert.equal(byTo[unnamed.email].subject, 'News for your team');
+    assert.ok(byTo[unnamed.email].text.startsWith('Company: n/a'));
+    await Contact.updateOne({ _id: named._id }, { $unset: { customFields: '' } });
+  });
 });

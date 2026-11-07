@@ -80,13 +80,14 @@ export const getContacts = async (params = {}, config = {}) => {
  * @param {import('axios').AxiosRequestConfig} [config={}]
  * @returns {Promise<object>} Safe contact object
  */
-export const createContact = async ({ name, email, tags } = {}, config = {}) => {
+export const createContact = async ({ name, email, tags, customFields } = {}, config = {}) => {
   const response = await apiClient.post(
     '/contacts',
     {
       name: typeof name === 'string' ? name.trim() : name,
       email: typeof email === 'string' ? email.trim() : email,
       ...(Array.isArray(tags) && { tags }),
+      ...(customFields && typeof customFields === 'object' && { customFields }),
     },
     config
   );
@@ -113,6 +114,9 @@ export const updateContact = async (id, payload = {}, config = {}) => {
 
   if (Array.isArray(payload.tags)) {
     body.tags = payload.tags;
+  }
+  if (payload.customFields && typeof payload.customFields === 'object') {
+    body.customFields = payload.customFields;
   }
 
   const response = await apiClient.patch(`/contacts/${id}`, body, config);

@@ -17,8 +17,9 @@ describe('Personalization service', () => {
       firstName: 'Ada',
       lastName: 'Lovelace King',
       email: 'ada@example.com',
+      custom: {},
     });
-    assert.deepEqual(buildMergeVariables({}), { name: '', firstName: '', lastName: '', email: '' });
+    assert.deepEqual(buildMergeVariables({}), { name: '', firstName: '', lastName: '', email: '', custom: {} });
     assert.equal(buildMergeVariables({ name: 'Cher' }).lastName, '');
   });
 
@@ -73,5 +74,22 @@ describe('Personalization service', () => {
     assert.equal(renderMergeTags(null, vars), '');
     assert.deepEqual(findMergeTags('{{name}} {{ Email }} {{name|"x"}} {{nope}}').sort(), ['email', 'name']);
     assert.deepEqual(findMergeTags(42), []);
+  });
+
+  it('renders custom field tags with fallbacks and escaping', () => {
+    const v = buildMergeVariables({ name: 'Ada', email: 'a@b.co', customFields: { Company: 'Acme <b>&</b>', plan: '' } });
+    assert.equal(renderMergeTags('{{custom.company}}', v), 'Acme <b>&</b>');
+    assert.equal(renderMergeTags('{{custom.company}}', v, { mode: 'html' }), 'Acme &lt;b&gt;&amp;&lt;/b&gt;');
+    assert.equal(renderMergeTags('{{ Custom.PLAN | "free" }}', v), 'free');
+    assert.equal(renderMergeTags('[{{custom.missing}}]', v), '[]');
+    assert.equal(renderMergeTags('{{custom.}} {{custom.9x}}', v), '{{custom.}} {{custom.9x}}');
+  });
+
+  it('does not expand tags hidden inside custom values and ignores non-text values', () => {
+    const v = buildMergeVariables({ name: 'Ada', email: 'a@b.co', customFields: { note: '{{email}}', n: 5 } });
+    assert.equal(renderMergeTags('{{custom.note}}', v), '{{email}}');
+    assert.equal(renderMergeTags('{{custom.n | "x"}}', v), 'x');
+    assert.deepEqual(buildMergeVariables({ name: 'A B' }).custom, {});
+    assert.deepEqual(findMergeTags('{{custom.Company}} {{name}} {{custom.company | "x"}}').sort(), ['custom.company', 'name']);
   });
 });

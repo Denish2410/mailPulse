@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { importContactsFromCsv, ImportError } from '../services/contactImport.service.js';
 import { toCsv } from '../utils/csv.js';
+import { toPlainCustomFields } from '../utils/customFields.js';
 
 /**
  * Format a Mongoose Contact document into a safe, client-facing representation.
@@ -20,6 +21,7 @@ export const formatSafeContact = (contact) => {
     name: doc.name,
     email: doc.email,
     tags: Array.isArray(doc.tags) ? doc.tags : [],
+    customFields: toPlainCustomFields(doc.customFields),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -37,7 +39,7 @@ export const createContact = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  const { name, email, tags = [] } = req.body;
+  const { name, email, tags = [], customFields } = req.body;
   const normalizedEmail = email.trim().toLowerCase();
 
   // 1. Proactively check if a contact with this email already exists for this owner
@@ -54,6 +56,7 @@ export const createContact = asyncHandler(async (req, res) => {
       name: name.trim(),
       email: normalizedEmail,
       tags,
+      ...(customFields && Object.keys(customFields).length > 0 && { customFields }),
     });
   } catch (err) {
     if (err.code === 11000) {
@@ -176,7 +179,7 @@ export const updateContact = asyncHandler(async (req, res) => {
   }
 
   const { id } = req.params;
-  const { name, email, tags } = req.body;
+  const { name, email, tags, customFields } = req.body;
 
   // 1. Query using BOTH contact ID and authenticated owner's ID
   // Returning 404 for unowned contacts prevents ownership enumeration attacks
@@ -210,6 +213,11 @@ export const updateContact = asyncHandler(async (req, res) => {
   // 3b. Replace tags if provided (already normalized by validation)
   if (tags !== undefined) {
     contact.tags = tags;
+  }
+
+  // 3c. Replace custom fields if provided ({} clears them)
+  if (customFields !== undefined) {
+    contact.customFields = Object.keys(customFields).length > 0 ? customFields : undefined;
   }
 
   // 4. Save updated document, preserving existing record if error occurs
@@ -342,18 +350,28 @@ export const exportContacts = asyncHandler(async (req, res) => {
   const contacts = await Contact.find(filter)
     .sort({ createdAt: 1, _id: 1 })
     .limit(MAX_EXPORT_ROWS)
-    .select('name email tags isUnsubscribed createdAt')
+    .select('name email tags customFields isUnsubscribed createdAt')
     .lean();
 
+  // One column per custom field key in use; keys that clash with a standard column are written
+  // as `custom:<key>`, which the importer understands.
+  const keys = [...new Set(contacts.flatMap((c) => Object.keys(toPlainCustomFields(c.customFields))))].sort();
+  const baseHeader = ['name', 'email', 'tags', 'status', 'created'];
+  const customHeader = keys.map((key) => (baseHeader.includes(key) ? `custom:${key}` : key));
+
   const csv = toCsv(
-    ['name', 'email', 'tags', 'status', 'created'],
-    contacts.map((c) => [
-      c.name,
-      c.email,
-      (c.tags || []).join(';'),
-      c.isUnsubscribed ? 'unsubscribed' : 'subscribed',
-      c.createdAt ? new Date(c.createdAt).toISOString() : '',
-    ])
+    [...baseHeader, ...customHeader],
+    contacts.map((c) => {
+      const fields = toPlainCustomFields(c.customFields);
+      return [
+        c.name,
+        c.email,
+        (c.tags || []).join(';'),
+        c.isUnsubscribed ? 'unsubscribed' : 'subscribed',
+        c.createdAt ? new Date(c.createdAt).toISOString() : '',
+        ...keys.map((key) => fields[key] ?? ''),
+      ];
+    })
   );
 
   res.status(200);

@@ -146,3 +146,46 @@ export const getSegmentErrorMessage = (error) => {
       return 'Something went wrong. Please try again.';
   }
 };
+
+export const MAX_CUSTOM_FIELDS = 10;
+const CUSTOM_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * Parses "key=value" lines into custom fields (keys lower-cased). Blank lines and blank values
+ * are skipped.
+ *
+ * @param {string} input
+ * @returns {{ fields: Record<string, string>, error: string|null }}
+ */
+export const parseCustomFieldsInput = (input) => {
+  const fields = {};
+  if (typeof input !== 'string') return { fields, error: null };
+  for (const line of input.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) return { fields: {}, error: `Use key=value on each line (problem: "${trimmed.slice(0, 40)}").` };
+    const key = trimmed.slice(0, eq).trim().toLowerCase();
+    const value = trimmed.slice(eq + 1).trim();
+    if (key.length > 30 || !CUSTOM_KEY_PATTERN.test(key)) {
+      return { fields: {}, error: `Invalid field name "${key.slice(0, 40)}". Use lowercase letters, numbers and underscores, starting with a letter.` };
+    }
+    if (value.length > 200) return { fields: {}, error: `Value for "${key}" cannot exceed 200 characters.` };
+    if (key in fields) return { fields: {}, error: `Duplicate field "${key}".` };
+    if (value) fields[key] = value;
+  }
+  if (Object.keys(fields).length > MAX_CUSTOM_FIELDS) {
+    return { fields: {}, error: `A contact can have at most ${MAX_CUSTOM_FIELDS} custom fields.` };
+  }
+  return { fields, error: null };
+};
+
+/**
+ * Formats stored custom fields back into editable "key=value" lines.
+ */
+export const formatCustomFieldsInput = (fields) =>
+  fields && typeof fields === 'object'
+    ? Object.entries(fields)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n')
+    : '';

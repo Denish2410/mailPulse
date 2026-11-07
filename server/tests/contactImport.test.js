@@ -22,7 +22,7 @@ import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
 import { hashPassword } from '../src/services/password.service.js';
 import { parseCsv } from '../src/utils/csv.js';
-import { MAX_IMPORT_ROWS } from '../src/services/contactImport.service.js';
+import { MAX_IMPORT_ROWS, headerToCustomKey } from '../src/services/contactImport.service.js';
 
 describe('Contact CSV import API', () => {
   let server;
@@ -191,6 +191,61 @@ describe('Contact CSV import API', () => {
       assert.equal(imported.created, 1);
       const back = await Contact.findOne({ userId: userOne._id, email: em('rt') }).lean();
       assert.deepEqual(back.tags, ['a', 'b']);
+    });
+  });
+
+  describe('custom field columns', () => {
+    it('maps headers to custom keys', () => {
+      assert.equal(headerToCustomKey('Company'), 'company');
+      assert.equal(headerToCustomKey('Phone Number'), 'phone_number');
+      assert.equal(headerToCustomKey(' Plan-Tier '), 'plan_tier');
+      assert.equal(headerToCustomKey('custom:Status'), 'status');
+      for (const ignored of ['', 'status', 'created', 'tags', '123', '!!!', 'custom:', 'custom:9x']) {
+        assert.equal(headerToCustomKey(ignored), null, ignored);
+      }
+    });
+
+    it('imports extra columns as custom fields and reports ignored ones', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const csv = `name,email,Company,Phone Number,status,@@@\nAda Lovelace,${em('cf1')},Acme,555-1234,subscribed,x\nNo Fields,${em('cf2')},,,,\n`;
+      const res = await post(csv);
+      const data = (await res.json()).data;
+      assert.equal(data.created, 2);
+      assert.deepEqual(data.ignoredColumns, ['@@@']);
+
+      const ada = await Contact.findOne({ userId: userOne._id, email: em('cf1') }).lean();
+      assert.deepEqual(ada.customFields, { company: 'Acme', phone_number: '555-1234' });
+      const none = await Contact.findOne({ userId: userOne._id, email: em('cf2') }).lean();
+      assert.equal(none.customFields, undefined);
+    });
+
+    it('rejects rows whose custom values are too long or too numerous', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const headers = Array.from({ length: 11 }, (_, i) => `f${i}`);
+      const tooMany = `email,${headers.join(',')}\n${em('many')},${headers.map(() => 'v').join(',')}\n`;
+      const tooLong = `email,note\n${em('long')},${'x'.repeat(201)}\n`;
+      const a = (await (await post(tooMany)).json()).data;
+      const b = (await (await post(tooLong)).json()).data;
+      assert.equal(a.invalid, 1);
+      assert.match(a.errors[0].message, /at most 10/);
+      assert.equal(b.invalid, 1);
+      assert.match(b.errors[0].message, /200 characters/);
+      assert.equal(await Contact.countDocuments({ userId: userOne._id }), 0);
+    });
+
+    it('exports custom fields and round-trips them, including keys that clash with standard columns', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      await Contact.create({ userId: userOne._id, name: 'Round Trip', email: em('rt2'), customFields: { company: 'Acme', status: 'vip' } });
+      const res = await fetch(`${baseUrl}/api/v1/contacts/export`, { headers: { Authorization: `Bearer ${tokenOne}` } });
+      const csv = await res.text();
+      const rows = parseCsv(csv);
+      assert.deepEqual(rows[0], ['name', 'email', 'tags', 'status', 'created', 'company', 'custom:status']);
+      assert.deepEqual(rows[1].slice(5), ['Acme', 'vip']);
+
+      await Contact.deleteMany({ userId: userOne._id });
+      assert.equal((await (await post(csv)).json()).data.created, 1);
+      const back = await Contact.findOne({ userId: userOne._id, email: em('rt2') }).lean();
+      assert.deepEqual(back.customFields, { company: 'Acme', status: 'vip' });
     });
   });
 });

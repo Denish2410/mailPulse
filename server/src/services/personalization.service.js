@@ -5,6 +5,7 @@
  *
  * Supported tags (case-insensitive, whitespace tolerant):
  *   {{name}}  {{firstName}}  {{lastName}}  {{email}}
+ *   {{custom.<field>}}  (the contact's custom fields, e.g. {{custom.company}})
  * Optional fallback used when the value is empty:
  *   {{name | "Customer"}}   {{firstName | 'there'}}
  *
@@ -19,7 +20,7 @@ export const MERGE_TAGS = Object.freeze(['name', 'firstName', 'lastName', 'email
 
 const TAG_LOOKUP = new Map(MERGE_TAGS.map((tag) => [tag.toLowerCase(), tag]));
 
-const TAG_PATTERN = /\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*(?:\|\s*(?:"([^"{}]*)"|'([^'{}]*)'))?\s*\}\}/g;
+const TAG_PATTERN = /\{\{\s*([A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9_]*)?)\s*(?:\|\s*(?:"([^"{}]*)"|'([^'{}]*)'))?\s*\}\}/g;
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -35,6 +36,12 @@ const stripControlChars = (value) =>
  * @returns {{ name: string, firstName: string, lastName: string, email: string }}
  */
 export const buildMergeVariables = (recipient = {}) => {
+  const custom = {};
+  if (recipient.customFields && typeof recipient.customFields === 'object') {
+    for (const [key, value] of Object.entries(recipient.customFields)) {
+      if (typeof value === 'string') custom[key.toLowerCase()] = value;
+    }
+  }
   const name = typeof recipient.name === 'string' ? recipient.name.trim().replace(/\s+/g, ' ') : '';
   const email = typeof recipient.email === 'string' ? recipient.email.trim() : '';
   const parts = name ? name.split(' ') : [];
@@ -43,6 +50,7 @@ export const buildMergeVariables = (recipient = {}) => {
     firstName: parts[0] || '',
     lastName: parts.length > 1 ? parts.slice(1).join(' ') : '',
     email,
+    custom,
   };
 };
 
@@ -62,10 +70,15 @@ export const renderMergeTags = (template, variables, { mode = 'text' } = {}) => 
   const sanitize = mode === 'html' ? escapeHtml : mode === 'subject' ? stripControlChars : String;
 
   return template.replace(TAG_PATTERN, (match, rawTag, dqFallback, sqFallback) => {
-    const tag = TAG_LOOKUP.get(rawTag.toLowerCase());
-    if (!tag) return match;
-
-    const value = variables?.[tag];
+    const lowered = rawTag.toLowerCase();
+    let value;
+    if (lowered.startsWith('custom.')) {
+      value = variables?.custom?.[lowered.slice('custom.'.length)];
+    } else {
+      const tag = TAG_LOOKUP.get(lowered);
+      if (!tag) return match;
+      value = variables?.[tag];
+    }
     if (typeof value === 'string' && value.trim() !== '') {
       return sanitize(value);
     }
@@ -100,8 +113,13 @@ export const findMergeTags = (template) => {
   if (typeof template !== 'string') return [];
   const found = new Set();
   for (const m of template.matchAll(TAG_PATTERN)) {
-    const tag = TAG_LOOKUP.get(m[1].toLowerCase());
-    if (tag) found.add(tag);
+    const lowered = m[1].toLowerCase();
+    if (lowered.startsWith('custom.')) {
+      found.add(lowered);
+    } else {
+      const tag = TAG_LOOKUP.get(lowered);
+      if (tag) found.add(tag);
+    }
   }
   return [...found];
 };
