@@ -138,3 +138,38 @@ describe('Segment helpers', () => {
     assert.match(getSegmentErrorMessage({}), /Something went wrong/);
   });
 });
+
+import { parseCustomFieldsInput, formatCustomFieldsInput } from '../src/utils/segmentHelpers.js';
+import { formatCustomMergeTag } from '../src/utils/templateHelpers.js';
+
+describe('Custom field helpers', () => {
+  it('parses key=value lines', () => {
+    assert.deepEqual(parseCustomFieldsInput('Company = Acme \n\nplan=pro\nempty=\n'), {
+      fields: { company: 'Acme', plan: 'pro' },
+      error: null,
+    });
+    assert.deepEqual(parseCustomFieldsInput(''), { fields: {}, error: null });
+    assert.deepEqual(parseCustomFieldsInput(undefined), { fields: {}, error: null });
+    assert.equal(parseCustomFieldsInput('x=a=b').fields.x, 'a=b');
+  });
+
+  it('reports the first problem', () => {
+    assert.match(parseCustomFieldsInput('no equals sign').error, /key=value/);
+    assert.match(parseCustomFieldsInput('=value').error, /key=value/);
+    assert.match(parseCustomFieldsInput('bad key=1').error, /Invalid field name/);
+    assert.match(parseCustomFieldsInput('9a=1').error, /Invalid field name/);
+    assert.match(parseCustomFieldsInput(`a=${'x'.repeat(201)}`).error, /200 characters/);
+    assert.match(parseCustomFieldsInput('a=1\nA=2').error, /Duplicate/);
+    const many = Array.from({ length: 11 }, (_, i) => `f${i}=v`).join('\n');
+    assert.match(parseCustomFieldsInput(many).error, /at most 10/);
+  });
+
+  it('formats fields for editing and builds custom merge tags', () => {
+    assert.equal(formatCustomFieldsInput({ company: 'Acme', plan: 'pro' }), 'company=Acme\nplan=pro');
+    assert.equal(formatCustomFieldsInput(undefined), '');
+    assert.equal(formatCustomMergeTag(' Company '), '{{custom.company}}');
+    assert.equal(formatCustomMergeTag('plan', 'free'), '{{custom.plan | "free"}}');
+    assert.equal(formatCustomMergeTag('bad name'), '');
+    assert.equal(formatCustomMergeTag(''), '');
+  });
+});

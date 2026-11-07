@@ -22,6 +22,15 @@ export const formatMergeTag = (tag, fallback = '') => {
 };
 
 /**
+ * Builds `{{custom.<name> | "fallback"}}`-style tags; returns '' for invalid field names.
+ */
+export const formatCustomMergeTag = (name, fallback = '') => {
+  const key = typeof name === 'string' ? name.trim().toLowerCase() : '';
+  if (!/^[a-z][a-z0-9_]{0,29}$/.test(key)) return '';
+  return formatMergeTag(`custom.${key}`, fallback);
+};
+
+/**
  * Inserts text into a value at the given selection range (clamped to valid bounds).
  *
  * @param {string} value
