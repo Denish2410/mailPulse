@@ -3,6 +3,7 @@ import Contact from '../models/Contact.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { importContactsFromCsv, ImportError } from '../services/contactImport.service.js';
+import { toCsv } from '../utils/csv.js';
 
 /**
  * Format a Mongoose Contact document into a safe, client-facing representation.
@@ -318,4 +319,48 @@ export const importContacts = asyncHandler(async (req, res) => {
     message: 'Contact import finished',
     data: result,
   });
+});
+
+const MAX_EXPORT_ROWS = 50000;
+
+/**
+ * Download the authenticated user's contacts as CSV (optionally filtered by ?tag=).
+ * Cells are formula-injection safe. The CSV re-imports through POST /contacts/import.
+ *
+ * Route: GET /api/v1/contacts/export
+ * Access: Protected (Bearer JWT)
+ */
+export const exportContacts = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const filter = { userId };
+  if (req.query.tag) filter.tags = req.query.tag;
+
+  const contacts = await Contact.find(filter)
+    .sort({ createdAt: 1, _id: 1 })
+    .limit(MAX_EXPORT_ROWS)
+    .select('name email tags isUnsubscribed createdAt')
+    .lean();
+
+  const csv = toCsv(
+    ['name', 'email', 'tags', 'status', 'created'],
+    contacts.map((c) => [
+      c.name,
+      c.email,
+      (c.tags || []).join(';'),
+      c.isUnsubscribed ? 'unsubscribed' : 'subscribed',
+      c.createdAt ? new Date(c.createdAt).toISOString() : '',
+    ])
+  );
+
+  res.status(200);
+  res.set({
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="contacts.csv"',
+    'Cache-Control': 'no-store',
+  });
+  res.send(csv);
 });

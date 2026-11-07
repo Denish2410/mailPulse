@@ -187,7 +187,22 @@ export const importContactsSchema = z.object({
     .strict(),
 });
 
+/**
+ * Schema for GET /api/v1/contacts/export
+ */
+export const exportContactsSchema = z.object({
+  query: z
+    .object({
+      tag: z
+        .preprocess((val) => (typeof val === 'string' ? normalizeTag(val) ?? '__invalid__' : val),
+          z.string({ invalid_type_error: 'Tag must be a string' }).optional())
+        .refine((val) => val !== '__invalid__', { message: 'Invalid tag' }),
+    })
+    .strict(),
+});
+
 export default {
+  exportContactsSchema,
   importContactsSchema,
   contactIdParamSchema,
   createContactSchema,

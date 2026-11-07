@@ -21,6 +21,7 @@ import Contact from '../src/models/Contact.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
 import { hashPassword } from '../src/services/password.service.js';
+import { parseCsv } from '../src/utils/csv.js';
 import { MAX_IMPORT_ROWS } from '../src/services/contactImport.service.js';
 
 describe('Contact CSV import API', () => {
@@ -143,5 +144,53 @@ describe('Contact CSV import API', () => {
     const big = ['email', ...Array.from({ length: MAX_IMPORT_ROWS + 1 }, (_, i) => `u${i}@x.co`)].join('\n');
     assert.equal((await post(big)).status, 400);
     assert.equal(await Contact.countDocuments({ userId: userOne._id }), 0);
+  });
+
+  describe('export', () => {
+    const get = (qs = '', token = tokenOne) =>
+      fetch(`${baseUrl}/api/v1/contacts/export${qs}`, { headers: { ...(token && { Authorization: `Bearer ${token}` }) } });
+
+    it('requires authentication', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      assert.equal((await get('', null)).status, 401);
+    });
+
+    it('downloads only the owner contacts as an attachment, optionally filtered by tag', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      await Contact.create({ userId: userOne._id, name: 'Zed, Zed', email: em('a'), tags: ['vip', 'lead'] });
+      await Contact.create({ userId: userOne._id, name: 'Plain', email: em('b'), isUnsubscribed: true });
+      await Contact.create({ userId: userTwo._id, name: 'Other Tenant', email: em('c') });
+
+      const res = await get();
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type'), /text\/csv/);
+      assert.match(res.headers.get('content-disposition'), /attachment; filename="contacts.csv"/);
+      const rows = parseCsv(await res.text());
+      assert.deepEqual(rows[0], ['name', 'email', 'tags', 'status', 'created']);
+      assert.equal(rows.length, 3);
+      assert.deepEqual(rows[1].slice(0, 4), ['Zed, Zed', em('a'), 'vip;lead', 'subscribed']);
+      assert.equal(rows[2][3], 'unsubscribed');
+      assert.ok(!rows.some((r) => r[1] === em('c')));
+
+      const filtered = parseCsv(await (await get('?tag=VIP')).text());
+      assert.equal(filtered.length, 2);
+      assert.equal((await get('?tag=bad!')).status, 400);
+    });
+
+    it('neutralizes formula injection and round-trips through import', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      await Contact.create({ userId: userOne._id, name: '=cmd|calc', email: em('evil'), tags: ['x'] });
+      const text = await (await get()).text();
+      assert.ok(text.includes("'=cmd|calc"));
+
+      await Contact.deleteMany({ userId: userOne._id });
+      await Contact.create({ userId: userOne._id, name: 'Round Trip', email: em('rt'), tags: ['a', 'b'] });
+      const csv = await (await get()).text();
+      await Contact.deleteMany({ userId: userOne._id });
+      const imported = (await (await post(csv)).json()).data;
+      assert.equal(imported.created, 1);
+      const back = await Contact.findOne({ userId: userOne._id, email: em('rt') }).lean();
+      assert.deepEqual(back.tags, ['a', 'b']);
+    });
   });
 });

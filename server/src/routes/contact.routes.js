@@ -6,6 +6,7 @@ import {
   deleteContact,
   getContactTags,
   importContacts,
+  exportContacts,
 } from '../controllers/contact.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
@@ -15,6 +16,7 @@ import {
   updateContactSchema,
   getContactsSchema,
   importContactsSchema,
+  exportContactsSchema,
 } from '../validators/contact.validator.js';
 
 const router = Router();
@@ -45,6 +47,13 @@ router.get('/', validate(getContactsSchema), getContacts);
  * @access  Protected
  */
 router.post('/import', validate(importContactsSchema), importContacts);
+
+/**
+ * @route   GET /api/v1/contacts/export
+ * @desc    Download contacts as CSV (optional ?tag= filter)
+ * @access  Protected
+ */
+router.get('/export', validate(exportContactsSchema), exportContacts);
 
 /**
  * @route   GET /api/v1/contacts/tags
