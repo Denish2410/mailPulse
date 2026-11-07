@@ -340,7 +340,18 @@ export const processNextDelivery = async (campaignId, message, emailService, log
 
   // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
   //    recipient values can never alter tracking links)
-  const personalized = personalizeMessage(message, { name: delivery.name, email: delivery.email });
+  let customFields;
+  if (delivery.contactId && delivery.userId && /\{\{\s*custom\./i.test(`${message.subject} ${message.text} ${message.html}`)) {
+    const contact = await Contact.findOne({ _id: delivery.contactId, userId: delivery.userId })
+      .select('customFields')
+      .lean();
+    customFields = contact?.customFields;
+  }
+  const personalized = personalizeMessage(message, {
+    name: delivery.name,
+    email: delivery.email,
+    customFields,
+  });
 
   // 3b. Inject tracking pixel, rewrite links, and add unsubscribe footers
   let htmlToSend = personalized.html;
