@@ -12,6 +12,7 @@ import {
   cancelScheduledCampaign,
   applyCampaignAudience,
   getCampaignBounces,
+  duplicateCampaign,
   getCampaignDeliveries,
   getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
@@ -145,5 +146,12 @@ router.post('/:id/audience', validate(applyAudienceSchema), applyCampaignAudienc
  * @access  Protected
  */
 router.get('/:id/bounces', validate(campaignIdParamSchema), getCampaignBounces);
+
+/**
+ * @route   POST /api/v1/campaigns/:id/duplicate
+ * @desc    Copy a campaign into a new draft
+ * @access  Protected
+ */
+router.post('/:id/duplicate', validate(campaignIdParamSchema), duplicateCampaign);
 
 export default router;
