@@ -13,6 +13,7 @@ import {
   createCampaign,
   updateCampaign,
   deleteCampaign,
+  duplicateCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
 import { computePageAfterDeletion } from '../../utils/campaignHelpers.js';
@@ -212,6 +213,24 @@ export const CampaignsPage = () => {
     setRefreshTrigger((prev) => prev + 1);
   };
 
+  const handleDuplicateCampaign = async (campaign) => {
+    if (!campaign?.id) return;
+    try {
+      const copy = await duplicateCampaign(campaign.id);
+      setNotification({
+        type: 'success',
+        message: `Created draft "${copy?.name || 'Copy'}" from "${campaign.name}".`,
+      });
+      setPage(1);
+      setRefreshTrigger((prev) => prev + 1);
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: getErrorMessage(err, 'Failed to duplicate the campaign. Please try again.'),
+      });
+    }
+  };
+
   // Deletion handlers
   const handleOpenDeleteDialog = (campaign) => {
     setActiveCampaignForDelete(campaign);
@@ -308,9 +327,11 @@ export const CampaignsPage = () => {
             className={`mb-6 p-4 rounded-xl text-sm flex items-center justify-between shadow-lg ${
               notification.type === 'success'
                 ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                : notification.type === 'error'
+                ? 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
                 : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300'
             }`}
-            role="status"
+            role={notification.type === 'error' ? 'alert' : 'status'}
             aria-live="polite"
           >
             <div className="flex items-center gap-2.5">
@@ -389,6 +410,7 @@ export const CampaignsPage = () => {
             onNewCampaign={handleOpenCreateDialog}
             onPreviewCampaign={handleOpenPreviewDialog}
             onViewAnalytics={handleOpenAnalyticsDialog}
+            onDuplicateCampaign={handleDuplicateCampaign}
             onEditCampaign={handleOpenEditDialog}
             onDeleteCampaign={handleOpenDeleteDialog}
           />
