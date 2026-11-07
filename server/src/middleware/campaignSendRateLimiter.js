@@ -54,6 +54,9 @@ export const createCampaignSendRateLimiter = ({ windowMs, max, env = process.env
     limit: max ?? resolved.max,
     standardHeaders: true,
     legacyHeaders: false,
+    // The limiter is created lazily on first request so runtime env values apply; that is
+    // intentional, so skip the "created in request handler" creation-stack validation.
+    validate: { creationStack: false },
     keyGenerator: (req) => {
       const userId = req.auth?.userId;
       return typeof userId === 'string' && userId ? `user:${userId}` : 'unauthenticated';

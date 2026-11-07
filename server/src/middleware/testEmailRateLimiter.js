@@ -69,6 +69,9 @@ export const createTestEmailRateLimiter = ({ windowMs, max, env = process.env } 
     limit: max ?? resolved.max,
     standardHeaders: true,
     legacyHeaders: false,
+    // The limiter is created lazily on first request so runtime env values apply; that is
+    // intentional, so skip the "created in request handler" creation-stack validation.
+    validate: { creationStack: false },
     // Authenticated identity is guaranteed by the upstream `authenticate` middleware.
     // The fallback bucket is defensive only and never shares quota with real users.
     keyGenerator: (req) => {
