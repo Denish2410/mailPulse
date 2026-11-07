@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import TrackingEvent from '../models/TrackingEvent.js';
 import Campaign from '../models/Campaign.js';
 import Contact from '../models/Contact.js';
+import Delivery from '../models/Delivery.js';
 import Suppression from '../models/Suppression.js';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -570,6 +571,50 @@ export const recordUnsubscribeEvent = async (tokenOrPayload, metadata = {}) => {
 };
 
 /**
+ * A/B subject test results: for each arm, how many recipients it reached and how many of them
+ * opened / clicked (unique recipients). Returns null when the campaign has no variant B.
+ * Arms are derived from our own Delivery records, so tracking events are only ever attributed
+ * to recipients of this campaign.
+ *
+ * @param {object} campaign - Campaign document (needs _id, subject, subjectB)
+ * @returns {Promise<object|null>}
+ */
+export const getCampaignVariantStats = async (campaign) => {
+  if (!campaign.subjectB) return null;
+
+  const campaignId = new mongoose.Types.ObjectId(campaign._id.toString());
+  const [deliveries, openers, clickers] = await Promise.all([
+    Delivery.find({ campaignId, status: 'sent' }).select('email variant').lean(),
+    TrackingEvent.distinct('recipientEmail', { campaignId, eventType: 'open' }),
+    TrackingEvent.distinct('recipientEmail', { campaignId, eventType: 'click' }),
+  ]);
+
+  const opened = new Set(openers.map((e) => String(e).toLowerCase()));
+  const clicked = new Set(clickers.map((e) => String(e).toLowerCase()));
+  const arm = (variant, subject) => ({ variant, subject, sent: 0, uniqueOpens: 0, uniqueClicks: 0, openRate: 0, clickRate: 0 });
+  const arms = { A: arm('A', campaign.subject), B: arm('B', campaign.subjectB) };
+
+  for (const d of deliveries) {
+    const a = arms[d.variant === 'B' ? 'B' : 'A'];
+    const email = String(d.email).toLowerCase();
+    a.sent += 1;
+    if (opened.has(email)) a.uniqueOpens += 1;
+    if (clicked.has(email)) a.uniqueClicks += 1;
+  }
+  for (const a of Object.values(arms)) {
+    a.openRate = a.sent > 0 ? Number(((a.uniqueOpens / a.sent) * 100).toFixed(1)) : 0;
+    a.clickRate = a.sent > 0 ? Number(((a.uniqueClicks / a.sent) * 100).toFixed(1)) : 0;
+  }
+
+  // The leader is only named when both arms have mail out and their open rates differ
+  let leader = null;
+  if (arms.A.sent > 0 && arms.B.sent > 0 && arms.A.openRate !== arms.B.openRate) {
+    leader = arms.A.openRate > arms.B.openRate ? 'A' : 'B';
+  }
+  return { arms: [arms.A, arms.B], leader };
+};
+
+/**
  * Retrieve comprehensive campaign tracking analytics and performance summary.
  *
  * @param {string|mongoose.Types.ObjectId} campaignId
@@ -700,6 +745,7 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
       totalUnsubscribes,
       unsubscribeRate,
     },
+    variants: await getCampaignVariantStats(campaign),
     linkBreakdown: linkStats,
     recentActivity: recentEvents.map((evt) => ({
       id: evt._id.toString(),
@@ -713,6 +759,7 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
 };
 
 export default {
+  getCampaignVariantStats,
   TRANSPARENT_1X1_GIF,
   TrackingTokenError,
   createTrackingToken,

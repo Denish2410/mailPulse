@@ -72,6 +72,14 @@ const campaignSchema = new mongoose.Schema(
       minlength: [1, 'Email subject cannot be empty'],
       maxlength: [200, 'Email subject cannot exceed 200 characters'],
     },
+    // Optional second subject for an A/B test: recipients are split evenly between `subject` (A)
+    // and `subjectB` at send time. Empty = no test.
+    subjectB: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [200, 'Variant B subject cannot exceed 200 characters'],
+    },
     textContent: {
       type: String,
       default: '',

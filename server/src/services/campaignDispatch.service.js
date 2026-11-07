@@ -347,7 +347,10 @@ export const processNextDelivery = async (campaignId, message, emailService, log
       .lean();
     customFields = contact?.customFields;
   }
-  const personalized = personalizeMessage(message, {
+  // A/B test: recipients assigned to variant B get the alternative subject
+  const variantSubject =
+    delivery.variant === 'B' && message.subjectB ? message.subjectB : message.subject;
+  const personalized = personalizeMessage({ ...message, subject: variantSubject }, {
     name: delivery.name,
     email: delivery.email,
     customFields,
@@ -391,7 +394,7 @@ export const processNextDelivery = async (campaignId, message, emailService, log
   try {
     result = await emailService.sendEmail({
       to: delivery.email,
-      subject: personalized.subject || message.subject,
+      subject: personalized.subject || variantSubject,
       text: textToSend,
       html: htmlToSend,
       ...(Object.keys(customHeaders).length > 0 && { headers: customHeaders }),
@@ -459,7 +462,7 @@ export const processCampaignDeliveries = async (
 ) => {
   try {
     const campaign = await Campaign.findOne({ _id: campaignId, status: 'sending' })
-      .select('subject textContent htmlContent')
+      .select('subject subjectB textContent htmlContent')
       .lean();
 
     if (!campaign) {
@@ -468,6 +471,7 @@ export const processCampaignDeliveries = async (
 
     const message = {
       subject: campaign.subject,
+      subjectB: campaign.subjectB || '',
       text: campaign.textContent ?? '',
       html: campaign.htmlContent ?? '',
     };
@@ -593,8 +597,10 @@ export const startCampaignDispatch = async ({
   // 2. One pending delivery per eligible recipient (address snapshot)
   try {
     await Delivery.insertMany(
-      eligibleContacts.map((contact) => ({
+      eligibleContacts.map((contact, index) => ({
         campaignId: locked._id,
+        // Alternate A/B so the split is exactly even; without a test everyone is 'A'
+        variant: locked.subjectB && index % 2 === 1 ? 'B' : 'A',
         userId: locked.userId,
         contactId: contact._id,
         email: contact.email,

@@ -775,6 +775,32 @@ export const describeDeliveryError = (code) => {
  *   recentActivity: Array<{ id: string, eventType: string, recipientEmail: string, targetUrl: string|null, timestamp: string, userAgent: string|null }>
  * }}
  */
+/**
+ * Normalizes the A/B test block of the analytics response. Returns null when the campaign has
+ * no test (or the payload is malformed) so the UI simply hides the panel.
+ *
+ * @param {object|null|undefined} raw
+ * @returns {{ arms: object[], leader: 'A'|'B'|null }|null}
+ */
+export const normalizeVariantStats = (raw) => {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.arms) || raw.arms.length !== 2) {
+    return null;
+  }
+  const num = (v) => Math.max(0, Number(v) || 0);
+  return {
+    arms: raw.arms.map((arm, index) => ({
+      variant: arm?.variant === 'B' || index === 1 ? 'B' : 'A',
+      subject: typeof arm?.subject === 'string' ? arm.subject : '',
+      sent: num(arm?.sent),
+      uniqueOpens: num(arm?.uniqueOpens),
+      uniqueClicks: num(arm?.uniqueClicks),
+      openRate: num(arm?.openRate),
+      clickRate: num(arm?.clickRate),
+    })),
+    leader: raw.leader === 'A' || raw.leader === 'B' ? raw.leader : null,
+  };
+};
+
 export const extractAnalyticsData = (responseOrPayload) => {
   if (!responseOrPayload || typeof responseOrPayload !== 'object') {
     return {
@@ -792,6 +818,7 @@ export const extractAnalyticsData = (responseOrPayload) => {
         clickThroughRate: 0,
         clickToDeliveredRate: 0,
       },
+      variants: null,
       linkBreakdown: [],
       recentActivity: [],
     };
@@ -825,6 +852,7 @@ export const extractAnalyticsData = (responseOrPayload) => {
       totalUnsubscribes: Math.max(0, Number(rawMetrics.totalUnsubscribes) || 0),
       unsubscribeRate: Math.max(0, Number(rawMetrics.unsubscribeRate) || 0),
     },
+    variants: normalizeVariantStats(raw.variants),
     linkBreakdown: Array.isArray(raw.linkBreakdown)
       ? raw.linkBreakdown
           .filter((item) => item && typeof item === 'object')
