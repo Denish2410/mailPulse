@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getCampaignAnalytics } from '../../api/campaigns.js';
 import BouncePanel from './BouncePanel.jsx';
+import VariantPanel from './VariantPanel.jsx';
 import { getErrorMessage } from '../../lib/api.js';
 import {
   extractAnalyticsData,
@@ -384,6 +385,9 @@ export const CampaignAnalyticsDialog = ({
                   </div>
                 </div>
               )}
+
+              {/* A/B subject test */}
+              <VariantPanel variants={analyticsData?.variants} />
 
               {/* Bounces & Complaints (Phase 12) */}
               <BouncePanel campaignId={campaign?.id} sentCount={campaign?.stats?.sent} />

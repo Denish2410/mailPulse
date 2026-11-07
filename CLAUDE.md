@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **839 automated tests** (534 server, 305 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **851 automated tests** (541 server, 310 client), 0 failures, 0 skipped.
 
 ---
 
@@ -125,6 +125,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - Send throttling: `CAMPAIGN_SEND_RATE_PER_MINUTE` (0/unset = unlimited) spaces sends evenly across all dispatch workers (`sendThrottle.service.js`); released on shutdown.
 - Custom contact fields: up to 10 `key=value` text fields per contact (`utils/customFields.js`, lowercase snake_case keys, values <= 200 chars), usable as `{{custom.<field>}}` merge tags (with `| "fallback"`), imported/exported as extra CSV columns (`custom:<key>` for names that clash with standard columns), edited in the contact form.
 - Public signup forms with double opt-in: owner CRUD at `/api/v1/signup-forms` (max 10, immutable random slug, tags applied to new subscribers); public `GET /api/v1/public/forms/:slug`, `POST /public/forms/:slug/subscribe` (uniform response, honeypot, 5-min per-address cooldown, tight IP rate limit) and `POST /public/subscriptions/confirm` (hashed 48h single-use token). On confirm: bounced/complained/owner-suppressed addresses stay blocked silently; a recipient's own earlier unsubscribe is lifted by fresh verified consent. Client pages `/signup-forms` (owner), `/subscribe/:slug` and `/confirm-subscription` (public).
+- A/B subject testing: optional `Campaign.subjectB`; when set, the audience snapshot alternates deliveries between variant `A` (main subject) and `B` (`Delivery.variant`) and the worker sends each arm its subject. `GET /campaigns/:id/analytics` adds `variants` (per-arm sent, unique opens/clicks, rates, `leader` by open rate; null without a test). There is no automatic winner send.
 - Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
 
 ---
@@ -137,10 +138,10 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Fields: `userId`, `name`, `email`, `tags`, `customFields` (Map of text), `isUnsubscribed`, `unsubscribedAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
 - **Campaign** (`server/src/models/Campaign.js`):
-  - Fields: `userId`, `name`, `subject`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`).
+  - Fields: `userId`, `name`, `subject`, `subjectB`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`).
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
 - **Delivery** (`server/src/models/Delivery.js`):
-  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
+  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `variant` (`'A'`, `'B'`), `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
 - **SignupForm** (`server/src/models/SignupForm.js`): `userId`, `name`, `description`, `tags`, `slug` (unique, immutable), `enabled`.
 - **PendingSubscription** (`server/src/models/PendingSubscription.js`): `formId`, `userId`, `email`, `name`, `tokenHash` (unique), `expiresAt` (TTL), unique `{ formId, email }`.
 - **Template** (`server/src/models/Template.js`):

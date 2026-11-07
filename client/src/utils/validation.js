@@ -417,6 +417,11 @@ export const validateCampaignForm = (data = {}, { isUpdate = false } = {}) => {
     if (subjectError) errors.subject = subjectError;
   }
 
+  // 3b. Validate the optional A/B variant subject
+  if (typeof data.subjectB === 'string' && data.subjectB.trim().length > 200) {
+    errors.subjectB = 'Variant B subject cannot exceed 200 characters.';
+  }
+
   // 4. Validate Content
   const contentResult = validateCampaignContent({
     textContent: data.textContent,

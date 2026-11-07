@@ -48,6 +48,12 @@ export const createCampaignSchema = z.object({
         .trim()
         .min(1, 'Email subject cannot be empty')
         .max(200, 'Email subject cannot exceed 200 characters'),
+      subjectB: z
+        .string()
+        .trim()
+        .max(200, 'Variant B subject cannot exceed 200 characters')
+        .optional()
+        .default(''),
       textContent: z
         .string()
         .max(100000, 'Plain text content cannot exceed 100,000 characters')
@@ -99,6 +105,11 @@ export const updateCampaignSchema = z.object({
         .min(1, 'Email subject cannot be empty')
         .max(200, 'Email subject cannot exceed 200 characters')
         .optional(),
+      subjectB: z
+        .string()
+        .trim()
+        .max(200, 'Variant B subject cannot exceed 200 characters')
+        .optional(),
       textContent: z
         .string()
         .max(100000, 'Plain text content cannot exceed 100,000 characters')
@@ -124,6 +135,7 @@ export const updateCampaignSchema = z.object({
       (data) =>
         data.name !== undefined ||
         data.subject !== undefined ||
+        data.subjectB !== undefined ||
         data.textContent !== undefined ||
         data.htmlContent !== undefined ||
         data.recipientIds !== undefined,

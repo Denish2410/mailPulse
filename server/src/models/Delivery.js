@@ -67,6 +67,12 @@ const deliverySchema = new mongoose.Schema(
       default: '',
       maxlength: [100, 'Recipient name cannot exceed 100 characters'],
     },
+    // A/B subject test arm this recipient was assigned to ('A' = the campaign's main subject).
+    variant: {
+      type: String,
+      enum: ['A', 'B'],
+      default: 'A',
+    },
     status: {
       type: String,
       enum: {

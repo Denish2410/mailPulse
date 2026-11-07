@@ -39,6 +39,7 @@ export const CampaignFormDialog = ({
   // Form input states
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
+  const [subjectB, setSubjectB] = useState('');
   const [textContent, setTextContent] = useState('');
   const [htmlContent, setHtmlContent] = useState('');
   const [recipientIds, setRecipientIds] = useState([]);
@@ -68,6 +69,7 @@ export const CampaignFormDialog = ({
       lastCampaignIdRef.current = campaign.id;
       setName(campaign.name || '');
       setSubject(campaign.subject || '');
+      setSubjectB(campaign.subjectB || '');
       setTextContent(campaign.textContent ?? '');
       setHtmlContent(campaign.htmlContent ?? '');
       setRecipientIds(Array.isArray(campaign.recipientIds) ? [...campaign.recipientIds] : []);
@@ -190,6 +192,7 @@ export const CampaignFormDialog = ({
     const payload = {
       name: name.trim(),
       subject: subject.trim(),
+      subjectB: subjectB.trim(),
       textContent,
       htmlContent,
       recipientIds,
@@ -354,6 +357,34 @@ export const CampaignFormDialog = ({
                   {errors.subject && (
                     <p className="mt-1 text-xs text-rose-400 font-medium" role="alert">
                       {errors.subject}
+                    </p>
+                  )}
+                </div>
+
+                {/* A/B test: optional alternative subject */}
+                <div>
+                  <label htmlFor="campaign-form-subject-b" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Variant B subject <span className="text-slate-500 font-normal">(optional A/B test)</span>
+                  </label>
+                  <input
+                    id="campaign-form-subject-b"
+                    name="subjectB"
+                    type="text"
+                    value={subjectB}
+                    onChange={(e) => {
+                      setSubjectB(e.target.value);
+                      if (errors.subjectB) setErrors((prev) => ({ ...prev, subjectB: null }));
+                    }}
+                    placeholder="Leave empty to send one subject to everyone"
+                    disabled={isSubmitting}
+                    className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors disabled:opacity-60"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Half of the recipients get each subject; results show in the campaign analytics.
+                  </p>
+                  {errors.subjectB && (
+                    <p className="mt-1 text-xs text-rose-400 font-medium" role="alert">
+                      {errors.subjectB}
                     </p>
                   )}
                 </div>
