@@ -61,6 +61,15 @@ const contactSchema = new mongoose.Schema(
         },
       ],
     },
+    customFields: {
+      type: Map,
+      of: { type: String, maxlength: 200 },
+      default: undefined,
+      validate: {
+        validator: (fields) => !fields || fields.size <= 10,
+        message: 'A contact cannot have more than 10 custom fields',
+      },
+    },
     unsubscribeReason: {
       type: String,
       default: null,
