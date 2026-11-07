@@ -5,6 +5,13 @@ import { signAccessToken } from '../utils/token.js';
 import { getAuthConfig } from '../config/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { getDefaultEmailService } from '../services/email.service.js';
+import {
+  createResetToken,
+  hashResetToken,
+  buildResetLink,
+  buildResetEmail,
+} from '../services/passwordReset.service.js';
 
 /**
  * Pre-computed valid Argon2id dummy hash.
@@ -170,3 +177,76 @@ export default {
   login,
   getMe,
 };
+
+const FORGOT_PASSWORD_MESSAGE =
+  'If an account exists for that email, a password reset link has been sent.';
+
+/**
+ * Start a password reset. Always answers with the same message so account existence is never
+ * revealed. The email is sent in the background (not awaited) to keep response timing uniform.
+ *
+ * Route: POST /api/v1/auth/forgot-password
+ * Access: Public
+ */
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const email = req.body.email.trim().toLowerCase();
+  const user = await User.findOne({ email });
+
+  if (user && user.status !== 'suspended') {
+    const { token, tokenHash, expiresAt } = createResetToken();
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt } }
+    );
+
+    const link = buildResetLink(token);
+    const emailService = req.app?.locals?.emailService || getDefaultEmailService();
+    emailService
+      .sendEmail({ to: user.email, ...buildResetEmail({ name: user.name, link }) })
+      .catch(() => {
+        // Never log the token or link. In local development, surface it so the flow is testable
+        // without SMTP.
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[Auth] Password reset email could not be sent (dev only) link: ${link}`);
+        } else if (process.env.NODE_ENV !== 'test') {
+          console.warn('[Auth] Password reset email could not be sent.');
+        }
+      });
+  }
+
+  res.status(200).json({ success: true, message: FORGOT_PASSWORD_MESSAGE });
+});
+
+/**
+ * Complete a password reset with the emailed token.
+ *
+ * Route: POST /api/v1/auth/reset-password
+ * Access: Public
+ */
+export const resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  const passwordHash = await hashPassword(password);
+
+  // Atomic consume: only one request can win a given token
+  const user = await User.findOneAndUpdate(
+    {
+      passwordResetTokenHash: hashResetToken(token),
+      passwordResetExpiresAt: { $gt: new Date() },
+      status: { $ne: 'suspended' },
+    },
+    {
+      $set: { passwordHash },
+      $unset: { passwordResetTokenHash: '', passwordResetExpiresAt: '' },
+    },
+    { new: true }
+  );
+
+  if (!user) {
+    throw new AppError('Invalid or expired reset link.', 400, null, { expose: true });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Password updated. You can now sign in with your new password.',
+  });
+});

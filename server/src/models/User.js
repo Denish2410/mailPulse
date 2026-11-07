@@ -32,6 +32,17 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password hash is required'],
       select: false,
     },
+    // Password reset (single-use; only the SHA-256 hash of the emailed token is stored)
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     status: {
       type: String,
       enum: {
