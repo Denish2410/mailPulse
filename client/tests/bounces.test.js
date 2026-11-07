@@ -2,7 +2,7 @@ import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { apiClient } from '../src/lib/api.js';
-import { getCampaignBounces } from '../src/api/campaigns.js';
+import { getCampaignBounces, duplicateCampaign } from '../src/api/campaigns.js';
 import { getBounceTypeInfo, extractBounceData, formatBounceRate } from '../src/utils/bounceHelpers.js';
 
 describe('Bounce client', () => {
@@ -18,6 +18,18 @@ describe('Bounce client', () => {
     assert.equal(captured.url, '/campaigns/c1/bounces');
     assert.equal(captured.config.signal, 'sig');
     assert.equal(result.summary.hardBounces, 1);
+  });
+
+  it('duplicates a campaign via POST /campaigns/:id/duplicate', async () => {
+    let captured;
+    mock.method(apiClient, 'post', async (url, body) => {
+      captured = { url, body };
+      return { data: { data: { campaign: { id: 'new', name: 'Copy of X' } } } };
+    });
+    const copy = await duplicateCampaign('c1');
+    assert.equal(captured.url, '/campaigns/c1/duplicate');
+    assert.deepEqual(captured.body, {});
+    assert.equal(copy.name, 'Copy of X');
   });
 
   it('describes event types', () => {

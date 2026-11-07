@@ -110,6 +110,34 @@ export const validateRegisterForm = ({ name, email, password, confirmPassword })
  * @param {{ email?: string, password?: string }} data
  * @returns {{ isValid: boolean, errors: Record<string, string> }}
  */
+/**
+ * Validates the forgot-password form.
+ *
+ * @param {{ email?: string }} data
+ * @returns {{ isValid: boolean, errors: Record<string, string> }}
+ */
+export const validateForgotPasswordForm = ({ email } = {}) => {
+  const errors = {};
+  const emailError = validateEmail(email);
+  if (emailError) errors.email = emailError;
+  return { isValid: Object.keys(errors).length === 0, errors };
+};
+
+/**
+ * Validates the reset-password form.
+ *
+ * @param {{ password?: string, confirmPassword?: string }} data
+ * @returns {{ isValid: boolean, errors: Record<string, string> }}
+ */
+export const validateResetPasswordForm = ({ password, confirmPassword } = {}) => {
+  const errors = {};
+  const passwordError = validatePassword(password);
+  if (passwordError) errors.password = passwordError;
+  const confirmError = validateConfirmPassword(password, confirmPassword);
+  if (confirmError) errors.confirmPassword = confirmError;
+  return { isValid: Object.keys(errors).length === 0, errors };
+};
+
 export const validateLoginForm = ({ email, password }) => {
   const errors = {};
 
@@ -431,6 +459,8 @@ export default {
   validateConfirmPassword,
   validateRegisterForm,
   validateLoginForm,
+  validateForgotPasswordForm,
+  validateResetPasswordForm,
   validateContactName,
   validateContactEmail,
   validateContactForm,

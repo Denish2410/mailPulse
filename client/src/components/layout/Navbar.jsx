@@ -1,5 +1,6 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
+import VerifyEmailBanner from './VerifyEmailBanner.jsx';
 
 /**
  * Reusable Navigation Bar for authenticated pages.
@@ -28,6 +29,7 @@ export const Navbar = () => {
 
   return (
     <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
+      <VerifyEmailBanner />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand Logo & Main Nav */}
         <div className="flex items-center gap-6 sm:gap-8">
@@ -125,6 +127,13 @@ export const Navbar = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
               </svg>
               <span>Segments</span>
+            </NavLink>
+
+            <NavLink to="/suppressions" className={navLinkClass}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+              </svg>
+              <span>Suppressions</span>
             </NavLink>
 
             <NavLink to="/analytics" className={navLinkClass}>

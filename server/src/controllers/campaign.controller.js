@@ -876,6 +876,46 @@ export const applyCampaignAudience = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Duplicate any of the owner's campaigns into a fresh draft.
+ *
+ * The copy keeps name (prefixed), subject, content and recipient list, and starts as a plain
+ * draft: no schedule, no send timestamps, zeroed stats and no deliveries.
+ *
+ * Route: POST /api/v1/campaigns/:id/duplicate
+ * Access: Protected (Bearer JWT)
+ */
+export const duplicateCampaign = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+
+  const source = await Campaign.findOne({ _id: req.params.id, userId }).lean();
+  if (!source) {
+    throw new AppError('Campaign not found.', 404);
+  }
+
+  const prefix = 'Copy of ';
+  const name = `${prefix}${source.name}`.slice(0, 120).trim();
+
+  const copy = await Campaign.create({
+    userId,
+    name,
+    subject: source.subject,
+    textContent: source.textContent ?? '',
+    htmlContent: source.htmlContent ?? '',
+    recipientIds: (source.recipientIds || []).slice(0, MAX_CAMPAIGN_RECIPIENTS),
+    status: 'draft',
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Campaign duplicated successfully',
+    data: { campaign: formatSafeCampaign(copy) },
+  });
+});
+
+/**
  * Bounce and complaint summary for a campaign (Phase 12).
  *
  * Route: GET /api/v1/campaigns/:id/bounces

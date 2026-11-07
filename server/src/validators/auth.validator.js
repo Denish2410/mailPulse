@@ -44,7 +44,46 @@ export const loginSchema = z.object({
   }),
 });
 
+export const forgotPasswordSchema = z.object({
+  body: z
+    .object({
+      email: z
+        .string({ required_error: 'Email is required' })
+        .trim()
+        .toLowerCase()
+        .email('Please provide a valid email address'),
+    })
+    .strict(),
+});
+
+export const resetPasswordSchema = z.object({
+  body: z
+    .object({
+      token: z
+        .string({ required_error: 'Reset token is required' })
+        .regex(/^[a-f0-9]{64}$/, 'Invalid or expired reset link.'),
+      password: z
+        .string({ required_error: 'Password is required' })
+        .min(8, 'Password must be at least 8 characters long')
+        .max(128, 'Password cannot exceed 128 characters'),
+    })
+    .strict(),
+});
+
+export const verifyEmailSchema = z.object({
+  body: z
+    .object({
+      token: z
+        .string({ required_error: 'Verification token is required' })
+        .regex(/^[a-f0-9]{64}$/, 'Invalid or expired verification link.'),
+    })
+    .strict(),
+});
+
 export default {
+  verifyEmailSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   registerSchema,
   loginSchema,
 };

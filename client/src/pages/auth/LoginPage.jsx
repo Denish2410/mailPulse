@@ -157,9 +157,14 @@ export const LoginPage = () => {
 
             {/* Password */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-300">
-                Password
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-300">
+                  Password
+                </label>
+                <Link to="/forgot-password" className="text-xs text-indigo-300 hover:text-indigo-200">
+                  Forgot password?
+                </Link>
+              </div>
               <div className="mt-1">
                 <input
                   id="password"

@@ -1,10 +1,16 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
-import { register, login, getMe } from '../controllers/auth.controller.js';
+import { register, login, getMe, forgotPassword, resetPassword, verifyEmail, resendVerification } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
-import { registerSchema, loginSchema } from '../validators/auth.validator.js';
+import {
+  registerSchema,
+  loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  verifyEmailSchema,
+} from '../validators/auth.validator.js';
 
 const router = Router();
 
@@ -39,6 +45,34 @@ router.post('/register', authLimiter, validate(registerSchema), register);
  * @access  Public
  */
 router.post('/login', authLimiter, validate(loginSchema), login);
+
+/**
+ * @route   POST /api/v1/auth/forgot-password
+ * @desc    Email a password reset link (same response whether or not the account exists)
+ * @access  Public
+ */
+router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), forgotPassword);
+
+/**
+ * @route   POST /api/v1/auth/reset-password
+ * @desc    Set a new password using the emailed single-use token
+ * @access  Public
+ */
+router.post('/reset-password', authLimiter, validate(resetPasswordSchema), resetPassword);
+
+/**
+ * @route   POST /api/v1/auth/verify-email
+ * @desc    Confirm an email address with the emailed single-use token
+ * @access  Public
+ */
+router.post('/verify-email', authLimiter, validate(verifyEmailSchema), verifyEmail);
+
+/**
+ * @route   POST /api/v1/auth/resend-verification
+ * @desc    Email a fresh verification link to the signed-in user
+ * @access  Protected
+ */
+router.post('/resend-verification', authLimiter, authenticate, resendVerification);
 
 /**
  * @route   GET /api/v1/auth/me

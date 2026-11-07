@@ -60,11 +60,70 @@ export const getCurrentUser = async (config = {}) => {
   return response.data?.data?.user;
 };
 
+/**
+ * Request a password reset email. The server answers identically whether or not the
+ * account exists.
+ *
+ * @param {{ email: string }} payload
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export const requestPasswordReset = async ({ email }, config = {}) => {
+  const response = await apiClient.post(
+    '/auth/forgot-password',
+    { email: email?.trim() },
+    { skipAuth: true, ...config }
+  );
+  return response.data;
+};
+
+/**
+ * Set a new password using the emailed single-use token.
+ *
+ * @param {{ token: string, password: string }} payload
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export const resetPassword = async ({ token, password }, config = {}) => {
+  const response = await apiClient.post(
+    '/auth/reset-password',
+    { token, password },
+    { skipAuth: true, ...config }
+  );
+  return response.data;
+};
+
+/**
+ * Confirm an email address with the emailed token.
+ *
+ * @param {{ token: string }} payload
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ */
+export const verifyEmail = async ({ token }, config = {}) => {
+  const response = await apiClient.post('/auth/verify-email', { token }, { skipAuth: true, ...config });
+  return response.data;
+};
+
+/**
+ * Ask the server to email a fresh verification link to the signed-in user.
+ *
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ emailVerified: boolean }>}
+ */
+export const resendVerificationEmail = async (config = {}) => {
+  const response = await apiClient.post('/auth/resend-verification', {}, config);
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
   registerUser,
   loginUser,
   getCurrentUser,
+  requestPasswordReset,
+  resetPassword,
+  verifyEmail,
+  resendVerificationEmail,
   getErrorMessage,
 };

@@ -4,12 +4,16 @@ import ProtectedRoute from './components/layout/ProtectedRoute.jsx';
 import PublicOnlyRoute from './components/layout/PublicOnlyRoute.jsx';
 import LoginPage from './pages/auth/LoginPage.jsx';
 import RegisterPage from './pages/auth/RegisterPage.jsx';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.jsx';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage.jsx';
+import VerifyEmailPage from './pages/auth/VerifyEmailPage.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import ContactsPage from './pages/contacts/ContactsPage.jsx';
 import CampaignsPage from './pages/campaigns/CampaignsPage.jsx';
 import AnalyticsPage from './pages/analytics/AnalyticsPage.jsx';
 import TemplatesPage from './pages/templates/TemplatesPage.jsx';
 import SegmentsPage from './pages/segments/SegmentsPage.jsx';
+import SuppressionsPage from './pages/suppressions/SuppressionsPage.jsx';
 
 export function App() {
   return (
@@ -20,7 +24,12 @@ export function App() {
           <Route element={<PublicOnlyRoute />}>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
           </Route>
+
+          {/* Open to everyone: the emailed link works whether or not the user is signed in */}
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Protected routes: redirect to /login if unauthenticated */}
           <Route element={<ProtectedRoute />}>
@@ -30,6 +39,7 @@ export function App() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/segments" element={<SegmentsPage />} />
+            <Route path="/suppressions" element={<SuppressionsPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}

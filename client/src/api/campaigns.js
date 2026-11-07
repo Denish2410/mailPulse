@@ -302,6 +302,18 @@ export const applyCampaignAudience = async (id, { tags, segmentId, mode = 'repla
 };
 
 /**
+ * Duplicate a campaign into a new draft.
+ *
+ * @param {string} id - Campaign ID to copy
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<object>} The new draft campaign
+ */
+export const duplicateCampaign = async (id, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/duplicate`, {}, config);
+  return response.data?.data?.campaign;
+};
+
+/**
  * Retrieve a campaign's bounce and complaint summary with recent events (Phase 12).
  *
  * @param {string} id - Campaign ID
@@ -340,6 +352,7 @@ export default {
   scheduleCampaign,
   cancelScheduledCampaign,
   applyCampaignAudience,
+  duplicateCampaign,
   getCampaignBounces,
   getCampaignDeliveries,
   getCampaignAnalytics,
