@@ -8,6 +8,8 @@ import {
   getErrorMessage,
 } from '../../api/campaigns.js';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
+import ScheduleTimeZone from './ScheduleTimeZone.jsx';
+import { getBrowserTimeZone, isValidTimeZone, zonedInputToFutureIso } from '../../utils/timezone.js';
 import {
   extractReadinessData,
   formatReadinessIssues,
@@ -23,8 +25,6 @@ import {
   getSendCampaignErrorMessage,
   isCampaignEditable,
   formatScheduledAt,
-  localInputToFutureIso,
-  toDatetimeLocalValue,
 } from '../../utils/campaignHelpers.js';
 
 /**
@@ -159,6 +159,23 @@ export const CampaignPreviewDialog = ({
 
   // Scheduling state
   const [scheduleInput, setScheduleInput] = useState('');
+  const [scheduleZone, setScheduleZone] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('mailpulse.scheduleTimeZone');
+      if (saved && isValidTimeZone(saved)) return saved;
+    } catch {
+      // storage can be unavailable (private mode); fall back to the browser zone
+    }
+    return getBrowserTimeZone();
+  });
+  const changeScheduleZone = (zone) => {
+    setScheduleZone(zone);
+    try {
+      window.localStorage.setItem('mailpulse.scheduleTimeZone', zone);
+    } catch {
+      // remembering the choice is only a convenience
+    }
+  };
   const [scheduleState, setScheduleState] = useState({ status: 'idle', message: '' });
   const [scheduleOverride, setScheduleOverride] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -189,7 +206,7 @@ export const CampaignPreviewDialog = ({
 
   const handleSchedule = async () => {
     if (scheduleState.status === 'saving') return;
-    const iso = localInputToFutureIso(scheduleInput);
+    const iso = zonedInputToFutureIso(scheduleInput, scheduleZone);
     if (!iso) {
       setScheduleState({ status: 'error', message: 'Choose a date and time in the future.' });
       return;
@@ -422,11 +439,11 @@ export const CampaignPreviewDialog = ({
                     <input
                       type="datetime-local"
                       value={scheduleInput}
-                      min={toDatetimeLocalValue(new Date())}
                       onChange={(e) => setScheduleInput(e.target.value)}
                       className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                   </label>
+                  <ScheduleTimeZone idPrefix="reschedule" value={scheduleZone} onChange={changeScheduleZone} inputValue={scheduleInput} />
                   <button
                     type="button"
                     onClick={handleSchedule}
@@ -891,11 +908,11 @@ export const CampaignPreviewDialog = ({
               <input
                 type="datetime-local"
                 value={scheduleInput}
-                min={toDatetimeLocalValue(new Date())}
                 onChange={(e) => setScheduleInput(e.target.value)}
                 className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </label>
+            <ScheduleTimeZone idPrefix="schedule" value={scheduleZone} onChange={changeScheduleZone} inputValue={scheduleInput} />
             <button
               type="button"
               onClick={handleSchedule}

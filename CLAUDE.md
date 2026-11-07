@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **851 automated tests** (541 server, 310 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **858 automated tests** (541 server, 317 client), 0 failures, 0 skipped.
 
 ---
 
@@ -126,6 +126,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - Custom contact fields: up to 10 `key=value` text fields per contact (`utils/customFields.js`, lowercase snake_case keys, values <= 200 chars), usable as `{{custom.<field>}}` merge tags (with `| "fallback"`), imported/exported as extra CSV columns (`custom:<key>` for names that clash with standard columns), edited in the contact form.
 - Public signup forms with double opt-in: owner CRUD at `/api/v1/signup-forms` (max 10, immutable random slug, tags applied to new subscribers); public `GET /api/v1/public/forms/:slug`, `POST /public/forms/:slug/subscribe` (uniform response, honeypot, 5-min per-address cooldown, tight IP rate limit) and `POST /public/subscriptions/confirm` (hashed 48h single-use token). On confirm: bounced/complained/owner-suppressed addresses stay blocked silently; a recipient's own earlier unsubscribe is lifted by fresh verified consent. Client pages `/signup-forms` (owner), `/subscribe/:slug` and `/confirm-subscription` (public).
 - A/B subject testing: optional `Campaign.subjectB`; when set, the audience snapshot alternates deliveries between variant `A` (main subject) and `B` (`Delivery.variant`) and the worker sends each arm its subject. `GET /campaigns/:id/analytics` adds `variants` (per-arm sent, unique opens/clicks, rates, `leader` by open rate; null without a test). There is no automatic winner send.
+- Timezone-aware scheduling: the schedule inputs take a timezone (remembered in localStorage); `client/src/utils/timezone.js` converts the wall-clock time to a UTC instant before `POST /schedule`, rejecting DST-gap times. No server change: `scheduledAt` stays one UTC instant.
 - Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
 
 ---
