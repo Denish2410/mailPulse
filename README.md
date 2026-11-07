@@ -174,6 +174,19 @@ Run these from the project root.
 
 ---
 
+## 🐳 Run with Docker
+
+No Node or MongoDB install needed:
+
+```bash
+export JWT_SECRET="$(openssl rand -hex 32)"
+docker compose up --build
+```
+
+Open http://localhost:8080. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Keep it to **one** `server` container: dispatch and rate limits live in process memory.
+
+---
+
 ## 🩺 Something not working?
 
 <details>
