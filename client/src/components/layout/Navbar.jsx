@@ -1,5 +1,6 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
+import VerifyEmailBanner from './VerifyEmailBanner.jsx';
 
 /**
  * Reusable Navigation Bar for authenticated pages.
@@ -28,6 +29,7 @@ export const Navbar = () => {
 
   return (
     <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
+      <VerifyEmailBanner />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand Logo & Main Nav */}
         <div className="flex items-center gap-6 sm:gap-8">

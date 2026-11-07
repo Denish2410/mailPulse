@@ -93,6 +93,28 @@ export const resetPassword = async ({ token, password }, config = {}) => {
   return response.data;
 };
 
+/**
+ * Confirm an email address with the emailed token.
+ *
+ * @param {{ token: string }} payload
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ */
+export const verifyEmail = async ({ token }, config = {}) => {
+  const response = await apiClient.post('/auth/verify-email', { token }, { skipAuth: true, ...config });
+  return response.data;
+};
+
+/**
+ * Ask the server to email a fresh verification link to the signed-in user.
+ *
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ emailVerified: boolean }>}
+ */
+export const resendVerificationEmail = async (config = {}) => {
+  const response = await apiClient.post('/auth/resend-verification', {}, config);
+  return response.data?.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -101,5 +123,7 @@ export default {
   getCurrentUser,
   requestPasswordReset,
   resetPassword,
+  verifyEmail,
+  resendVerificationEmail,
   getErrorMessage,
 };

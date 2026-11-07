@@ -6,6 +6,7 @@ import LoginPage from './pages/auth/LoginPage.jsx';
 import RegisterPage from './pages/auth/RegisterPage.jsx';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.jsx';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage.jsx';
+import VerifyEmailPage from './pages/auth/VerifyEmailPage.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import ContactsPage from './pages/contacts/ContactsPage.jsx';
 import CampaignsPage from './pages/campaigns/CampaignsPage.jsx';
@@ -26,6 +27,9 @@ export function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
           </Route>
+
+          {/* Open to everyone: the emailed link works whether or not the user is signed in */}
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Protected routes: redirect to /login if unauthenticated */}
           <Route element={<ProtectedRoute />}>

@@ -49,3 +49,33 @@ describe('Password reset validation', () => {
     assert.equal(validateResetPasswordForm().isValid, false);
   });
 });
+
+describe('Email verification client', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('verifies with a token and no auth header', async () => {
+    let captured;
+    mock.method(apiClient, 'post', async (url, body, config) => {
+      captured = { url, body, config };
+      return { data: { success: true } };
+    });
+    const { verifyEmail } = await import('../src/api/auth.js');
+    await verifyEmail({ token: 'a'.repeat(64) });
+    assert.equal(captured.url, '/auth/verify-email');
+    assert.deepEqual(captured.body, { token: 'a'.repeat(64) });
+    assert.equal(captured.config.skipAuth, true);
+  });
+
+  it('resends using the signed-in session', async () => {
+    let captured;
+    mock.method(apiClient, 'post', async (url, body, config) => {
+      captured = { url, body, config };
+      return { data: { data: { emailVerified: false } } };
+    });
+    const { resendVerificationEmail } = await import('../src/api/auth.js');
+    const result = await resendVerificationEmail();
+    assert.equal(captured.url, '/auth/resend-verification');
+    assert.equal(captured.config?.skipAuth, undefined);
+    assert.deepEqual(result, { emailVerified: false });
+  });
+});
