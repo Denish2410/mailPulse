@@ -16,6 +16,7 @@ import {
 } from './tracking.service.js';
 import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
+import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -147,6 +148,7 @@ export const waitForCampaignDispatch = (campaignId) =>
 export const stopAllDispatches = async () => {
   stopRequested = true;
   stopDispatchWatchdog();
+  cancelSharedSendThrottle();
   await Promise.allSettled([...activeDispatches.values()]);
 };
 
@@ -461,8 +463,13 @@ export const processCampaignDeliveries = async (
 
     const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, MAX_SEND_CONCURRENCY));
 
+    const throttle = getSharedSendThrottle();
+
     const worker = async () => {
       while (!stopRequested) {
+        // Reserve a send slot first (no-op when CAMPAIGN_SEND_RATE_PER_MINUTE is unset)
+        await throttle.wait();
+        if (stopRequested) return;
         const hadWork = await processNextDelivery(campaignId, message, emailService, logger);
         if (!hadWork) {
           return;
