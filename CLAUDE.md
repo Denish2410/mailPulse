@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **741 automated tests** (461 server, 280 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **796 automated tests** (499 server, 297 client), 0 failures, 0 skipped.
 
 ---
 
@@ -39,7 +39,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 ---
 
-## 3. Completed Phases Summary (Phases 1 – 12)
+## 3. Completed Phases Summary (Phases 1 – 12 + gap fixes)
 
 ### Phase 1: Core Infrastructure & Security
 - Monorepo setup, centralized Express error handling, Helmet, CORS, morgan logging.
@@ -114,12 +114,19 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - `bounceProcessing.service.js`: events are matched to our own `Delivery` (tag, then message id; address must match) so the owner never comes from the payload; unmatched events are dropped. Hard bounce -> `Suppression` (`source: 'bounce'`); complaint -> suppression + contact unsubscribed; 3 soft bounces in 30 days -> suppression. Idempotent on `{ provider, providerEventId }`.
 - Suppressed addresses are excluded from segments/tag audiences. `GET /campaigns/:id/bounces` + Bounces & Complaints panel in the analytics dialog.
 
+### Gap Fixes (post Phase 12)
+- Contacts: `POST /contacts/import` (CSV text, email required, name/tags optional, 5,000 rows, skips duplicates, tenant-scoped) and `GET /contacts/export` (formula-injection-safe CSV, optional `?tag=`) via `server/src/utils/csv.js`; Import/Export buttons on the contacts page.
+- Suppressions: `GET/POST /suppressions`, `DELETE /suppressions/:id` + `/suppressions` page. Only `admin`, `import` and `bounce` entries are removable; recipient opt-outs (`link`, `one-click-header`) and `complaint` are permanent (409).
+- Campaigns: `POST /campaigns/:id/duplicate` (clean owner-scoped draft copy) + duplicate button.
+- Auth: `POST /auth/forgot-password` (uniform response, background email) and `POST /auth/reset-password` (hashed, 1h, single-use token); `POST /auth/verify-email` and `POST /auth/resend-verification` (hashed, 24h token); `emailVerified` on the user payload; sending is NOT gated on verification. Client pages `/forgot-password`, `/reset-password`, `/verify-email` and an unverified-email banner.
+- The lazily created send/test-email rate limiters pass `validate: { creationStack: false }`.
+
 ---
 
 ## 4. Key Data Models (Mongoose)
 
 - **User** (`server/src/models/User.js`):
-  - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`).
+  - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`), `emailVerifiedAt`, plus hashed one-time `passwordResetTokenHash`/`passwordResetExpiresAt` and `emailVerificationTokenHash`/`emailVerificationExpiresAt` (all `select: false`).
 - **Contact** (`server/src/models/Contact.js`):
   - Fields: `userId`, `name`, `email`, `tags`, `isUnsubscribed`, `unsubscribedAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
@@ -154,9 +161,14 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/auth/register` | POST | Public | Register new user |
 | `/api/v1/auth/login` | POST | Public | Authenticate user & return JWT |
 | `/api/v1/auth/me` | GET | Protected | Get authenticated profile |
+| `/api/v1/auth/forgot-password` | POST | Public | Email a reset link (uniform response) |
+| `/api/v1/auth/reset-password` | POST | Public | Set a new password with the emailed token |
+| `/api/v1/auth/verify-email` | POST | Public | Confirm email with the emailed token |
+| `/api/v1/auth/resend-verification` | POST | Protected | Re-send the verification email |
 | `/api/v1/contacts` | GET, POST | Protected | List and create contacts |
 | `/api/v1/contacts/:id` | PATCH, DELETE | Protected | Update and delete a contact |
 | `/api/v1/contacts/import` | POST | Protected | Bulk CSV import |
+| `/api/v1/contacts/export` | GET | Protected | CSV download (`?tag=`) |
 | `/api/v1/contacts/tags` | GET | Protected | Tags with contact counts |
 | `/api/v1/campaigns` | GET, POST | Protected | List and draft campaigns |
 | `/api/v1/campaigns/:id` | GET, PATCH, DELETE | Protected | Campaign CRUD (locked if scheduled/sent) |
@@ -165,6 +177,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/campaigns/:id/send` | POST | Protected | Dispatch campaign (`{ confirm: true }`) |
 | `/api/v1/campaigns/:id/schedule` | POST | Protected | Schedule campaign (`{ scheduledAt }`) |
 | `/api/v1/campaigns/:id/cancel-schedule` | POST | Protected | Cancel schedule, revert to draft |
+| `/api/v1/campaigns/:id/duplicate` | POST | Protected | Copy into a new draft |
 | `/api/v1/campaigns/:id/audience` | POST | Protected | Fill draft recipients by tag or segment |
 | `/api/v1/campaigns/:id/deliveries` | GET | Protected | Delivery audit log |
 | `/api/v1/campaigns/:id/bounces` | GET | Protected | Bounce/complaint summary + recent events |
@@ -175,6 +188,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/segments/preview` | POST | Protected | Preview unsaved criteria |
 | `/api/v1/segments/:id` | GET, PATCH, DELETE | Protected | Segment CRUD |
 | `/api/v1/segments/:id/preview` | GET | Protected | Count + sample for a saved segment |
+| `/api/v1/suppressions` | GET, POST | Protected | List and add suppressions |
+| `/api/v1/suppressions/:id` | DELETE | Protected | Remove (admin/import/bounce only) |
 | `/api/v1/analytics/overview` | GET | Protected | Overview metrics (`?days=7\|30\|90`) |
 | `/api/v1/webhooks/sendgrid`, `/mailgun`, `/ses` | POST | Signed (ESP) | Bounce & complaint ingestion |
 | `/api/v1/tracking/open/:token` | GET | Public | Transparent 1x1 GIF tracking pixel |
