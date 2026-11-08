@@ -115,6 +115,40 @@ export const resendVerificationEmail = async (config = {}) => {
   return response.data?.data;
 };
 
+/**
+ * Update the account name and/or the sender mailing address printed in campaign footers.
+ *
+ * @param {{ name?: string, mailingAddress?: string }} payload
+ * @returns {Promise<object>} Updated safe user profile
+ */
+export const updateProfile = async (payload, config = {}) => {
+  const body = {};
+  if (payload?.name !== undefined) body.name = String(payload.name).trim();
+  if (payload?.mailingAddress !== undefined) body.mailingAddress = String(payload.mailingAddress).trim();
+  const response = await apiClient.patch('/auth/me', body, config);
+  return response.data?.data?.user;
+};
+
+/**
+ * Download all of the account's data. Resolves to the JSON text; the page saves it as a file.
+ *
+ * @returns {Promise<string>}
+ */
+export const exportAccountData = async (config = {}) => {
+  const response = await apiClient.get('/auth/me/export', { responseType: 'text', transformResponse: (d) => d, ...config });
+  return response.data;
+};
+
+/**
+ * Permanently delete the account and all its data. Requires the current password.
+ *
+ * @param {{ password: string }} payload
+ */
+export const deleteAccount = async ({ password }, config = {}) => {
+  const response = await apiClient.delete('/auth/me', { data: { password }, ...config });
+  return response.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -125,5 +159,8 @@ export default {
   resetPassword,
   verifyEmail,
   resendVerificationEmail,
+  updateProfile,
+  exportAccountData,
+  deleteAccount,
   getErrorMessage,
 };
