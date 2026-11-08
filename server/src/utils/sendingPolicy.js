@@ -18,9 +18,24 @@ export const isVerifiedEmailRequired = (env = process.env) => {
 };
 
 /**
+ * Whether a sender mailing address is required before sending (CAN-SPAM requires a valid
+ * physical postal address in commercial email). REQUIRE_MAILING_ADDRESS=true|false overrides;
+ * unset means on in production only.
+ *
+ * @param {object} [env=process.env]
+ * @returns {boolean}
+ */
+export const isMailingAddressRequired = (env = process.env) => {
+  const flag = String(env.REQUIRE_MAILING_ADDRESS ?? '').trim().toLowerCase();
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  return env.NODE_ENV === 'production';
+};
+
+/**
  * Throws 403 when the account may not send. `action` is "send" or "schedule".
  *
- * @param {{ status?: string, emailVerifiedAt?: Date|null }} user
+ * @param {{ status?: string, emailVerifiedAt?: Date|null, mailingAddress?: string }} user
  * @param {'send'|'schedule'} action
  * @param {object} [env=process.env]
  */
@@ -33,6 +48,13 @@ export const assertAccountMaySend = (user, action, env = process.env) => {
       `Verify your email address before you ${action} campaigns. Check your inbox or request a new verification email.`,
       403,
       [{ path: 'user.email', message: 'Email address is not verified.' }]
+    );
+  }
+  if (isMailingAddressRequired(env) && !String(user.mailingAddress ?? '').trim()) {
+    throw new AppError(
+      `Add your mailing address in Account settings before you ${action} campaigns. It is printed in every email footer, as anti-spam law requires.`,
+      403,
+      [{ path: 'user.mailingAddress', message: 'Mailing address is not set.' }]
     );
   }
 };

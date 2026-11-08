@@ -595,7 +595,7 @@ export const sendCampaign = asyncHandler(async (req, res) => {
   }
 
   // 2. The account must be allowed to send
-  const user = await User.findById(userId).select('status emailVerifiedAt').lean();
+  const user = await User.findById(userId).select('status emailVerifiedAt mailingAddress').lean();
   if (!user) {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
@@ -692,7 +692,7 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
   }
 
   // 3. User account status check
-  const user = await User.findById(userId).select('status emailVerifiedAt').lean();
+  const user = await User.findById(userId).select('status emailVerifiedAt mailingAddress').lean();
   if (!user) {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
