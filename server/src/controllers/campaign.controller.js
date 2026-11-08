@@ -4,6 +4,7 @@ import Contact from '../models/Contact.js';
 import User from '../models/User.js';
 import Delivery from '../models/Delivery.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { assertAccountMaySend } from '../utils/sendingPolicy.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
   getDefaultEmailService,
@@ -594,13 +595,11 @@ export const sendCampaign = asyncHandler(async (req, res) => {
   }
 
   // 2. The account must be allowed to send
-  const user = await User.findById(userId).select('status').lean();
+  const user = await User.findById(userId).select('status emailVerifiedAt').lean();
   if (!user) {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
-  if (user.status && user.status !== 'active') {
-    throw new AppError('Your account is not permitted to send campaigns.', 403);
-  }
+  assertAccountMaySend(user, 'send');
 
   // 3. Re-evaluate readiness server-side (never trust the client's preview)
   const { isReady, issues, eligibleContacts } = await evaluateCampaignReadiness(campaign, userId);
@@ -693,13 +692,11 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
   }
 
   // 3. User account status check
-  const user = await User.findById(userId).select('status').lean();
+  const user = await User.findById(userId).select('status emailVerifiedAt').lean();
   if (!user) {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
-  if (user.status && user.status !== 'active') {
-    throw new AppError('Your account is not permitted to schedule campaigns.', 403);
-  }
+  assertAccountMaySend(user, 'schedule');
 
   // 4. Evaluate readiness
   const { isReady, issues, eligibleContacts } = await evaluateCampaignReadiness(campaign, userId);
