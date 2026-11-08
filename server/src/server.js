@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { getErrorReporter } from './services/errorReporter.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -216,6 +217,18 @@ process.on('SIGINT', () => handleShutdown('SIGINT'));
 
 // Automatically start when executed directly as entry point
 if (isMainModule()) {
+  // Last-resort handlers: report, then exit so the process manager (Docker restart policy,
+  // systemd, ...) starts a clean instance instead of leaving a half-broken one running.
+  const crash = (source) => async (reason) => {
+    await Promise.race([
+      getErrorReporter().reportError(reason, { source }),
+      new Promise((resolve) => setTimeout(resolve, 2500)),
+    ]);
+    process.exit(1);
+  };
+  process.on('unhandledRejection', crash('unhandledRejection'));
+  process.on('uncaughtException', crash('uncaughtException'));
+
   startServer().catch(() => {});
 }
 
