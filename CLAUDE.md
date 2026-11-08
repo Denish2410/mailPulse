@@ -9,15 +9,17 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **886 automated tests** (559 server, 319 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **895 automated tests** (576 server, 319 client), 0 failures, 0 skipped.
 
 ---
 
 ## 2. Core Architectural Principles & Hard Constraints
 
-1. **Deployment Constraint (Single Instance)**:
-   - Run **exactly one application server instance**.
-   - Dispatch concurrency tracking (`activeDispatches`), memory rate limiters, and the background scheduler timer live in-process memory.
+1. **Deployment (single or multiple instances)**:
+   - One instance works out of the box. Several instances need `RATE_LIMIT_STORE=mongo` (shared rate-limit counters) and, behind a proxy, `TRUST_PROXY=<hops>`.
+   - Campaigns in `sending` carry a dispatch lease (`dispatchLeaseOwner`/`dispatchLeaseUntil`, `dispatchLease.service.js`, `CAMPAIGN_LEASE_MS`); recovery and the watchdog never touch a campaign a live instance holds, and resume a crashed instance's campaigns once its lease expires.
+   - The scheduler is safe across instances (atomic claim). `activeDispatches`, the stop flag and the send throttle are per process: `CAMPAIGN_SEND_RATE_PER_MINUTE` applies per instance.
+   - Design note: coordination uses MongoDB (atomic updates), not Redis/BullMQ, so no extra infrastructure is needed. Add Redis only if rate-limit write volume or queue throughput demands it.
 2. **Tenant Isolation**:
    - Every user-owned document (`Contact`, `Campaign`, `Delivery`, `Suppression`, `Template`, `Segment`; `TrackingEvent` via its owner's campaigns) MUST be scoped strictly to `{ _id: id, userId }`.
    - Never expose raw database IDs or sensitive internal fields in safe formatting functions.
@@ -235,11 +237,9 @@ git diff --check
 
 ---
 
-## 7. Future Phases Roadmap
+## 7. Roadmap
 
-- **Phase 13: Distributed Queue & Multi-Instance Scaling (BullMQ / Redis)**:
-  - Remove single-instance constraint by replacing memory queues with Redis + BullMQ.
-  - Enable multiple server replicas behind load balancers.
+- **Phase 13: Multi-Instance Scaling**: DONE using MongoDB dispatch leases and a Mongo-backed rate-limit store (Redis/BullMQ not needed yet; see section 2).
 - **Phase 14: Automated Drip Campaigns & Sequences**:
   - Time-delayed drip journeys (Welcome series: Day 1 -> Day 3 -> Day 7).
   - Event triggers and visual workflow branching.

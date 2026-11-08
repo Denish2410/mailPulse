@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { createRateLimitStore } from './rateLimitStore.js';
 
 /**
  * Dedicated Rate Limiter for Campaign Test Emails (Phase 4.4 Step 3)
@@ -65,6 +66,7 @@ export const createTestEmailRateLimiter = ({ windowMs, max, env = process.env } 
   const resolved = getTestEmailRateLimitConfig(env);
 
   return rateLimit({
+    store: createRateLimitStore('test-email', env),
     windowMs: windowMs ?? resolved.windowMs,
     limit: max ?? resolved.max,
     standardHeaders: true,

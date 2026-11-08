@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { createRateLimitStore } from './middleware/rateLimitStore.js';
 
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
@@ -81,6 +82,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 // 5. API Rate limiting
 const limiter = rateLimit({
+  store: createRateLimitStore('api'),
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   max: Number(process.env.RATE_LIMIT_MAX) || 100,
   standardHeaders: true,

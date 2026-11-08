@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import { createRateLimitStore } from '../middleware/rateLimitStore.js';
 import { getPublicForm, subscribeToForm, confirmFormSubscription } from '../controllers/public.controller.js';
 import { validate } from '../validators/validate.js';
 import {
@@ -14,6 +15,7 @@ const isTest = () => process.env.NODE_ENV === 'test';
 
 // Subscribing sends email to an arbitrary address, so it gets a tight per-IP limit
 const subscribeLimiter = rateLimit({
+  store: createRateLimitStore('public-subscribe'),
   windowMs: 15 * 60 * 1000,
   limit: () => (isTest() ? 1000 : Number(process.env.PUBLIC_SUBSCRIBE_RATE_LIMIT_MAX) || 10),
   standardHeaders: true,
@@ -22,6 +24,7 @@ const subscribeLimiter = rateLimit({
 });
 
 const readLimiter = rateLimit({
+  store: createRateLimitStore('public-read'),
   windowMs: 15 * 60 * 1000,
   limit: () => (isTest() ? 1000 : 60),
   standardHeaders: true,

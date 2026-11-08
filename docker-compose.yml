@@ -1,6 +1,6 @@
 # Run the whole stack:   docker compose up --build        (UI at http://localhost:8080)
 # Production with HTTPS: see docker-compose.prod.yml and the README.
-# MailPulse must run as ONE server instance, so do not scale the `server` service.
+# Scale the `server` service only with RATE_LIMIT_STORE=mongo (set below); see server/.env.example.
 #
 # Required in your shell or a .env file next to this file:
 #   JWT_SECRET             random string, 32+ characters   (openssl rand -hex 32)
@@ -33,6 +33,7 @@ services:
       # Links in sent emails (open pixel, click redirect, unsubscribe) must be reachable by recipients.
       TRACKING_BASE_URL: ${TRACKING_BASE_URL:-${CLIENT_URL:-http://localhost:8080}}
       # Hops in front of the server: nginx = 1 (the prod overlay with Caddy sets 2).
+      RATE_LIMIT_STORE: ${RATE_LIMIT_STORE:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to a random string of at least 32 characters}
       # In production the account email must be verified before sending. Set false to skip

@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { createRateLimitStore } from './rateLimitStore.js';
 
 /**
  * Dedicated Rate Limiter for Campaign Sends (Phase 5)
@@ -50,6 +51,7 @@ export const createCampaignSendRateLimiter = ({ windowMs, max, env = process.env
   const resolved = getCampaignSendRateLimitConfig(env);
 
   return rateLimit({
+    store: createRateLimitStore('campaign-send', env),
     windowMs: windowMs ?? resolved.windowMs,
     limit: max ?? resolved.max,
     standardHeaders: true,

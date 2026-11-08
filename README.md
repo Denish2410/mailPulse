@@ -184,7 +184,7 @@ export MONGO_ROOT_PASSWORD="$(openssl rand -hex 24)"
 docker compose up --build
 ```
 
-Open http://localhost:8080. MongoDB requires a password and is not exposed outside the Docker network. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Keep it to **one** `server` container: dispatch and rate limits live in process memory.
+Open http://localhost:8080. MongoDB requires a password and is not exposed outside the Docker network. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Run one `server` container unless you set `RATE_LIMIT_STORE=mongo` (shared rate limits); with it, several instances can run behind a load balancer and campaigns in progress are protected by leases (see `server/.env.example`).
 
 ### HTTPS for a real domain
 
