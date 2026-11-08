@@ -180,10 +180,22 @@ No Node or MongoDB install needed:
 
 ```bash
 export JWT_SECRET="$(openssl rand -hex 32)"
+export MONGO_ROOT_PASSWORD="$(openssl rand -hex 24)"
 docker compose up --build
 ```
 
-Open http://localhost:8080. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Keep it to **one** `server` container: dispatch and rate limits live in process memory.
+Open http://localhost:8080. MongoDB requires a password and is not exposed outside the Docker network. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Keep it to **one** `server` container: dispatch and rate limits live in process memory.
+
+### HTTPS for a real domain
+
+```bash
+export DOMAIN=mail.example.com CLIENT_URL=https://mail.example.com
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+```
+
+Caddy gets and renews the certificate automatically (DNS must point at the host; ports 80 and 443 open). Links in sent emails use `TRACKING_BASE_URL`, which defaults to `CLIENT_URL`. In production an account must verify its email before it can send campaigns (`REQUIRE_VERIFIED_EMAIL=false` turns that off). Back up the `mongo-data` volume, for example with `docker compose exec mongo mongodump --archive -u mailpulse -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin > backup.archive`.
+
+Before going live, run `npm run smtp:check -- --to you@example.com` (in `server/`, with your SMTP settings in `server/.env`) to confirm real delivery works.
 
 ---
 
