@@ -2,7 +2,18 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { createRateLimitStore } from '../middleware/rateLimitStore.js';
 
-import { register, login, getMe, forgotPassword, resetPassword, verifyEmail, resendVerification } from '../controllers/auth.controller.js';
+import {
+  register,
+  login,
+  getMe,
+  updateMe,
+  exportMyData,
+  deleteMyAccount,
+  forgotPassword,
+  resetPassword,
+  verifyEmail,
+  resendVerification,
+} from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
 import {
@@ -11,6 +22,8 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  updateProfileSchema,
+  deleteAccountSchema,
 } from '../validators/auth.validator.js';
 
 const router = Router();
@@ -82,6 +95,27 @@ router.post('/resend-verification', authLimiter, authenticate, resendVerificatio
  * @access  Protected (Bearer token)
  */
 router.get('/me', authenticate, getMe);
+
+/**
+ * @route   PATCH /api/v1/auth/me
+ * @desc    Update the account name and the sender mailing address used in campaign footers
+ * @access  Protected (Bearer token)
+ */
+router.patch('/me', authenticate, validate(updateProfileSchema), updateMe);
+
+/**
+ * @route   GET /api/v1/auth/me/export
+ * @desc    Download all of the account's data as JSON
+ * @access  Protected (Bearer token)
+ */
+router.get('/me/export', authLimiter, authenticate, exportMyData);
+
+/**
+ * @route   DELETE /api/v1/auth/me
+ * @desc    Permanently delete the account and its data (requires the current password)
+ * @access  Protected (Bearer token)
+ */
+router.delete('/me', authLimiter, authenticate, validate(deleteAccountSchema), deleteMyAccount);
 
 export default router;
 

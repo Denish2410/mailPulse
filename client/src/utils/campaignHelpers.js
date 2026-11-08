@@ -661,8 +661,8 @@ export const getSendCampaignErrorMessage = (error) => {
     case 401:
       return 'Your session has expired. Please sign in again.';
     case 403:
-      // The server tells unverified accounts to confirm their email first; show that guidance
-      if (typeof body?.message === 'string' && /verify your email/i.test(body.message)) {
+      // The server explains what to fix first (verify email, add mailing address); show that
+      if (typeof body?.message === 'string' && /verify your email|mailing address/i.test(body.message)) {
         return body.message;
       }
       return 'Your account is not permitted to send campaigns.';

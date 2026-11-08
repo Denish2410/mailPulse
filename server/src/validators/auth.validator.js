@@ -80,7 +80,38 @@ export const verifyEmailSchema = z.object({
     .strict(),
 });
 
+export const updateProfileSchema = z.object({
+  body: z
+    .object({
+      name: z
+        .string()
+        .trim()
+        .min(2, 'Name must be at least 2 characters long')
+        .max(100, 'Name cannot exceed 100 characters')
+        .optional(),
+      mailingAddress: z
+        .string()
+        .trim()
+        .max(300, 'Mailing address cannot exceed 300 characters')
+        .optional(),
+    })
+    .strict()
+    .refine((data) => data.name !== undefined || data.mailingAddress !== undefined, {
+      message: 'At least one field must be provided for update',
+    }),
+});
+
+export const deleteAccountSchema = z.object({
+  body: z
+    .object({
+      password: z.string({ required_error: 'Password is required' }).min(1, 'Password is required').max(128),
+    })
+    .strict(),
+});
+
 export default {
+  updateProfileSchema,
+  deleteAccountSchema,
   verifyEmailSchema,
   forgotPasswordSchema,
   resetPasswordSchema,

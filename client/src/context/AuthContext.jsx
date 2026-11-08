@@ -109,6 +109,13 @@ export const AuthProvider = ({ children }) => {
     setAuthError(null);
   }, []);
 
+  /**
+   * Replaces the cached profile (after the user edits it in Account settings).
+   */
+  const updateUserProfile = useCallback((profile) => {
+    if (profile) setUser(profile);
+  }, []);
+
   const value = {
     user,
     isAuthenticated: Boolean(user),
@@ -118,6 +125,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     restoreSession,
+    updateUserProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

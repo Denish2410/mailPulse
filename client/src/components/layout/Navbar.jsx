@@ -154,14 +154,18 @@ export const Navbar = () => {
 
         {/* Right: User Profile & Sign Out */}
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="hidden sm:flex flex-col items-end text-right">
+          <Link
+            to="/settings"
+            aria-label="Account settings"
+            className="hidden sm:flex flex-col items-end text-right rounded-lg px-2 py-1 hover:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
             <span className="text-sm font-medium text-slate-200 leading-tight">
               {user?.name || 'User'}
             </span>
             <span className="text-xs text-slate-400 font-mono leading-tight">
               {user?.email || ''}
             </span>
-          </div>
+          </Link>
 
           <button
             type="button"

@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **895 automated tests** (576 server, 319 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **915 automated tests** (589 server, 326 client), 0 failures, 0 skipped.
 
 ---
 
@@ -130,6 +130,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - A/B subject testing: optional `Campaign.subjectB`; when set, the audience snapshot alternates deliveries between variant `A` (main subject) and `B` (`Delivery.variant`) and the worker sends each arm its subject. `GET /campaigns/:id/analytics` adds `variants` (per-arm sent, unique opens/clicks, rates, `leader` by open rate; null without a test). There is no automatic winner send.
 - Timezone-aware scheduling: the schedule inputs take a timezone (remembered in localStorage); `client/src/utils/timezone.js` converts the wall-clock time to a UTC instant before `POST /schedule`, rejecting DST-gap times. No server change: `scheduledAt` stays one UTC instant.
 - Production hardening: `npm run smtp:check [-- --to addr]` (real SMTP smoke test); sending/scheduling requires a verified email in production (`REQUIRE_VERIFIED_EMAIL`, `utils/sendingPolicy.js`); `TRUST_PROXY` hop count so rate limits see real client IPs behind a proxy; `errorReporter.service.js` (JSON error logs, optional `ERROR_WEBHOOK_URL` alerts, crash-and-restart on fatal errors); Docker compose with MongoDB auth plus `docker-compose.prod.yml` (Caddy HTTPS).
+- Compliance & privacy: `User.mailingAddress` is printed in every campaign footer (`appendMailingAddress`) and required to send/schedule in production (`REQUIRE_MAILING_ADDRESS`); `PATCH /auth/me`, `GET /auth/me/export` (JSON of the owner's data, no secrets) and `DELETE /auth/me` (password-confirmed, 409 while campaigns are sending/scheduled, removes only the caller's data; tracking events are reached through the owner's campaigns as they have no `userId`); client page `/settings`. No terms/privacy pages are included: those need your own legal text.
 - Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
 
 ---
@@ -137,7 +138,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 ## 4. Key Data Models (Mongoose)
 
 - **User** (`server/src/models/User.js`):
-  - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`), `emailVerifiedAt`, plus hashed one-time `passwordResetTokenHash`/`passwordResetExpiresAt` and `emailVerificationTokenHash`/`emailVerificationExpiresAt` (all `select: false`).
+  - Fields: `name`, `email`, `passwordHash`, `status` (`'active'` | `'suspended'`), `emailVerifiedAt`, `mailingAddress`, plus hashed one-time `passwordResetTokenHash`/`passwordResetExpiresAt` and `emailVerificationTokenHash`/`emailVerificationExpiresAt` (all `select: false`).
 - **Contact** (`server/src/models/Contact.js`):
   - Fields: `userId`, `name`, `email`, `tags`, `customFields` (Map of text), `isUnsubscribed`, `unsubscribedAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
@@ -173,7 +174,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 | `/api/v1/health/ready` | GET | Public | Readiness check (MongoDB ping) |
 | `/api/v1/auth/register` | POST | Public | Register new user |
 | `/api/v1/auth/login` | POST | Public | Authenticate user & return JWT |
-| `/api/v1/auth/me` | GET | Protected | Get authenticated profile |
+| `/api/v1/auth/me` | GET, PATCH, DELETE | Protected | Get / update profile (name, mailing address) / delete account (password) |
+| `/api/v1/auth/me/export` | GET | Protected | Download all account data as JSON |
 | `/api/v1/auth/forgot-password` | POST | Public | Email a reset link (uniform response) |
 | `/api/v1/auth/reset-password` | POST | Public | Set a new password with the emailed token |
 | `/api/v1/auth/verify-email` | POST | Public | Confirm email with the emailed token |

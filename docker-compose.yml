@@ -39,6 +39,7 @@ services:
       # In production the account email must be verified before sending. Set false to skip
       # (for example when SMTP is not configured yet and verification emails cannot arrive).
       REQUIRE_VERIFIED_EMAIL: ${REQUIRE_VERIFIED_EMAIL:-}
+      REQUIRE_MAILING_ADDRESS: ${REQUIRE_MAILING_ADDRESS:-}
       ERROR_WEBHOOK_URL: ${ERROR_WEBHOOK_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
