@@ -6,6 +6,8 @@ import { getAuthConfig } from '../config/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { getDefaultEmailService } from '../services/email.service.js';
+import Campaign from '../models/Campaign.js';
+import { buildAccountExport, deleteAccountData } from '../services/account.service.js';
 import {
   createResetToken,
   hashResetToken,
@@ -39,6 +41,7 @@ const formatSafeUser = (user) => ({
   email: user.email,
   status: user.status,
   emailVerified: Boolean(user.emailVerifiedAt),
+  mailingAddress: user.mailingAddress ?? '',
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -197,6 +200,97 @@ export const getMe = asyncHandler(async (req, res) => {
     data: {
       user: formatSafeUser(user),
     },
+  });
+});
+
+
+/**
+ * Update the account name and/or the sender mailing address printed in campaign footers.
+ *
+ * Route: PATCH /api/v1/auth/me
+ */
+export const updateMe = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  const { name, mailingAddress } = req.body;
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new AppError('User account not found.', 401);
+  }
+  if (user.status === 'suspended') {
+    throw new AppError('Your account has been suspended. Please contact support.', 403);
+  }
+
+  if (name !== undefined) user.name = name;
+  if (mailingAddress !== undefined) user.mailingAddress = mailingAddress;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Profile updated successfully',
+    data: { user: formatSafeUser(user) },
+  });
+});
+
+/**
+ * Download everything the account owns as a JSON file (GDPR access/portability).
+ *
+ * Route: GET /api/v1/auth/me/export
+ */
+export const exportMyData = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  const data = await buildAccountExport(userId);
+  if (!data) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mailpulse-export.json"');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(JSON.stringify(data, null, 2));
+});
+
+/**
+ * Permanently delete the account and all its data (GDPR erasure). Requires the current password
+ * and refuses while a campaign is being sent, so a dispatch is never orphaned.
+ *
+ * Route: DELETE /api/v1/auth/me
+ */
+export const deleteMyAccount = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  const user = await User.findById(userId).select('+passwordHash');
+  if (!user) {
+    throw new AppError('User account not found.', 401);
+  }
+
+  const passwordOk = await verifyPassword(req.body.password, user.passwordHash);
+  if (!passwordOk) {
+    throw new AppError('Password is incorrect.', 403);
+  }
+
+  if (await Campaign.exists({ userId, status: { $in: ['sending', 'scheduled'] } })) {
+    throw new AppError(
+      'Wait for campaigns that are sending to finish and cancel scheduled ones before deleting your account.',
+      409
+    );
+  }
+
+  await deleteAccountData(userId);
+
+  res.status(200).json({
+    success: true,
+    message: 'Your account and all its data have been permanently deleted.',
   });
 });
 

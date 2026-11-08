@@ -32,6 +32,13 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password hash is required'],
       select: false,
     },
+    // Postal address of the sender, printed in every campaign footer (CAN-SPAM requires one)
+    mailingAddress: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [300, 'Mailing address cannot exceed 300 characters'],
+    },
     // Email verification (only the SHA-256 hash of the emailed token is stored)
     emailVerifiedAt: {
       type: Date,
