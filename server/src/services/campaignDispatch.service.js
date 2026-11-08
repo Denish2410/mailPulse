@@ -1,3 +1,4 @@
+import { acquireLease, leaseFields, releaseAllLeases, startLeaseHeartbeat, LEASE_UNSET } from './dispatchLease.service.js';
 import mongoose from 'mongoose';
 import Campaign from '../models/Campaign.js';
 import Delivery from '../models/Delivery.js';
@@ -49,9 +50,10 @@ import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.
  * 'INTERRUPTED' or 'PERSIST_ERROR'). It is not exactly-once: Delivery records are a lower bound
  * on what was accepted, since a crash or write failure after acceptance is recorded as failed.
  *
- * DEPLOYMENT: SINGLE APPLICATION INSTANCE ONLY. Dispatch bookkeeping (`activeDispatches`,
- * `stopRequested`) lives in process memory. With several instances, startup recovery or the
- * watchdog on one instance can fail deliveries that another instance is still sending.
+ * DEPLOYMENT: several application instances may run. `activeDispatches` and `stopRequested`
+ * describe only THIS process, so each campaign in 'sending' also carries a lease
+ * (dispatchLease.service.js) that its owner renews; recovery never touches a campaign whose lease
+ * is held by a live peer. CAMPAIGN_SEND_RATE_PER_MINUTE is applied per instance.
  */
 
 export const DEFAULT_SEND_CONCURRENCY = 5;
@@ -108,6 +110,13 @@ const activeDispatches = new Map();
 const recoveringCampaigns = new Set();
 
 /**
+ * Campaigns whose lease another instance took over while this process was sending them; the
+ * local workers stop claiming deliveries for them.
+ * @type {Set<string>}
+ */
+const leaseLostCampaigns = new Set();
+
+/**
  * Set when the process is shutting down; workers stop claiming new deliveries.
  */
 let stopRequested = false;
@@ -150,6 +159,14 @@ export const stopAllDispatches = async () => {
   stopDispatchWatchdog();
   cancelSharedSendThrottle();
   await Promise.allSettled([...activeDispatches.values()]);
+  // Hand our campaigns to peers immediately instead of making them wait for the lease to expire
+  // (skipped when the database is not connected, and bounded so shutdown can never hang on it)
+  if (mongoose.connection.readyState === 1) {
+    await Promise.race([
+      releaseAllLeases().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 2000).unref?.()),
+    ]);
+  }
 };
 
 /**
@@ -208,6 +225,7 @@ export const finalizeCampaign = async (campaignId) => {
         'stats.sent': counts.sent,
         'stats.failed': counts.failed,
       },
+      $unset: LEASE_UNSET,
     },
     { new: true }
   );
@@ -460,6 +478,7 @@ export const processCampaignDeliveries = async (
   campaignId,
   { emailService, concurrency = getSendConcurrency(), logger = console } = {}
 ) => {
+  let stopHeartbeat = () => {};
   try {
     const campaign = await Campaign.findOne({ _id: campaignId, status: 'sending' })
       .select('subject subjectB textContent htmlContent')
@@ -468,6 +487,15 @@ export const processCampaignDeliveries = async (
     if (!campaign) {
       return;
     }
+
+    // Another live instance already owns this campaign: leave it alone
+    if (!(await acquireLease(campaignId))) {
+      return;
+    }
+    leaseLostCampaigns.delete(String(campaignId));
+    stopHeartbeat = startLeaseHeartbeat(campaignId, {
+      onLost: () => leaseLostCampaigns.add(String(campaignId)),
+    });
 
     const message = {
       subject: campaign.subject,
@@ -481,10 +509,10 @@ export const processCampaignDeliveries = async (
     const throttle = getSharedSendThrottle();
 
     const worker = async () => {
-      while (!stopRequested) {
+      while (!stopRequested && !leaseLostCampaigns.has(String(campaignId))) {
         // Reserve a send slot first (no-op when CAMPAIGN_SEND_RATE_PER_MINUTE is unset)
         await throttle.wait();
-        if (stopRequested) return;
+        if (stopRequested || leaseLostCampaigns.has(String(campaignId))) return;
         const hadWork = await processNextDelivery(campaignId, message, emailService, logger);
         if (!hadWork) {
           return;
@@ -507,13 +535,16 @@ export const processCampaignDeliveries = async (
       return;
     }
 
-    if (!stopRequested) {
+    if (!stopRequested && !leaseLostCampaigns.has(String(campaignId))) {
       await finalizeCampaign(campaignId);
     }
   } catch (error) {
     logger.error(
       `[Dispatcher] Campaign ${String(campaignId)} dispatch halted: ${error?.name || 'Error'}`
     );
+  } finally {
+    stopHeartbeat();
+    leaseLostCampaigns.delete(String(campaignId));
   }
 };
 
@@ -582,6 +613,7 @@ export const startCampaignDispatch = async ({
         status: 'sending',
         sendStartedAt: now,
         sendCompletedAt: null,
+        ...leaseFields(now.getTime()),
         'stats.total': eligibleContacts.length,
         'stats.sent': 0,
         'stats.failed': 0,
@@ -622,6 +654,7 @@ export const startCampaignDispatch = async ({
           'stats.sent': 0,
           'stats.failed': 0,
         },
+        $unset: LEASE_UNSET,
       }
     );
     throw error;
@@ -647,8 +680,8 @@ export const startCampaignDispatch = async ({
  * synchronous, and dispatch is registered in `activeDispatches` before the lock is released, so
  * no other recovery can interleave.
  *
- * SINGLE-INSTANCE ONLY: "no dispatch running" is known only for this process. With several
- * application instances, one instance could recover a campaign another is still sending.
+ * Multi-instance: the campaign's lease is taken first; if another live instance holds it, this
+ * returns 'skipped' and the campaign is left alone.
  *
  * @returns {Promise<'resumed'|'reverted'|'skipped'>}
  */
@@ -660,6 +693,11 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
   recoveringCampaigns.add(key);
 
   try {
+    // Another live instance holds the lease: it is still sending this campaign
+    if (!(await acquireLease(campaignId))) {
+      return 'skipped';
+    }
+
     await Delivery.updateMany(
       { campaignId, status: 'processing' },
       { $set: { status: 'failed', errorCode: 'INTERRUPTED', failedAt: new Date() } }
@@ -679,6 +717,7 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
             'stats.sent': 0,
             'stats.failed': 0,
           },
+          $unset: LEASE_UNSET,
         }
       );
       return reverted.modifiedCount > 0 ? 'reverted' : 'skipped';
@@ -766,7 +805,7 @@ export const getWatchdogConfig = (env = process.env) => ({
  * error). The age threshold keeps the sweep away from campaigns that were just locked and are
  * still having their deliveries created.
  *
- * SINGLE-INSTANCE ONLY (see `recoverCampaign`).
+ * Lease-aware (see `recoverCampaign`): campaigns held by a live instance are skipped.
  *
  * @param {object} options
  * @param {{ sendEmail: Function }} options.emailService
@@ -788,7 +827,12 @@ export const reapStalledCampaigns = async ({
   }
 
   const cutoff = new Date(now.getTime() - stallTimeoutMs);
-  const stalled = await Campaign.find({ status: 'sending', sendStartedAt: { $lte: cutoff } })
+  // Stalled = started long ago, or its owner's lease ran out (the owning instance died).
+  // recoverCampaign still refuses campaigns whose lease is held by a live instance.
+  const stalled = await Campaign.find({
+    status: 'sending',
+    $or: [{ sendStartedAt: { $lte: cutoff } }, { dispatchLeaseUntil: { $lte: now } }],
+  })
     .select('_id')
     .lean();
 
