@@ -17,8 +17,12 @@ import suppressionRoutes from './routes/suppression.routes.js';
 import signupFormRoutes from './routes/signupForm.routes.js';
 import publicRoutes from './routes/public.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import { resolveTrustProxy } from './config/proxy.js';
 
 const app = express();
+
+// 0. Client IP resolution behind reverse proxies (rate limits and tracking use req.ip)
+app.set('trust proxy', resolveTrustProxy());
 
 // 1. Security HTTP headers
 // Sets HSTS, X-Content-Type-Options, Frameguard, and cross-origin resource policy for JSON APIs

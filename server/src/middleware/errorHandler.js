@@ -1,4 +1,5 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { getErrorReporter } from '../services/errorReporter.service.js';
 
 /**
  * Custom application error class for operational errors with explicit HTTP status codes.
@@ -56,10 +57,13 @@ export const errorHandler = (err, req, res, next) => {
 
   // 3. Log only unexpected internal server errors (5xx); omit expected client errors (4xx)
   if (!isClientError) {
-    // Safely log error without printing request bodies, tokens, or credentials
-    const errorTitle = err.name || 'Error';
-    const errorDetails = err.stack ? err.stack.split('\n')[0] : err.message;
-    console.error(`[Server Error] [${req.method || 'UNKNOWN'} ${req.originalUrl || ''}] ${errorTitle}: ${errorDetails}`);
+    // The reporter logs only the error, method and path (never bodies, headers or query strings).
+    // Structured log line plus optional webhook alert; fire-and-forget so the response is never delayed
+    void getErrorReporter().reportError(err, {
+      method: req.method,
+      path: req.originalUrl,
+      status: statusCode,
+    });
   }
 
   // 4. Sanitize message: do not expose internal exception details or stack traces to clients

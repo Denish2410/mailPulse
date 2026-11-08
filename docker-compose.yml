@@ -1,12 +1,21 @@
-# Run the whole stack: docker compose up --build   (UI at http://localhost:8080)
+# Run the whole stack:   docker compose up --build        (UI at http://localhost:8080)
+# Production with HTTPS: see docker-compose.prod.yml and the README.
 # MailPulse must run as ONE server instance, so do not scale the `server` service.
+#
+# Required in your shell or a .env file next to this file:
+#   JWT_SECRET             random string, 32+ characters   (openssl rand -hex 32)
+#   MONGO_ROOT_PASSWORD    database password, use hex only (openssl rand -hex 24)
 services:
   mongo:
     image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mailpulse
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD (hex characters only, e.g. openssl rand -hex 24)}
     volumes:
       - mongo-data:/data/db
+    # No published ports: only the server container can reach the database.
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 })"]
+      test: ["CMD", "mongosh", "--quiet", "-u", "mailpulse", "-p", "${MONGO_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({ ping: 1 })"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -15,13 +24,21 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 5000
-      MONGODB_URI: mongodb://mongo:27017/mailpulse
+      MONGODB_URI: mongodb://mailpulse:${MONGO_ROOT_PASSWORD}@mongo:27017/mailpulse?authSource=admin
       CLIENT_URL: ${CLIENT_URL:-http://localhost:8080}
-      # Set a real secret (32+ chars) in your shell or a .env file next to this file.
+      # Links in sent emails (open pixel, click redirect, unsubscribe) must be reachable by recipients.
+      TRACKING_BASE_URL: ${TRACKING_BASE_URL:-${CLIENT_URL:-http://localhost:8080}}
+      # Hops in front of the server: nginx = 1 (the prod overlay with Caddy sets 2).
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to a random string of at least 32 characters}
+      # In production the account email must be verified before sending. Set false to skip
+      # (for example when SMTP is not configured yet and verification emails cannot arrive).
+      REQUIRE_VERIFIED_EMAIL: ${REQUIRE_VERIFIED_EMAIL:-}
+      ERROR_WEBHOOK_URL: ${ERROR_WEBHOOK_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -35,6 +52,7 @@ services:
     build:
       context: .
       dockerfile: client/Dockerfile
+    restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
