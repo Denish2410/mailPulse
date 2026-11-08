@@ -1,0 +1,35 @@
+# HTTPS in production: Caddy terminates TLS (automatic Let's Encrypt certificates) in front of
+# the stack. Point your domain's DNS at this host and open ports 80 and 443.
+#
+#   export DOMAIN=mail.example.com
+#   export CLIENT_URL=https://$DOMAIN
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to the hostname that points at this server}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - client
+
+  server:
+    environment:
+      CLIENT_URL: ${CLIENT_URL:?set CLIENT_URL to https://your-domain}
+      # Caddy -> nginx -> server is two proxy hops
+      TRUST_PROXY: 2
+
+  client:
+    # Only reachable through Caddy; drop the plain-HTTP port published by the base file
+    ports: !reset []
+
+volumes:
+  caddy-data:
+  caddy-config:
