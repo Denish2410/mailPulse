@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import { createRateLimitStore } from '../middleware/rateLimitStore.js';
 
 import { register, login, getMe, forgotPassword, resetPassword, verifyEmail, resendVerification } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
@@ -22,6 +23,7 @@ const router = Router();
  * Operates in addition to the global /api limiter mounted in app.js.
  */
 const authLimiter = rateLimit({
+  store: createRateLimitStore('auth'),
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: () => (process.env.NODE_ENV === 'test' ? 1000 : (Number(process.env.AUTH_RATE_LIMIT_MAX) || 20)),
   standardHeaders: true,
