@@ -6,6 +6,7 @@ import Contact from '../models/Contact.js';
 import Delivery from '../models/Delivery.js';
 import Suppression from '../models/Suppression.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { escapeHtml as escapeHtmlText } from './personalization.service.js';
 
 /**
  * 1x1 Transparent GIF buffer (43 bytes)
@@ -387,6 +388,37 @@ export const injectUnsubscribeLinks = (html, text, { unsubscribeUrl, appendToTex
 };
 
 /**
+ * Appends the sender's postal address (CAN-SPAM) to the message: a small footer block in the HTML
+ * and a trailing line in the plain text. Applied independently of the unsubscribe footer, so it is
+ * present even when the author placed {{unsubscribeUrl}} in their own layout. The address is
+ * HTML-escaped and flattened to one line per row.
+ *
+ * @param {string} html
+ * @param {string} text
+ * @param {string} address
+ * @returns {{ html: string, text: string }}
+ */
+export const appendMailingAddress = (html, text, address) => {
+  const clean = typeof address === 'string' ? address.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim() : '';
+  if (!clean) return { html, text };
+
+  let outHtml = typeof html === 'string' ? html : '';
+  let outText = typeof text === 'string' ? text : '';
+
+  if (outHtml.trim()) {
+    const lines = clean.split(/\r?\n/).map((line) => escapeHtmlText(line.trim())).filter(Boolean).join('<br>');
+    const block = `<div class="mailpulse-address-footer" style="margin-top: 12px; text-align: center; font-size: 12px; color: #6b7280; font-family: sans-serif;">${lines}</div>`;
+    outHtml = /<\/body>/i.test(outHtml)
+      ? outHtml.replace(/<\/body>/i, () => `${block}\n</body>`)
+      : `${outHtml}\n${block}`;
+  }
+  if (outText.trim()) {
+    outText = `${outText}\n\n${clean.replace(/\r\n/g, '\n')}`;
+  }
+  return { html: outHtml, text: outText };
+};
+
+/**
  * Combines link rewriting, unsubscribe injection, and open-pixel injection in a single operation.
  *
  * @param {string} htmlContent
@@ -759,6 +791,7 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
 };
 
 export default {
+  appendMailingAddress,
   getCampaignVariantStats,
   TRANSPARENT_1X1_GIF,
   TrackingTokenError,

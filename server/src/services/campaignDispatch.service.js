@@ -1,5 +1,6 @@
 import { acquireLease, leaseFields, releaseAllLeases, startLeaseHeartbeat, LEASE_UNSET } from './dispatchLease.service.js';
 import mongoose from 'mongoose';
+import User from '../models/User.js';
 import Campaign from '../models/Campaign.js';
 import Delivery from '../models/Delivery.js';
 import Contact from '../models/Contact.js';
@@ -12,6 +13,7 @@ import {
 } from './email.service.js';
 import {
   prepareTrackedEmailHtml,
+  appendMailingAddress,
   createUnsubscribeToken,
   injectUnsubscribeLinks,
 } from './tracking.service.js';
@@ -407,6 +409,13 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     }
   }
 
+  // 3c. Sender postal address footer
+  if (message.mailingAddress) {
+    const withAddress = appendMailingAddress(htmlToSend, textToSend, message.mailingAddress);
+    htmlToSend = withAddress.html;
+    textToSend = withAddress.text;
+  }
+
   // 4. Hand the message to the transport with custom headers
   let result;
   try {
@@ -481,7 +490,7 @@ export const processCampaignDeliveries = async (
   let stopHeartbeat = () => {};
   try {
     const campaign = await Campaign.findOne({ _id: campaignId, status: 'sending' })
-      .select('subject subjectB textContent htmlContent')
+      .select('userId subject subjectB textContent htmlContent')
       .lean();
 
     if (!campaign) {
@@ -497,7 +506,11 @@ export const processCampaignDeliveries = async (
       onLost: () => leaseLostCampaigns.add(String(campaignId)),
     });
 
+    // The owner's postal address goes into every footer (CAN-SPAM); read once per dispatch
+    const owner = await User.findById(campaign.userId).select('mailingAddress').lean();
+
     const message = {
+      mailingAddress: owner?.mailingAddress || '',
       subject: campaign.subject,
       subjectB: campaign.subjectB || '',
       text: campaign.textContent ?? '',
