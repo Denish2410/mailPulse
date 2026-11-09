@@ -1,3 +1,4 @@
+import AuthLayout from '../../components/layout/AuthLayout.jsx';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { requestPasswordReset } from '../../api/auth.js';
@@ -38,9 +39,9 @@ export const ForgotPasswordPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <AuthLayout>
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-white">Reset your password</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-50">Reset your password</h1>
         <p className="mt-2 text-sm text-slate-400">
           Enter your account email and we will send you a reset link.
         </p>
@@ -76,7 +77,7 @@ export const ForgotPasswordPage = () => {
                   disabled={isSubmitting}
                   aria-invalid={Boolean(error)}
                   placeholder="name@company.com"
-                  className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
                 {error && (
                   <p className="mt-1.5 text-xs text-rose-400" role="alert">{error}</p>
@@ -96,7 +97,7 @@ export const ForgotPasswordPage = () => {
           )}
         </div>
       </div>
-    </div>
+    </AuthLayout>
   );
 };
 

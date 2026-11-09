@@ -1,3 +1,4 @@
+import AuthLayout from '../../components/layout/AuthLayout.jsx';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { resetPassword } from '../../api/auth.js';
@@ -63,16 +64,16 @@ export const ResetPasswordPage = () => {
         onChange={handleChange}
         disabled={isSubmitting}
         aria-invalid={Boolean(errors[name])}
-        className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 placeholder-slate-500 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
       />
       {errors[name] && <p className="mt-1.5 text-xs text-rose-400" role="alert">{errors[name]}</p>}
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <AuthLayout>
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-white">Choose a new password</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-50">Choose a new password</h1>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
@@ -112,7 +113,7 @@ export const ResetPasswordPage = () => {
           )}
         </div>
       </div>
-    </div>
+    </AuthLayout>
   );
 };
 
