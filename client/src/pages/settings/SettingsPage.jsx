@@ -87,12 +87,12 @@ export const SettingsPage = () => {
       <Navbar />
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8 flex flex-col gap-6">
         <header>
-          <h1 className="text-2xl font-bold text-white">Account settings</h1>
+          <h1 className="text-2xl font-bold text-slate-50">Account settings</h1>
           <p className="text-sm text-slate-400 mt-1">{user?.email}</p>
         </header>
 
         <form onSubmit={handleSaveProfile} className={cardClass} noValidate>
-          <h2 className="text-base font-semibold text-white">Profile</h2>
+          <h2 className="text-base font-semibold text-slate-50">Profile</h2>
           <div>
             <label htmlFor="settings-name" className="block text-xs font-semibold text-slate-300 mb-1.5">Name</label>
             <input id="settings-name" className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
@@ -131,7 +131,7 @@ export const SettingsPage = () => {
         </form>
 
         <section className={cardClass}>
-          <h2 className="text-base font-semibold text-white">Your data</h2>
+          <h2 className="text-base font-semibold text-slate-50">Your data</h2>
           <p className="text-sm text-slate-400">
             Download everything MailPulse stores for your account (contacts, campaigns, templates, segments,
             suppressions, forms and delivery records) as a JSON file.

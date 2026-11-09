@@ -90,9 +90,9 @@ export const TemplatesPage = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <div className="inline-flex px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold tracking-wide uppercase mb-2 border border-indigo-500/20">
-              Phase 10 — Templates &amp; Personalization
+              Templates
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Templates</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50 tracking-tight">Templates</h1>
             <p className="mt-1 text-sm text-slate-400 max-w-2xl">
               Save reusable designs and personalize them with merge tags.
             </p>
@@ -152,7 +152,7 @@ export const TemplatesPage = () => {
             {templates.map((tpl) => (
               <li key={tpl.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 flex flex-col gap-3">
                 <div>
-                  <h2 className="font-semibold text-white truncate">{tpl.name}</h2>
+                  <h2 className="font-semibold text-slate-50 truncate">{tpl.name}</h2>
                   <p className="text-xs text-slate-400 truncate mt-0.5">{tpl.subject || 'No subject'}</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5 min-h-6">

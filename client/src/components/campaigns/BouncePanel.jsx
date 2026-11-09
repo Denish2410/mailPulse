@@ -29,7 +29,7 @@ export const BouncePanel = ({ campaignId, sentCount }) => {
 
   return (
     <div className="flex flex-col gap-2.5" aria-label="Bounces and complaints">
-      <h3 className="text-sm font-semibold text-white">Bounces &amp; Complaints</h3>
+      <h3 className="text-sm font-semibold text-slate-50">Bounces &amp; Complaints</h3>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
         {[
           ['Hard bounces', summary.hardBounces],
@@ -38,7 +38,7 @@ export const BouncePanel = ({ campaignId, sentCount }) => {
           ['Bounce rate', formatBounceRate(summary, sentCount)],
         ].map(([label, value]) => (
           <div key={label} className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-            <div className="text-lg font-bold text-white">{value}</div>
+            <div className="text-lg font-bold text-slate-50">{value}</div>
             <div className="text-[11px] text-slate-400">{label}</div>
           </div>
         ))}

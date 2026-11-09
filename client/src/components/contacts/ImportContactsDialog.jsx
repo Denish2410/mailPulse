@@ -53,7 +53,7 @@ export const ImportContactsDialog = ({ onClose, onImported }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
       <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => !isImporting && onClose()} aria-hidden="true" />
       <div className="relative z-10 w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100">
-        <h2 id="import-dialog-title" className="text-lg font-bold text-white">Import Contacts</h2>
+        <h2 id="import-dialog-title" className="text-lg font-bold text-slate-50">Import Contacts</h2>
         <p className="text-xs text-slate-400 mt-1">
           Upload a CSV with an <code className="text-indigo-300">email</code> column. Optional columns:{' '}
           <code className="text-indigo-300">name</code>, <code className="text-indigo-300">tags</code> (separate tags with <code>;</code>).

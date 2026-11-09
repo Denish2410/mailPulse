@@ -167,7 +167,7 @@ export const ContactFormModal = ({
               </svg>
             </div>
             <div>
-              <h2 id="contact-modal-title" className="text-lg font-bold text-white tracking-tight">
+              <h2 id="contact-modal-title" className="text-lg font-bold text-slate-50 tracking-tight">
                 {isEditing ? 'Edit Contact' : 'Add New Contact'}
               </h2>
               <p className="text-xs text-slate-400">
@@ -181,7 +181,7 @@ export const ContactFormModal = ({
             onClick={onClose}
             disabled={isSubmitting}
             aria-label="Close dialog"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-50 hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -314,7 +314,7 @@ export const ContactFormModal = ({
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:text-slate-50 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
             >
               Cancel
             </button>

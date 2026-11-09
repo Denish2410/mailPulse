@@ -142,7 +142,7 @@ export const CampaignAnalyticsDialog = ({
             </div>
             <h2
               id="campaign-analytics-title"
-              className="text-lg sm:text-xl font-bold text-white truncate"
+              className="text-lg sm:text-xl font-bold text-slate-50 truncate"
             >
               {campaign.name}
             </h2>
@@ -159,7 +159,7 @@ export const CampaignAnalyticsDialog = ({
               disabled={isLoading}
               aria-label="Refresh tracking analytics"
               title="Refresh metrics"
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+              className="p-1.5 text-slate-400 hover:text-slate-50 hover:bg-slate-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
             >
               <svg
                 className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`}
@@ -227,7 +227,7 @@ export const CampaignAnalyticsDialog = ({
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                 <div className="min-w-0 flex-1">
                   <span className="text-slate-400 font-medium block mb-0.5">Subject</span>
-                  <span className="text-white font-semibold text-sm truncate block">
+                  <span className="text-slate-50 font-semibold text-sm truncate block">
                     {campaign.subject}
                   </span>
                 </div>
@@ -259,7 +259,7 @@ export const CampaignAnalyticsDialog = ({
                       {formatted.openRateFormatted}
                     </span>
                   </div>
-                  <div className="text-2xl font-bold text-white mt-1">
+                  <div className="text-2xl font-bold text-slate-50 mt-1">
                     {formatted.uniqueOpensFormatted}
                     <span className="text-xs font-normal text-slate-400 ml-1.5">
                       unique opens
@@ -280,7 +280,7 @@ export const CampaignAnalyticsDialog = ({
                       {formatted.ctrFormatted}
                     </span>
                   </div>
-                  <div className="text-2xl font-bold text-white mt-1">
+                  <div className="text-2xl font-bold text-slate-50 mt-1">
                     {formatted.uniqueClicksFormatted}
                     <span className="text-xs font-normal text-slate-400 ml-1.5">
                       unique clicks
@@ -301,7 +301,7 @@ export const CampaignAnalyticsDialog = ({
                       {formatted.clickToDeliveredFormatted}
                     </span>
                   </div>
-                  <div className="text-2xl font-bold text-white mt-1">
+                  <div className="text-2xl font-bold text-slate-50 mt-1">
                     {totalRecipients > 0
                       ? `${((metrics.uniqueClicks / totalRecipients) * 100).toFixed(1)}%`
                       : '0.0%'}
@@ -321,7 +321,7 @@ export const CampaignAnalyticsDialog = ({
                       {formatted.unsubscribeRateFormatted}
                     </span>
                   </div>
-                  <div className="text-2xl font-bold text-white mt-1">
+                  <div className="text-2xl font-bold text-slate-50 mt-1">
                     {formatted.totalUnsubscribesFormatted}
                     <span className="text-xs font-normal text-slate-400 ml-1.5">
                       opt-outs
@@ -351,7 +351,7 @@ export const CampaignAnalyticsDialog = ({
               {/* Link Breakdown Section */}
               {linkBreakdown.length > 0 && (
                 <div className="flex flex-col gap-2.5">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-50 flex items-center gap-2">
                     <span>Link Performance Breakdown</span>
                     <span className="text-xs font-normal text-slate-400">
                       ({linkBreakdown.length} {linkBreakdown.length === 1 ? 'link' : 'links'})
@@ -395,7 +395,7 @@ export const CampaignAnalyticsDialog = ({
               {/* Recent Activity Timeline Section */}
               {recentActivity.length > 0 && (
                 <div className="flex flex-col gap-2.5">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-50 flex items-center gap-2">
                     <span>Recent Activity</span>
                     <span className="text-xs font-normal text-slate-400">
                       (Latest {recentActivity.length} events)
@@ -444,7 +444,7 @@ export const CampaignAnalyticsDialog = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-slate-50 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
             Close
           </button>

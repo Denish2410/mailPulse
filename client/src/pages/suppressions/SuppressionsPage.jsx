@@ -112,7 +112,7 @@ export const SuppressionsPage = () => {
       <Navbar />
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Suppressions</h1>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50 tracking-tight">Suppressions</h1>
           <p className="mt-1 text-sm text-slate-400 max-w-2xl">
             Addresses that will never be emailed: unsubscribes, bounces, spam complaints and manual entries.
             Recipient opt-outs and spam complaints are permanent.

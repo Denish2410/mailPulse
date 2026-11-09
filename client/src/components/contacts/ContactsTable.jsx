@@ -45,7 +45,7 @@ export const ContactsTable = ({
             />
           </svg>
         </div>
-        <h3 className="text-lg font-bold text-white mb-1">No contacts yet</h3>
+        <h3 className="text-lg font-bold text-slate-50 mb-1">No contacts yet</h3>
         <p className="text-sm text-slate-400 max-w-md mb-6">
           Get started by adding your first contact to build your audience and launch email campaigns.
         </p>
@@ -83,14 +83,14 @@ export const ContactsTable = ({
             />
           </svg>
         </div>
-        <h3 className="text-lg font-bold text-white mb-1">No matching contacts</h3>
+        <h3 className="text-lg font-bold text-slate-50 mb-1">No matching contacts</h3>
         <p className="text-sm text-slate-400 max-w-md mb-6">
           No contacts matched your search or email domain filter. Try adjusting your query or reset filters.
         </p>
         <button
           type="button"
           onClick={onResetFilters}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:text-slate-50 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
         >
           <span>Clear Filters</span>
         </button>

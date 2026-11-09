@@ -274,9 +274,9 @@ export const ContactsPage = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold tracking-wide uppercase mb-2 border border-indigo-500/20">
-              Phase 3 — Contact Management
+              Audience
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50 tracking-tight">
               Contacts
             </h1>
             <p className="mt-1 text-sm text-slate-400 max-w-2xl">

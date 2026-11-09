@@ -242,7 +242,7 @@ export const CampaignFormDialog = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
           <div>
-            <h2 id="campaign-dialog-title" className="text-lg font-bold text-white">
+            <h2 id="campaign-dialog-title" className="text-lg font-bold text-slate-50">
               {isEditing ? 'Edit Campaign Draft' : 'Create New Campaign Draft'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -533,7 +533,7 @@ export const CampaignFormDialog = ({
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 cursor-pointer disabled:opacity-50"
+              className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-300 hover:text-slate-50 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>

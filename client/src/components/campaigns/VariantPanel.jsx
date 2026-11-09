@@ -10,7 +10,7 @@ export const VariantPanel = ({ variants }) => {
 
   return (
     <div className="flex flex-col gap-2.5" aria-label="A/B subject test results">
-      <h3 className="text-sm font-semibold text-white">A/B Subject Test</h3>
+      <h3 className="text-sm font-semibold text-slate-50">A/B Subject Test</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {variants.arms.map((arm) => {
           const isLeader = variants.leader === arm.variant;
@@ -37,7 +37,7 @@ export const VariantPanel = ({ variants }) => {
                   ['Click rate', `${arm.clickRate}%`],
                 ].map(([label, value]) => (
                   <div key={label}>
-                    <dd className="text-base font-bold text-white">{value}</dd>
+                    <dd className="text-base font-bold text-slate-50">{value}</dd>
                     <dt className="text-[11px] text-slate-400">{label}</dt>
                   </div>
                 ))}

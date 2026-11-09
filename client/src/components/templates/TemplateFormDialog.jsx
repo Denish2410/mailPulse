@@ -105,7 +105,7 @@ export const TemplateFormDialog = ({ template = null, onClose, onSubmit }) => {
       <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => !isSubmitting && onClose()} aria-hidden="true" />
       <div className="relative w-full max-w-2xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col">
         <div className="px-6 py-4 border-b border-slate-800">
-          <h2 id="template-dialog-title" className="text-lg font-bold text-white">
+          <h2 id="template-dialog-title" className="text-lg font-bold text-slate-50">
             {template ? 'Edit Template' : 'New Template'}
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">

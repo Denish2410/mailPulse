@@ -31,7 +31,7 @@ export const DashboardPage = () => {
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold tracking-wide uppercase mb-3 border border-indigo-500/20">
                 Active Session
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50">
                 Welcome back, {user?.name || 'User'}!
               </h1>
               <p className="mt-1 text-sm text-slate-400">
@@ -52,7 +52,7 @@ export const DashboardPage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <div className="lg:col-span-1 bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-base font-semibold text-white">Last 30 days</h2>
+              <h2 className="text-base font-semibold text-slate-50">Last 30 days</h2>
               <Link to="/analytics" className="text-xs font-medium text-indigo-300 hover:text-indigo-200">
                 View analytics →
               </Link>
@@ -70,7 +70,7 @@ export const DashboardPage = () => {
           </div>
 
           <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
-            <h2 className="text-base font-semibold text-white mb-2">Live Backend Connectivity</h2>
+            <h2 className="text-base font-semibold text-slate-50 mb-2">Live Backend Connectivity</h2>
             <p className="text-xs text-slate-400 mb-4">
               Diagnostic verification of the Express API and MongoDB database health.
             </p>
