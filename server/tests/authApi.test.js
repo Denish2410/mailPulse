@@ -579,7 +579,7 @@ describe('Authentication API (Registration, Login & Security Integration)', () =
 
       assert.equal(res.status, 401);
       assert.equal(data.success, false);
-      assert.equal(data.message, 'User account not found.');
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.'); // rejected by the session check before the controller
     });
 
     it('19. A valid token for a suspended user is rejected with HTTP 403 Forbidden', async (t) => {
@@ -637,7 +637,7 @@ describe('Authentication API (Registration, Login & Security Integration)', () =
       const data = await res.json();
       assert.equal(res.status, 401);
       assert.equal(data.success, false);
-      assert.equal(data.message, 'User account not found.');
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.'); // rejected by the session check before the controller
     });
   });
 
@@ -782,7 +782,7 @@ describe('Authentication API (Registration, Login & Security Integration)', () =
       });
       const deletedUserMeData = await deletedUserMeRes.json();
       assert.equal(deletedUserMeRes.status, 401);
-      assert.equal(deletedUserMeData.message, 'User account not found.');
+      assert.equal(deletedUserMeData.message, 'Authentication required. Invalid or missing authorization token.');
 
       // Step 9: Verify client logout behavior (cleared token results in rejection)
       const afterLogoutRes = await fetch(`${baseUrl}/api/v1/auth/me`, {
