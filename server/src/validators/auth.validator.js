@@ -1,3 +1,4 @@
+import { getPasswordWeakness } from '../utils/passwordPolicy.js';
 import { z } from 'zod';
 
 /**
@@ -27,7 +28,12 @@ export const registerSchema = z.object({
       .string({ error: 'Password is required' })
       .min(8, 'Password must be at least 8 characters long')
       .max(128, 'Password cannot exceed 128 characters'),
-  }),
+  })
+    // Strength rules (repetitive, simple runs, common passwords, contains the email name)
+    .superRefine((body, ctx) => {
+      const weakness = getPasswordWeakness(body.password, { email: body.email });
+      if (weakness) ctx.addIssue({ code: 'custom', path: ['password'], message: weakness });
+    }),
 });
 
 export const loginSchema = z.object({
@@ -65,7 +71,11 @@ export const resetPasswordSchema = z.object({
       password: z
         .string({ error: 'Password is required' })
         .min(8, 'Password must be at least 8 characters long')
-        .max(128, 'Password cannot exceed 128 characters'),
+        .max(128, 'Password cannot exceed 128 characters')
+        .superRefine((password, ctx) => {
+          const weakness = getPasswordWeakness(password);
+          if (weakness) ctx.addIssue({ code: 'custom', message: weakness });
+        }),
     })
     .strict(),
 });
