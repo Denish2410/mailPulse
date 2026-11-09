@@ -325,14 +325,18 @@ const FORGOT_PASSWORD_MESSAGE =
 export const forgotPassword = asyncHandler(async (req, res) => {
   const email = req.body.email.trim().toLowerCase();
   const user = await User.findOne({ email });
+  const eligible = Boolean(user && user.status !== 'suspended');
 
-  if (user && user.status !== 'suspended') {
-    const { token, tokenHash, expiresAt } = createResetToken();
-    await User.updateOne(
-      { _id: user._id },
-      { $set: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt } }
-    );
+  // Do the same work whether or not the account exists: generate a token and run one update.
+  // For an unknown (or suspended) address the update targets a random id and matches nothing, so
+  // response time does not reveal which emails are registered.
+  const { token, tokenHash, expiresAt } = createResetToken();
+  await User.updateOne(
+    { _id: eligible ? user._id : new mongoose.Types.ObjectId() },
+    { $set: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt } }
+  );
 
+  if (eligible) {
     const link = buildResetLink(token);
     const emailService = req.app?.locals?.emailService || getDefaultEmailService();
     emailService
