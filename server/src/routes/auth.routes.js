@@ -9,12 +9,13 @@ import {
   updateMe,
   exportMyData,
   deleteMyAccount,
+  logoutAll,
   forgotPassword,
   resetPassword,
   verifyEmail,
   resendVerification,
 } from '../controllers/auth.controller.js';
-import { authenticate } from '../middleware/authenticate.js';
+import { authenticateSession as authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
 import {
   registerSchema,
@@ -95,6 +96,13 @@ router.post('/resend-verification', authLimiter, authenticate, resendVerificatio
  * @access  Protected (Bearer token)
  */
 router.get('/me', authenticate, getMe);
+
+/**
+ * @route   POST /api/v1/auth/logout-all
+ * @desc    Revoke every access token issued so far, on all devices
+ * @access  Protected (Bearer token)
+ */
+router.post('/logout-all', authLimiter, authenticate, logoutAll);
 
 /**
  * @route   PATCH /api/v1/auth/me

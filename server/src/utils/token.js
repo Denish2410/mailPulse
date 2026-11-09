@@ -24,11 +24,15 @@ export const signAccessToken = (userOrId, customConfig) => {
 
   // Extract stable userId identifier, ensuring raw objects with credentials are discarded
   let userId;
+  let tokenVersion = 0;
   if (typeof userOrId === 'string') {
     userId = userOrId.trim();
   } else if (userOrId && typeof userOrId === 'object') {
     const rawId = userOrId._id || userOrId.userId || userOrId.id || userOrId.sub;
     userId = rawId != null ? String(rawId).trim() : '';
+    if (Number.isInteger(userOrId.tokenVersion) && userOrId.tokenVersion > 0) {
+      tokenVersion = userOrId.tokenVersion;
+    }
   }
 
   if (!userId) {
@@ -38,6 +42,8 @@ export const signAccessToken = (userOrId, customConfig) => {
   // Strictly minimal payload - only essential identifier
   const payload = {
     userId,
+    // Revocation counter; omitted at 0 so tokens issued before this feature stay valid
+    ...(tokenVersion > 0 && { tv: tokenVersion }),
   };
 
   return jwt.sign(payload, config.secret, {

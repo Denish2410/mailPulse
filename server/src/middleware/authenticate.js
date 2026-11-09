@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import { AppError } from './errorHandler.js';
+import User from '../models/User.js';
 import { verifyAccessToken } from '../utils/token.js';
 
 /**
@@ -61,6 +63,7 @@ export const authenticate = (req, res, next) => {
 
     req.auth = {
       userId: rawUserId.trim(),
+      tokenVersion: Number.isInteger(decoded.tv) && decoded.tv > 0 ? decoded.tv : 0,
     };
 
     next();
@@ -71,5 +74,32 @@ export const authenticate = (req, res, next) => {
     );
   }
 };
+
+/**
+ * Second step for protected routes: confirms the signed-in account still exists and that the
+ * token has not been revoked since it was issued (password reset or "sign out everywhere" bumps
+ * the user's `tokenVersion`). One indexed lookup per request; fails closed on database errors.
+ * `authenticate` above only proves the token is genuine and unexpired.
+ *
+ * @type {import('express').RequestHandler}
+ */
+export const requireLiveSession = async (req, res, next) => {
+  const unauthorized = () =>
+    next(new AppError('Authentication required. Invalid or missing authorization token.', 401));
+  try {
+    const userId = req.auth?.userId;
+    if (!userId || !mongoose.isValidObjectId(userId)) return unauthorized();
+
+    const user = await User.findById(userId).select('tokenVersion').lean();
+    if (!user) return unauthorized();
+    if ((user.tokenVersion ?? 0) !== (req.auth.tokenVersion ?? 0)) return unauthorized();
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Use this on routes: verify the token, then check the session is still live. */
+export const authenticateSession = [authenticate, requireLiveSession];
 
 export default authenticate;
