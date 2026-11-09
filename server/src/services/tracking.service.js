@@ -34,12 +34,27 @@ export class TrackingTokenError extends Error {
  * @returns {string} Secret key
  */
 export const getTrackingSecret = (customSecret) => {
-  return (
-    customSecret ||
-    process.env.TRACKING_SECRET ||
-    process.env.JWT_SECRET ||
-    'mailpulse-default-tracking-secret-for-hmac'
-  );
+  const secret = customSecret || process.env.TRACKING_SECRET || process.env.JWT_SECRET;
+  // Never fall back to a hard-coded value: anyone could forge tracking and unsubscribe tokens
+  if (!secret) {
+    throw new Error('TRACKING_SECRET (or JWT_SECRET) must be set to sign tracking tokens.');
+  }
+  return secret;
+};
+
+/**
+ * One-way, keyed hash of a visitor IP address. Recipients' raw IPs are personal data, so only
+ * this value is stored: it is stable (the same address always maps to the same hash, which keeps
+ * unique-visitor style counts possible) but cannot be turned back into an address without the
+ * server secret.
+ *
+ * @param {string|null|undefined} ip
+ * @returns {string|null} 32 hex characters, or null when there is no IP
+ */
+export const hashIp = (ip) => {
+  if (!ip) return null;
+  const key = crypto.createHmac('sha256', getTrackingSecret()).update('mailpulse-ip-hash-v1').digest();
+  return crypto.createHmac('sha256', key).update(String(ip).slice(0, 100)).digest('hex').slice(0, 32);
 };
 
 /**
@@ -460,7 +475,7 @@ export const recordOpenEvent = async (token, { ip, userAgent } = {}, secret) => 
     recipientId: verified.recipientId || null,
     recipientEmail: verified.recipientEmail,
     eventType: 'open',
-    ip: ip ? ip.toString().slice(0, 100) : null,
+    ipHash: hashIp(ip),
     userAgent: userAgent ? userAgent.toString().slice(0, 500) : null,
     timestamp: new Date(),
   });
@@ -507,7 +522,7 @@ export const recordClickEvent = async (token, { ip, userAgent } = {}, secret) =>
     recipientEmail: verified.recipientEmail,
     eventType: 'click',
     targetUrl: verified.targetUrl,
-    ip: ip ? ip.toString().slice(0, 100) : null,
+    ipHash: hashIp(ip),
     userAgent: userAgent ? userAgent.toString().slice(0, 500) : null,
     timestamp: new Date(),
   });
@@ -584,7 +599,7 @@ export const recordUnsubscribeEvent = async (tokenOrPayload, metadata = {}) => {
         recipientId: recipientId && mongoose.isValidObjectId(recipientId) ? recipientId : null,
         recipientEmail: normalizedEmail,
         eventType: 'unsubscribe',
-        ip: ip ? String(ip).slice(0, 100) : null,
+        ipHash: hashIp(ip),
         userAgent: userAgent ? String(userAgent).slice(0, 500) : null,
         timestamp: now,
       });
@@ -791,6 +806,7 @@ export const getCampaignTrackingSummary = async (campaignId, userId) => {
 };
 
 export default {
+  hashIp,
   appendMailingAddress,
   getCampaignVariantStats,
   TRANSPARENT_1X1_GIF,
