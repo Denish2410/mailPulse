@@ -306,6 +306,20 @@ export const deleteMyAccount = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Sign out everywhere: invalidates every access token issued so far (including this one).
+ *
+ * Route: POST /api/v1/auth/logout-all
+ */
+export const logoutAll = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+  await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+  res.status(200).json({ success: true, message: 'Signed out of all devices.' });
+});
+
 export default {
   register,
   login,
@@ -374,6 +388,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
     },
     {
       $set: { passwordHash },
+      // Revoke every session that was signed in with the old password
+      $inc: { tokenVersion: 1 },
       // Resetting the password also lifts any login lockout (the owner proved mailbox access)
       $unset: {
         passwordResetTokenHash: '',
