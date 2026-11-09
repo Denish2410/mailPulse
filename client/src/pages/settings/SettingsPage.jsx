@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/layout/Navbar.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
-import { updateProfile, exportAccountData, deleteAccount, getErrorMessage } from '../../api/auth.js';
+import { updateProfile, exportAccountData, deleteAccount, logoutAllDevices, getErrorMessage } from '../../api/auth.js';
 import {
   MAX_MAILING_ADDRESS_LENGTH,
   validateProfileForm,
@@ -28,6 +28,20 @@ export const SettingsPage = () => {
   const [profileState, setProfileState] = useState({ status: 'idle', message: '' });
 
   const [exportState, setExportState] = useState({ status: 'idle', message: '' });
+
+  const [signOutState, setSignOutState] = useState({ status: 'idle', message: '' });
+
+  const handleSignOutEverywhere = async () => {
+    if (signOutState.status === 'working') return;
+    setSignOutState({ status: 'working', message: '' });
+    try {
+      await logoutAllDevices();
+      logout();
+      navigate('/login', { replace: true });
+    } catch (err) {
+      setSignOutState({ status: 'error', message: getErrorMessage(err, 'Could not sign out of all devices.') });
+    }
+  };
 
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState('');
@@ -147,6 +161,24 @@ export const SettingsPage = () => {
             </button>
             {exportState.status === 'done' && <span role="status" className="text-xs text-emerald-300">{exportState.message}</span>}
             {exportState.status === 'error' && <span role="alert" className="text-xs text-rose-300">{exportState.message}</span>}
+          </div>
+        </section>
+
+        <section className={cardClass}>
+          <h2 className="text-base font-semibold text-white">Sessions</h2>
+          <p className="text-sm text-slate-400">
+            Signed in somewhere you no longer trust? This ends every session on every device, including this one.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSignOutEverywhere}
+              disabled={signOutState.status === 'working'}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {signOutState.status === 'working' ? 'Signing out…' : 'Sign out of all devices'}
+            </button>
+            {signOutState.status === 'error' && <span role="alert" className="text-xs text-rose-300">{signOutState.message}</span>}
           </div>
         </section>
 

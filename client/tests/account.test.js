@@ -77,3 +77,19 @@ describe('Account helpers', () => {
     assert.equal(getSendCampaignErrorMessage({ response: { status: 403, data: { message } } }), message);
   });
 });
+
+describe('Sign out everywhere', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('POSTs to /auth/logout-all', async () => {
+    const { logoutAllDevices } = await import('../src/api/auth.js');
+    let captured;
+    mock.method(apiClient, 'post', async (url) => {
+      captured = url;
+      return { data: { success: true } };
+    });
+    const result = await logoutAllDevices();
+    assert.equal(captured, '/auth/logout-all');
+    assert.equal(result.success, true);
+  });
+});

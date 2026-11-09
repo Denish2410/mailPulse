@@ -149,6 +149,14 @@ export const deleteAccount = async ({ password }, config = {}) => {
   return response.data;
 };
 
+/**
+ * Invalidate every access token issued so far, on all devices (including this one).
+ */
+export const logoutAllDevices = async (config = {}) => {
+  const response = await apiClient.post('/auth/logout-all', {}, config);
+  return response.data;
+};
+
 export { getErrorMessage };
 
 export default {
@@ -162,5 +170,6 @@ export default {
   updateProfile,
   exportAccountData,
   deleteAccount,
+  logoutAllDevices,
   getErrorMessage,
 };
