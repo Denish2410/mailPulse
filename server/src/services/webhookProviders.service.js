@@ -38,7 +38,35 @@ export class WebhookError extends Error {
  * @param {object} [env=process.env]
  * @returns {{ sendgridPublicKey: string|null, mailgunSigningKey: string|null, sesTopicArns: string[] }}
  */
+/**
+ * Replay protection: a correctly signed webhook is only accepted while its signed timestamp is
+ * recent. ESPs retry failed deliveries for up to a day, so the default window is 24 hours
+ * (WEBHOOK_MAX_AGE_SECONDS, minimum 60); anything older, or more than 5 minutes in the future,
+ * is refused even though its signature is valid. Per-event idempotency still applies on top.
+ */
+export const DEFAULT_WEBHOOK_MAX_AGE_SECONDS = 24 * 60 * 60;
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+const resolveMaxAgeMs = (env) => {
+  const seconds = Number(String(env.WEBHOOK_MAX_AGE_SECONDS ?? '').trim());
+  return (Number.isInteger(seconds) && seconds >= 60 ? seconds : DEFAULT_WEBHOOK_MAX_AGE_SECONDS) * 1000;
+};
+
+/**
+ * @param {number} timestampMs - Signed timestamp, in ms since the epoch
+ * @param {{ maxAgeMs?: number }} config
+ * @param {number} [now=Date.now()]
+ * @throws {WebhookError} 401 when missing, stale or from the future
+ */
+export const assertFreshTimestamp = (timestampMs, config, now = Date.now()) => {
+  if (!Number.isFinite(timestampMs)) throw new WebhookError('Invalid webhook timestamp.', 401);
+  const maxAgeMs = config.maxAgeMs ?? DEFAULT_WEBHOOK_MAX_AGE_SECONDS * 1000;
+  if (now - timestampMs > maxAgeMs) throw new WebhookError('Webhook timestamp is too old.', 401);
+  if (timestampMs - now > FUTURE_SKEW_MS) throw new WebhookError('Webhook timestamp is in the future.', 401);
+};
+
 export const getWebhookConfig = (env = process.env) => ({
+  maxAgeMs: resolveMaxAgeMs(env),
   sendgridPublicKey: env.SENDGRID_WEBHOOK_PUBLIC_KEY?.trim() || null,
   mailgunSigningKey: env.MAILGUN_WEBHOOK_SIGNING_KEY?.trim() || null,
   sesTopicArns: (env.SES_SNS_TOPIC_ARNS || '')
@@ -124,7 +152,7 @@ const sendgridKey = (config) => {
   }
 };
 
-export const verifySendgrid = (rawBody, headers, config) => {
+export const verifySendgrid = (rawBody, headers, config, { now = Date.now() } = {}) => {
   if (!config.sendgridPublicKey) throw new WebhookError('Webhook provider is not enabled.', 404);
   const signature = header(headers, 'x-twilio-email-event-webhook-signature');
   const timestamp = header(headers, 'x-twilio-email-event-webhook-timestamp');
@@ -143,6 +171,7 @@ export const verifySendgrid = (rawBody, headers, config) => {
     valid = false;
   }
   if (!valid) throw new WebhookError('Invalid webhook signature.', 401);
+  assertFreshTimestamp(Number(timestamp) * 1000, config, now);
 };
 
 export const parseSendgrid = (rawBody) => {
@@ -180,7 +209,7 @@ export const parseSendgrid = (rawBody) => {
 // Mailgun
 // ---------------------------------------------------------------------------
 
-export const verifyMailgun = (payload, config) => {
+export const verifyMailgun = (payload, config, { now = Date.now() } = {}) => {
   if (!config.mailgunSigningKey) throw new WebhookError('Webhook provider is not enabled.', 404);
   const sig = payload?.signature;
   if (!sig || typeof sig.timestamp === 'undefined' || !sig.token || !sig.signature) {
@@ -191,6 +220,7 @@ export const verifyMailgun = (payload, config) => {
     .update(`${sig.timestamp}${sig.token}`)
     .digest('hex');
   if (!safeEqual(expected, sig.signature)) throw new WebhookError('Invalid webhook signature.', 401);
+  assertFreshTimestamp(Number(sig.timestamp) * 1000, config, now);
 };
 
 export const parseMailgun = (payload) => {
@@ -273,7 +303,7 @@ export const fetchSigningCertificate = async (url) => {
  * @param {object} config
  * @param {{ getCertificate?: (url: string) => Promise<string> }} [deps]
  */
-export const verifySns = async (message, config, { getCertificate = fetchSigningCertificate } = {}) => {
+export const verifySns = async (message, config, { getCertificate = fetchSigningCertificate, now = Date.now() } = {}) => {
   if (config.sesTopicArns.length === 0) throw new WebhookError('Webhook provider is not enabled.', 404);
   if (!message || typeof message !== 'object' || typeof message.Signature !== 'string') {
     throw new WebhookError('Missing webhook signature.', 401);
@@ -296,6 +326,7 @@ export const verifySns = async (message, config, { getCertificate = fetchSigning
     valid = false;
   }
   if (!valid) throw new WebhookError('Invalid webhook signature.', 401);
+  assertFreshTimestamp(Date.parse(message.Timestamp), config, now);
 };
 
 /**

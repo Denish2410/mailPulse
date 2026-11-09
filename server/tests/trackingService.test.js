@@ -23,6 +23,7 @@ import {
   recordOpenEvent,
   recordClickEvent,
   recordUnsubscribeEvent,
+  hashIp,
   getCampaignTrackingSummary,
 } from '../src/services/tracking.service.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
@@ -288,7 +289,10 @@ describe('Tracking Service Tests (server/src/services/tracking.service.js)', () 
       assert.ok(event._id);
       assert.equal(event.eventType, 'open');
       assert.equal(event.recipientEmail, 'open-recorder@example.com');
-      assert.equal(event.ip, '192.168.1.1');
+      // The raw address must never be stored; only a keyed hash is
+      assert.equal(event.ip ?? null, null);
+      assert.equal(event.ipHash, hashIp('192.168.1.1'));
+      assert.notEqual(event.ipHash, '192.168.1.1');
     });
 
     it('records click event and returns safe target URL', async () => {

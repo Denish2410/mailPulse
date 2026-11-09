@@ -190,7 +190,7 @@ describe('Contact CRUD APIs (/api/v1/contacts)', () => {
       assert.equal(data.success, false);
       // The authenticate middleware passes req.auth.userId = 'not-a-valid-mongo-object-id'
       // The contact controller's guard checks !mongoose.isValidObjectId(userId) and throws 401
-      assert.equal(data.message, 'Authentication required. Invalid user identity.');
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
       assert.equal(data.data, undefined);
     });
   });

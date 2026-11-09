@@ -1,5 +1,8 @@
 # {$DOMAIN} comes from docker-compose.prod.yml. Caddy obtains and renews the certificate.
 {$DOMAIN} {
 	encode gzip
+
+	# Browsers must use HTTPS for this host from now on (Caddy terminates TLS here)
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy client:80
 }

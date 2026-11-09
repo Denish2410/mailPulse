@@ -33,7 +33,7 @@ const OWNED_COLLECTIONS = [
 
 /** Tracking events carry no userId: they belong to the owner through their campaigns. */
 const campaignIdsOf = (userId) => Campaign.distinct('_id', { userId });
-const TRACKING_EXPORT_OMIT = { ip: 0, userAgent: 0 };
+const TRACKING_EXPORT_OMIT = { ip: 0, ipHash: 0, userAgent: 0 };
 
 /**
  * Builds the full export for a user.

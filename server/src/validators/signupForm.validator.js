@@ -22,7 +22,7 @@ const tagList = z
   });
 
 const nameField = z
-  .string({ required_error: 'Form name is required' })
+  .string({ error: 'Form name is required' })
   .trim()
   .min(2, 'Form name must be at least 2 characters long')
   .max(120, 'Form name cannot exceed 120 characters');
@@ -31,7 +31,7 @@ const descriptionField = z.string().trim().max(300, 'Description cannot exceed 3
 const idParams = z
   .object({
     id: z
-      .string({ required_error: 'Form ID is required' })
+      .string({ error: 'Form ID is required' })
       .refine((val) => mongoose.isValidObjectId(val), { message: 'Invalid form ID format' }),
   })
   .strict();

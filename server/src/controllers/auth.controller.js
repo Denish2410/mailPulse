@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword } from '../services/password.service.js';
 import { signAccessToken } from '../utils/token.js';
 import { getAuthConfig } from '../config/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { isLoginLocked, recordLoginFailure, clearLoginFailures } from '../services/loginThrottle.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { getDefaultEmailService } from '../services/email.service.js';
 import Campaign from '../models/Campaign.js';
@@ -132,7 +133,7 @@ export const login = asyncHandler(async (req, res) => {
   const normalizedEmail = email.trim().toLowerCase();
 
   // 1. Query user by normalized email, explicitly requesting the passwordHash field
-  const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
+  const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash +lockedUntil +loginFailureCount');
 
   // 2. Mitigate email enumeration timing attacks if account does not exist
   if (!user) {
@@ -140,10 +141,21 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError('Invalid email or password.', 401);
   }
 
+  // 2b. A locked account answers exactly like a wrong password (no account-state disclosure);
+  //     the hash is still computed so the response time matches
+  if (isLoginLocked(user)) {
+    await verifyPassword(password, DUMMY_ARGON2_HASH);
+    throw new AppError('Invalid email or password.', 401);
+  }
+
   // 3. Verify submitted password against stored Argon2id hash
   const isMatch = await verifyPassword(password, user.passwordHash);
   if (!isMatch) {
+    await recordLoginFailure(user._id);
     throw new AppError('Invalid email or password.', 401);
+  }
+  if (user.loginFailureCount || user.lockedUntil) {
+    await clearLoginFailures(user._id);
   }
 
   // 4. Validate account status (must be active)
@@ -294,6 +306,20 @@ export const deleteMyAccount = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Sign out everywhere: invalidates every access token issued so far (including this one).
+ *
+ * Route: POST /api/v1/auth/logout-all
+ */
+export const logoutAll = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('User account not found.', 401);
+  }
+  await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+  res.status(200).json({ success: true, message: 'Signed out of all devices.' });
+});
+
 export default {
   register,
   login,
@@ -313,14 +339,18 @@ const FORGOT_PASSWORD_MESSAGE =
 export const forgotPassword = asyncHandler(async (req, res) => {
   const email = req.body.email.trim().toLowerCase();
   const user = await User.findOne({ email });
+  const eligible = Boolean(user && user.status !== 'suspended');
 
-  if (user && user.status !== 'suspended') {
-    const { token, tokenHash, expiresAt } = createResetToken();
-    await User.updateOne(
-      { _id: user._id },
-      { $set: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt } }
-    );
+  // Do the same work whether or not the account exists: generate a token and run one update.
+  // For an unknown (or suspended) address the update targets a random id and matches nothing, so
+  // response time does not reveal which emails are registered.
+  const { token, tokenHash, expiresAt } = createResetToken();
+  await User.updateOne(
+    { _id: eligible ? user._id : new mongoose.Types.ObjectId() },
+    { $set: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt } }
+  );
 
+  if (eligible) {
     const link = buildResetLink(token);
     const emailService = req.app?.locals?.emailService || getDefaultEmailService();
     emailService
@@ -358,7 +388,16 @@ export const resetPassword = asyncHandler(async (req, res) => {
     },
     {
       $set: { passwordHash },
-      $unset: { passwordResetTokenHash: '', passwordResetExpiresAt: '' },
+      // Revoke every session that was signed in with the old password
+      $inc: { tokenVersion: 1 },
+      // Resetting the password also lifts any login lockout (the owner proved mailbox access)
+      $unset: {
+        passwordResetTokenHash: '',
+        passwordResetExpiresAt: '',
+        loginFailureCount: '',
+        loginFailureAt: '',
+        lockedUntil: '',
+      },
     },
     { new: true }
   );

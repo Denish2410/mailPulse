@@ -28,13 +28,17 @@ const rejects = async (fn, status) => {
   );
 };
 
+// Fixtures are signed with fixed timestamps, so verification is run at that same instant
+const FIXTURE_NOW = 1700000000 * 1000;
+const SNS_FIXTURE_NOW = Date.parse('2026-11-06T10:00:00.000Z');
+
 describe('Webhook config and tagging', () => {
   it('reads config and enables only configured providers', () => {
     const config = getWebhookConfig({
       SENDGRID_WEBHOOK_PUBLIC_KEY: ' key ',
       SES_SNS_TOPIC_ARNS: 'arn:a, arn:b ,',
     });
-    assert.deepEqual(config, { sendgridPublicKey: 'key', mailgunSigningKey: null, sesTopicArns: ['arn:a', 'arn:b'] });
+    assert.deepEqual(config, { maxAgeMs: 24 * 60 * 60 * 1000, sendgridPublicKey: 'key', mailgunSigningKey: null, sesTopicArns: ['arn:a', 'arn:b'] });
     assert.equal(isProviderEnabled('sendgrid', config), true);
     assert.equal(isProviderEnabled('mailgun', config), false);
     assert.equal(isProviderEnabled('ses', config), true);
@@ -65,10 +69,10 @@ describe('SendGrid', () => {
       'x-twilio-email-event-webhook-timestamp': '1700000000',
       'x-twilio-email-event-webhook-signature': sign('1700000000', body),
     };
-    assert.doesNotThrow(() => verifySendgrid(body, headers, config));
-    await rejects(() => verifySendgrid(Buffer.from('[]'), headers, config), 401);
-    await rejects(() => verifySendgrid(body, { ...headers, 'x-twilio-email-event-webhook-timestamp': '1' }, config), 401);
-    await rejects(() => verifySendgrid(body, {}, config), 401);
+    assert.doesNotThrow(() => verifySendgrid(body, headers, config, { now: FIXTURE_NOW }));
+    await rejects(() => verifySendgrid(Buffer.from('[]'), headers, config, { now: FIXTURE_NOW }), 401);
+    await rejects(() => verifySendgrid(body, { ...headers, 'x-twilio-email-event-webhook-timestamp': '1' }, config, { now: FIXTURE_NOW }), 401);
+    await rejects(() => verifySendgrid(body, {}, config, { now: FIXTURE_NOW }), 401);
     await rejects(() => verifySendgrid(body, headers, { ...config, sendgridPublicKey: null }), 404);
     await rejects(() => verifySendgrid(body, headers, { ...config, sendgridPublicKey: 'not-a-key' }), 503);
   });
@@ -118,11 +122,11 @@ describe('Mailgun', () => {
   };
 
   it('verifies the HMAC signature', async () => {
-    assert.doesNotThrow(() => verifyMailgun(signed(), config));
+    assert.doesNotThrow(() => verifyMailgun(signed(), config, { now: FIXTURE_NOW }));
     const bad = signed();
     bad.signature.signature = bad.signature.signature.replace(/.$/, bad.signature.signature.endsWith('0') ? '1' : '0');
-    await rejects(() => verifyMailgun(bad, config), 401);
-    await rejects(() => verifyMailgun({}, config), 401);
+    await rejects(() => verifyMailgun(bad, config, { now: FIXTURE_NOW }), 401);
+    await rejects(() => verifyMailgun({}, config, { now: FIXTURE_NOW }), 401);
     await rejects(() => verifyMailgun(signed(), { ...config, mailgunSigningKey: null }), 404);
     await rejects(() => verifyMailgun(signed(), { ...config, mailgunSigningKey: 'other' }), 401);
   });
@@ -174,7 +178,7 @@ describe('Amazon SES via SNS', () => {
     message.Signature = signer.sign(privateKey, 'base64');
     return message;
   };
-  const deps = { getCertificate: async () => pem };
+  const deps = { getCertificate: async () => pem, now: SNS_FIXTURE_NOW };
 
   it('validates SNS certificate URLs', () => {
     assert.equal(isTrustedSnsUrl(CERT_URL), true);
@@ -205,11 +209,11 @@ describe('Amazon SES via SNS', () => {
     await rejects(() => verifySns(makeMessage({}, 'RSA-SHA256', '3'), config, deps), 401);
     await rejects(() => verifySns({ ...good, Signature: undefined }, config, deps), 401);
     await rejects(() => verifySns(good, { ...config, sesTopicArns: [] }, deps), 404);
-    await rejects(() => verifySns(good, config, { getCertificate: async () => { throw new Error('network'); } }), 401);
+    await rejects(() => verifySns(good, config, { getCertificate: async () => { throw new Error('network'); }, now: SNS_FIXTURE_NOW }), 401);
 
     const other = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     await rejects(
-      () => verifySns(good, config, { getCertificate: async () => other.publicKey.export({ type: 'spki', format: 'pem' }) }),
+      () => verifySns(good, config, { getCertificate: async () => other.publicKey.export({ type: 'spki', format: 'pem' }), now: SNS_FIXTURE_NOW }),
       401
     );
   });

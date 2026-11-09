@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **915 automated tests** (589 server, 326 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **974 automated tests** (641 server, 333 client), 0 failures, 0 skipped.
 
 ---
 
@@ -132,6 +132,15 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - Production hardening: `npm run smtp:check [-- --to addr]` (real SMTP smoke test); sending/scheduling requires a verified email in production (`REQUIRE_VERIFIED_EMAIL`, `utils/sendingPolicy.js`); `TRUST_PROXY` hop count so rate limits see real client IPs behind a proxy; `errorReporter.service.js` (JSON error logs, optional `ERROR_WEBHOOK_URL` alerts, crash-and-restart on fatal errors); Docker compose with MongoDB auth plus `docker-compose.prod.yml` (Caddy HTTPS).
 - Compliance & privacy: `User.mailingAddress` is printed in every campaign footer (`appendMailingAddress`) and required to send/schedule in production (`REQUIRE_MAILING_ADDRESS`); `PATCH /auth/me`, `GET /auth/me/export` (JSON of the owner's data, no secrets) and `DELETE /auth/me` (password-confirmed, 409 while campaigns are sending/scheduled, removes only the caller's data; tracking events are reached through the owner's campaigns as they have no `userId`); client page `/settings`. No terms/privacy pages are included: those need your own legal text.
 - UI theme (light blue): the client theme lives in `client/src/index.css`. The Tailwind `slate` scale is deliberately REASSIGNED, so existing class names render a light theme: `bg-slate-950` = page/input background, `bg-slate-900` = card surface, `border-slate-800` = soft border, `text-slate-400/300` = secondary/body text, `text-slate-100/50` = headings (dark navy). `indigo` is the brand blue, and the rose/emerald/amber/purple 100-400 text shades are darkened for pale alert backgrounds. Use `text-white` only on solid coloured buttons/tiles. New components should follow the same class conventions rather than introducing raw hex colours (Recharts colours in `AnalyticsPage.jsx` are the exception). Sign-in and password pages use `components/layout/AuthLayout.jsx`.
+- Security hardening pass (after an internal audit; see `server/.env.example` for settings):
+  - Requests: lists above 5,000 items or nesting deeper than 12 are refused before schema validation (`validators/requestLimits.js`); Zod is 4.x (3.x had a memory-exhaustion advisory) and custom messages use the `error` option, not `required_error`/`invalid_type_error`.
+  - Sessions: access tokens carry `tv` (the user's `tokenVersion`); protected routes use `authenticateSession` = `authenticate` (signature) + `requireLiveSession` (one DB lookup: account exists and version matches). Password reset and `POST /auth/logout-all` bump the version. A token for a deleted account is refused everywhere.
+  - Passwords: creation (register, reset) rejects repetitive passwords, simple runs (12345678), a common-password list and passwords containing the email name (`utils/passwordPolicy.js`, mirrored in `client/src/utils/passwordPolicy.js`); login is unchanged so existing weak passwords still work.
+  - Login: per-account lockout after `LOGIN_MAX_FAILURES` (5) wrong passwords in `LOGIN_LOCK_MINUTES` (15) (`loginThrottle.service.js`); a locked account answers like a wrong password; a password reset lifts it. Forgot-password does identical DB work for every address.
+  - Webhooks: signed timestamps must be within `WEBHOOK_MAX_AGE_SECONDS` (24 h) and not in the future; fixtures in tests must sign the current time.
+  - Privacy: tracking events store `ipHash` (HMAC), never the raw IP; `npm --prefix server run anonymize:tracking-ips` converts old rows. `getTrackingSecret` throws instead of using a built-in value; startup warns about a missing `TRACKING_SECRET` in production.
+  - UI: `client/nginx.conf` sends a CSP, nosniff, frame denial and no-referrer; Caddy adds HSTS. If the API is on another origin, add it to `connect-src`.
+  - Accepted risks: registering an existing email returns 409 (account enumeration, bounded by the auth rate limiter); the 5 remaining `npm audit` moderate findings are `minimatch` inside eslint/nodemon (dev tools only).
 - Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
 
 ---

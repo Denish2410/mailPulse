@@ -49,6 +49,16 @@ const trackingEventSchema = new mongoose.Schema(
       default: null,
       maxlength: [2048, 'Target URL cannot exceed 2048 characters'],
     },
+    // Keyed one-way hash of the visitor IP (see hashIp in tracking.service.js). The raw address is
+    // never stored by new events.
+    ipHash: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: [64, 'IP hash cannot exceed 64 characters'],
+    },
+    // LEGACY: raw IPs written before hashing existed. New events never set it; run
+    // `npm --prefix server run anonymize:tracking-ips` to convert and remove old values.
     ip: {
       type: String,
       default: null,

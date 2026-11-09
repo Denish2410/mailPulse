@@ -35,6 +35,8 @@ services:
       # Hops in front of the server: nginx = 1 (the prod overlay with Caddy sets 2).
       RATE_LIMIT_STORE: ${RATE_LIMIT_STORE:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
+      # Separate key for email tracking/unsubscribe tokens (set it BEFORE sending; changing it later breaks old links)
+      TRACKING_SECRET: ${TRACKING_SECRET:-}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to a random string of at least 32 characters}
       # In production the account email must be verified before sending. Set false to skip
       # (for example when SMTP is not configured yet and verification emails cannot arrive).

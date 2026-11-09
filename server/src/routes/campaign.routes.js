@@ -16,7 +16,7 @@ import {
   getCampaignDeliveries,
   getCampaignAnalytics,
 } from '../controllers/campaign.controller.js';
-import { authenticate } from '../middleware/authenticate.js';
+import { authenticateSession as authenticate } from '../middleware/authenticate.js';
 import { testEmailRateLimiter } from '../middleware/testEmailRateLimiter.js';
 import { campaignSendRateLimiter } from '../middleware/campaignSendRateLimiter.js';
 import { validate } from '../validators/validate.js';

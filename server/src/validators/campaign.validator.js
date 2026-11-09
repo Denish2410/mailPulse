@@ -26,7 +26,7 @@ export const campaignIdParamSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
@@ -39,12 +39,12 @@ export const createCampaignSchema = z.object({
   body: z
     .object({
       name: z
-        .string({ required_error: 'Campaign name is required' })
+        .string({ error: 'Campaign name is required' })
         .trim()
         .min(2, 'Campaign name must be at least 2 characters long')
         .max(120, 'Campaign name cannot exceed 120 characters'),
       subject: z
-        .string({ required_error: 'Email subject is required' })
+        .string({ error: 'Email subject is required' })
         .trim()
         .min(1, 'Email subject cannot be empty')
         .max(200, 'Email subject cannot exceed 200 characters'),
@@ -67,7 +67,7 @@ export const createCampaignSchema = z.object({
       recipientIds: z
         .array(
           z
-            .string({ invalid_type_error: 'Each recipient ID must be a valid string' })
+            .string({ error: 'Each recipient ID must be a valid string' })
             .refine(isValidObjectId, { message: 'Invalid recipient ID format' })
         )
         .max(
@@ -87,7 +87,7 @@ export const updateCampaignSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
@@ -121,7 +121,7 @@ export const updateCampaignSchema = z.object({
       recipientIds: z
         .array(
           z
-            .string({ invalid_type_error: 'Each recipient ID must be a valid string' })
+            .string({ error: 'Each recipient ID must be a valid string' })
             .refine(isValidObjectId, { message: 'Invalid recipient ID format' })
         )
         .max(
@@ -159,14 +159,14 @@ export const sendTestEmailSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
   body: z
     .object({
       to: z
-        .string({ invalid_type_error: 'Destination email must be a string' })
+        .string({ error: 'Destination email must be a string' })
         .trim()
         .min(1, 'Destination email cannot be empty')
         .max(254, 'Destination email cannot exceed 254 characters')
@@ -194,7 +194,7 @@ export const getCampaignsQuerySchema = z.object({
           }
           if (typeof val === 'number') return val;
           return NaN;
-        }, z.number({ invalid_type_error: 'Page must be a positive integer' })
+        }, z.number({ error: 'Page must be a positive integer' })
           .int('Page must be an integer')
           .min(1, 'Page must be at least 1')
         ),
@@ -208,7 +208,7 @@ export const getCampaignsQuerySchema = z.object({
           }
           if (typeof val === 'number') return val;
           return NaN;
-        }, z.number({ invalid_type_error: 'Limit must be a positive integer' })
+        }, z.number({ error: 'Limit must be a positive integer' })
           .int('Limit must be an integer')
           .min(1, 'Limit must be at least 1')
           .max(100, 'Limit cannot exceed 100')
@@ -238,7 +238,7 @@ export const sendCampaignSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
@@ -264,7 +264,7 @@ const positiveIntQuery = (fallback, label, max = Number.MAX_SAFE_INTEGER) =>
     }
     if (typeof val === 'number') return val;
     return NaN;
-  }, z.number({ invalid_type_error: `${label} must be a positive integer` })
+  }, z.number({ error: `${label} must be a positive integer` })
     .int(`${label} must be an integer`)
     .min(1, `${label} must be at least 1`)
     .max(max, `${label} cannot exceed ${max}`));
@@ -276,7 +276,7 @@ export const getCampaignDeliveriesSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
@@ -305,14 +305,14 @@ export const scheduleCampaignSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),
   body: z
     .object({
       scheduledAt: z
-        .string({ required_error: 'scheduledAt is required' })
+        .string({ error: 'scheduledAt is required' })
         .refine((val) => !isNaN(Date.parse(val)), {
           message: 'scheduledAt must be a valid date string',
         })
@@ -333,7 +333,7 @@ export const applyAudienceSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Campaign ID is required' })
+        .string({ error: 'Campaign ID is required' })
         .refine(isValidObjectId, { message: 'Invalid campaign ID format' }),
     })
     .strict(),

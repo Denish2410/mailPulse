@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { getErrorReporter } from './services/errorReporter.service.js';
+import { getSecurityWarnings } from './config/securityWarnings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -168,6 +169,9 @@ export const startServer = async (options = {}) => {
     const shouldValidateConfig = options.validateConfig ?? isMainModule();
     if (shouldValidateConfig) {
       validateAuthConfig();
+      for (const warning of getSecurityWarnings()) {
+        console.warn(`[Security] ${warning}`);
+      }
     }
 
     // 1. Await database connection before opening port

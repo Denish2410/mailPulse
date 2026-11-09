@@ -61,7 +61,7 @@ describe('ESP webhook endpoints', () => {
 
   const sendgridRequest = (events, { tamper = false } = {}) => {
     const body = JSON.stringify(events);
-    const ts = '1700000000';
+    const ts = String(Math.floor(Date.now() / 1000)); // webhooks must be fresh
     const sig = crypto.sign('sha256', Buffer.from(ts + body), sg.privateKey).toString('base64');
     return post('/api/v1/webhooks/sendgrid', tamper ? body.replace('bounce', 'bounse') : body, {
       'X-Twilio-Email-Event-Webhook-Timestamp': ts,
@@ -69,13 +69,13 @@ describe('ESP webhook endpoints', () => {
     });
   };
 
-  const mailgunBody = (data, secret = 'mg-secret') => ({
+  const mailgunBody = (data, secret = 'mg-secret', nowSeconds = Math.floor(Date.now() / 1000)) => ({
     signature: {
-      timestamp: '1700000000',
+      timestamp: String(nowSeconds),
       token: 'tok',
-      signature: crypto.createHmac('sha256', secret).update('1700000000tok').digest('hex'),
+      signature: crypto.createHmac('sha256', secret).update(`${nowSeconds}tok`).digest('hex'),
     },
-    'event-data': { id: `mg-${prefix}-${Math.random()}`, timestamp: 1700000000, recipient: alice.email, ...data },
+    'event-data': { id: `mg-${prefix}-${Math.random()}`, timestamp: nowSeconds, recipient: alice.email, ...data },
   });
 
   const snsMessage = (type, extra = {}) => {
@@ -83,7 +83,7 @@ describe('ESP webhook endpoints', () => {
       Type: type,
       MessageId: `sns-${Math.random()}`,
       TopicArn: TOPIC,
-      Timestamp: '2026-11-06T10:00:00.000Z',
+      Timestamp: new Date().toISOString(),
       SignatureVersion: '2',
       SigningCertURL: CERT_URL,
       Message: '{}',
@@ -199,6 +199,17 @@ describe('ESP webhook endpoints', () => {
     assert.equal((await Suppression.findOne({ userId: owner._id }).lean()).source, 'complaint');
     assert.equal((await Contact.findById(alice._id).lean()).isUnsubscribed, true);
     await Contact.updateOne({ _id: alice._id }, { $set: { isUnsubscribed: false } });
+  });
+
+  it('replay: a validly signed but day-old or future-dated event is refused and changes nothing', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const data = { event: 'complained', 'user-variables': { [DELIVERY_TAG]: String(delivery._id) } };
+    const before = await Suppression.countDocuments({ userId: owner._id });
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const dayAndAMinuteAgo = nowSeconds - 24 * 3600 - 60;
+    assert.equal((await post('/api/v1/webhooks/mailgun', mailgunBody(data, 'mg-secret', dayAndAMinuteAgo))).status, 401);
+    assert.equal((await post('/api/v1/webhooks/mailgun', mailgunBody(data, 'mg-secret', nowSeconds + 3600))).status, 401);
+    assert.equal(await Suppression.countDocuments({ userId: owner._id }), before);
   });
 
   it('SES: verifies SNS, confirms subscriptions and processes notifications', async (t) => {

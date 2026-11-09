@@ -1,3 +1,4 @@
+import { getPasswordWeakness } from './passwordPolicy.js';
 /**
  * Frontend Validation Utilities
  *
@@ -48,7 +49,7 @@ export const validateEmail = (email) => {
  * @param {string} password
  * @returns {string|null} Error message or null if valid
  */
-export const validatePassword = (password) => {
+export const validatePassword = (password, { email } = {}) => {
   if (!password || typeof password !== 'string') {
     return 'Password is required.';
   }
@@ -58,7 +59,8 @@ export const validatePassword = (password) => {
   if (password.length > 128) {
     return 'Password cannot exceed 128 characters.';
   }
-  return null;
+  // Strength rules mirror the server (repetitive, simple runs, common, contains the email name)
+  return getPasswordWeakness(password, { email });
 };
 
 /**
@@ -92,7 +94,7 @@ export const validateRegisterForm = ({ name, email, password, confirmPassword })
   const emailError = validateEmail(email);
   if (emailError) errors.email = emailError;
 
-  const passwordError = validatePassword(password);
+  const passwordError = validatePassword(password, { email });
   if (passwordError) errors.password = passwordError;
 
   const confirmError = validateConfirmPassword(password, confirmPassword);

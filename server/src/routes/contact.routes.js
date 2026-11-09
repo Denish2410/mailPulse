@@ -8,7 +8,7 @@ import {
   importContacts,
   exportContacts,
 } from '../controllers/contact.controller.js';
-import { authenticate } from '../middleware/authenticate.js';
+import { authenticateSession as authenticate } from '../middleware/authenticate.js';
 import { validate } from '../validators/validate.js';
 import {
   createContactSchema,

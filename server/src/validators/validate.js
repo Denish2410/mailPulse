@@ -1,3 +1,4 @@
+import { assertWithinRequestLimits } from './requestLimits.js';
 import { ZodError } from 'zod';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -59,6 +60,9 @@ export const validate = (schema) => {
       if (!isRequestWrapper) {
         toValidate = req.body;
       }
+
+      // 1b. Refuse absurdly long lists / deep nesting before Zod allocates anything for them
+      assertWithinRequestLimits(req.body, req.query, req.params);
 
       // 2. Parse and validate the request data asynchronously
       const parsed = await schema.parseAsync(toValidate);

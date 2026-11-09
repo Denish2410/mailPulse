@@ -238,7 +238,7 @@ describe('Campaign CRUD APIs (/api/v1/campaigns)', () => {
       assert.equal(res.status, 401);
       const data = await res.json();
       assert.equal(data.success, false);
-      assert.equal(data.message, 'Authentication required. Invalid user identity.');
+      assert.equal(data.message, 'Authentication required. Invalid or missing authorization token.');
     });
   });
 

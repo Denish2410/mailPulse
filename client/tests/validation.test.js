@@ -86,8 +86,8 @@ describe('Frontend Validation Utilities', () => {
 
     it('11. Accepts valid passwords between 8 and 128 characters', () => {
       assert.equal(validatePassword('ValidPass123!'), null);
-      assert.equal(validatePassword('12345678'), null);
-      assert.equal(validatePassword('P'.repeat(128)), null);
+      assert.equal(validatePassword('Zq7!mP2#'), null); // exactly 8
+      assert.equal(validatePassword('Zq7!mP2#'.repeat(16)), null); // exactly 128, varied characters
     });
   });
 
@@ -181,5 +181,22 @@ describe('Frontend Validation Utilities', () => {
       assert.ok(result.errors.email);
       assert.ok(result.errors.password);
     });
+  });
+});
+
+describe('Password strength (mirrors the server policy)', () => {
+  it('rejects repetitive, simple-run, common and email-derived passwords', async () => {
+    const { validatePassword } = await import('../src/utils/validation.js');
+    assert.match(validatePassword('aaaaaaaa'), /repetitive/);
+    assert.match(validatePassword('12345678'), /simple/);
+    assert.match(validatePassword('Password123'), /common/);
+    assert.match(validatePassword('jonathan-2026-x', { email: 'jonathan@example.com' }), /email name/);
+  });
+
+  it('keeps accepting good passwords and the existing length rules', async () => {
+    const { validatePassword } = await import('../src/utils/validation.js');
+    assert.equal(validatePassword('CorrectHorse-Battery9!'), null);
+    assert.equal(validatePassword('short'), 'Password must be at least 8 characters long.');
+    assert.equal(validatePassword(''), 'Password is required.');
   });
 });

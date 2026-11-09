@@ -26,7 +26,7 @@ const customFieldsField = z.record(z.string(), z.any()).transform((value, ctx) =
 
 // Tags are normalized (trimmed, lowercased, de-duplicated); invalid tags are rejected, not dropped
 const tagsField = z
-  .array(z.string(), { invalid_type_error: 'Tags must be an array of strings' })
+  .array(z.string(), { error: 'Tags must be an array of strings' })
   .max(MAX_TAGS_PER_CONTACT, `A contact cannot have more than ${MAX_TAGS_PER_CONTACT} tags`)
   .transform((values, ctx) => {
     const result = [];
@@ -54,7 +54,7 @@ export const contactIdParamSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Contact ID is required' })
+        .string({ error: 'Contact ID is required' })
         .refine(isValidObjectId, { message: 'Invalid contact ID format' }),
     })
     .strict(),
@@ -67,12 +67,12 @@ export const createContactSchema = z.object({
   body: z
     .object({
       name: z
-        .string({ required_error: 'Contact name is required' })
+        .string({ error: 'Contact name is required' })
         .trim()
         .min(2, 'Contact name must be at least 2 characters long')
         .max(100, 'Contact name cannot exceed 100 characters'),
       email: z
-        .string({ required_error: 'Contact email is required' })
+        .string({ error: 'Contact email is required' })
         .trim()
         .toLowerCase()
         .max(254, 'Contact email cannot exceed 254 characters')
@@ -90,7 +90,7 @@ export const updateContactSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Contact ID is required' })
+        .string({ error: 'Contact ID is required' })
         .refine(isValidObjectId, { message: 'Invalid contact ID format' }),
     })
     .strict(),
@@ -139,7 +139,7 @@ export const getContactsSchema = z.object({
           }
           if (typeof val === 'number') return val;
           return NaN;
-        }, z.number({ invalid_type_error: 'Page must be a positive integer' })
+        }, z.number({ error: 'Page must be a positive integer' })
             .int('Page must be a positive integer')
             .min(1, 'Page must be a positive integer'))
         .default(1),
@@ -153,7 +153,7 @@ export const getContactsSchema = z.object({
           }
           if (typeof val === 'number') return val;
           return NaN;
-        }, z.number({ invalid_type_error: 'Limit must be a positive integer' })
+        }, z.number({ error: 'Limit must be a positive integer' })
             .int('Limit must be a positive integer')
             .min(1, 'Limit must be a positive integer')
             .max(100, 'Limit cannot exceed 100'))
@@ -166,7 +166,7 @@ export const getContactsSchema = z.object({
             return str.length > 0 ? str : undefined;
           }
           return val;
-        }, z.string({ invalid_type_error: 'Search must be a string' })
+        }, z.string({ error: 'Search must be a string' })
             .max(100, 'Search term cannot exceed 100 characters')
             .optional()),
       emailDomain: z
@@ -176,7 +176,7 @@ export const getContactsSchema = z.object({
             return val.trim().toLowerCase();
           }
           return val;
-        }, z.string({ invalid_type_error: 'Email domain must be a string' })
+        }, z.string({ error: 'Email domain must be a string' })
             .regex(
               /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/,
               'Invalid email domain format'
@@ -184,7 +184,7 @@ export const getContactsSchema = z.object({
             .optional()),
       tag: z
         .preprocess((val) => (typeof val === 'string' ? normalizeTag(val) ?? '__invalid__' : val),
-          z.string({ invalid_type_error: 'Tag must be a string' }).optional())
+          z.string({ error: 'Tag must be a string' }).optional())
         .refine((val) => val !== '__invalid__', { message: 'Invalid tag' }),
     })
     .strict(),
@@ -198,7 +198,7 @@ export const importContactsSchema = z.object({
   body: z
     .object({
       csv: z
-        .string({ required_error: 'CSV content is required' })
+        .string({ error: 'CSV content is required' })
         .min(1, 'CSV content is required')
         .max(900000, 'CSV content is too large'),
     })
@@ -213,7 +213,7 @@ export const exportContactsSchema = z.object({
     .object({
       tag: z
         .preprocess((val) => (typeof val === 'string' ? normalizeTag(val) ?? '__invalid__' : val),
-          z.string({ invalid_type_error: 'Tag must be a string' }).optional())
+          z.string({ error: 'Tag must be a string' }).optional())
         .refine((val) => val !== '__invalid__', { message: 'Invalid tag' }),
     })
     .strict(),
