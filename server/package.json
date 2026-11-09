@@ -7,6 +7,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "smtp:check": "node scripts/smtp-check.js",
+    "anonymize:tracking-ips": "node scripts/anonymize-tracking-ips.js",
     "test": "node --test tests/**/*.test.js"
   },
   "dependencies": {
