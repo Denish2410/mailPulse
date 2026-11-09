@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword } from '../services/password.service.js';
 import { signAccessToken } from '../utils/token.js';
 import { getAuthConfig } from '../config/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { isLoginLocked, recordLoginFailure, clearLoginFailures } from '../services/loginThrottle.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { getDefaultEmailService } from '../services/email.service.js';
 import Campaign from '../models/Campaign.js';
@@ -132,7 +133,7 @@ export const login = asyncHandler(async (req, res) => {
   const normalizedEmail = email.trim().toLowerCase();
 
   // 1. Query user by normalized email, explicitly requesting the passwordHash field
-  const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
+  const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash +lockedUntil +loginFailureCount');
 
   // 2. Mitigate email enumeration timing attacks if account does not exist
   if (!user) {
@@ -140,10 +141,21 @@ export const login = asyncHandler(async (req, res) => {
     throw new AppError('Invalid email or password.', 401);
   }
 
+  // 2b. A locked account answers exactly like a wrong password (no account-state disclosure);
+  //     the hash is still computed so the response time matches
+  if (isLoginLocked(user)) {
+    await verifyPassword(password, DUMMY_ARGON2_HASH);
+    throw new AppError('Invalid email or password.', 401);
+  }
+
   // 3. Verify submitted password against stored Argon2id hash
   const isMatch = await verifyPassword(password, user.passwordHash);
   if (!isMatch) {
+    await recordLoginFailure(user._id);
     throw new AppError('Invalid email or password.', 401);
+  }
+  if (user.loginFailureCount || user.lockedUntil) {
+    await clearLoginFailures(user._id);
   }
 
   // 4. Validate account status (must be active)
@@ -358,7 +370,14 @@ export const resetPassword = asyncHandler(async (req, res) => {
     },
     {
       $set: { passwordHash },
-      $unset: { passwordResetTokenHash: '', passwordResetExpiresAt: '' },
+      // Resetting the password also lifts any login lockout (the owner proved mailbox access)
+      $unset: {
+        passwordResetTokenHash: '',
+        passwordResetExpiresAt: '',
+        loginFailureCount: '',
+        loginFailureAt: '',
+        lockedUntil: '',
+      },
     },
     { new: true }
   );

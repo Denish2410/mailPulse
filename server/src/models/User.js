@@ -39,6 +39,10 @@ const userSchema = new mongoose.Schema(
       default: '',
       maxlength: [300, 'Mailing address cannot exceed 300 characters'],
     },
+    // Login throttling (see loginThrottle.service.js)
+    loginFailureCount: { type: Number, default: undefined, select: false },
+    loginFailureAt: { type: Date, default: undefined, select: false },
+    lockedUntil: { type: Date, default: undefined, select: false },
     // Email verification (only the SHA-256 hash of the emailed token is stored)
     emailVerifiedAt: {
       type: Date,
