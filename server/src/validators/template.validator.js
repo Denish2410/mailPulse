@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 const isValidObjectId = (val) => mongoose.isValidObjectId(val);
 
 const nameField = z
-  .string({ required_error: 'Template name is required' })
+  .string({ error: 'Template name is required' })
   .trim()
   .min(2, 'Template name must be at least 2 characters long')
   .max(120, 'Template name cannot exceed 120 characters');
@@ -16,7 +16,7 @@ export const templateIdParamSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Template ID is required' })
+        .string({ error: 'Template ID is required' })
         .refine(isValidObjectId, { message: 'Invalid template ID format' }),
     })
     .strict(),

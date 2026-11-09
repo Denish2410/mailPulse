@@ -7,7 +7,7 @@ export const suppressionIdParamSchema = z.object({
   params: z
     .object({
       id: z
-        .string({ required_error: 'Suppression ID is required' })
+        .string({ error: 'Suppression ID is required' })
         .refine((val) => mongoose.isValidObjectId(val), { message: 'Invalid suppression ID format' }),
     })
     .strict(),
@@ -17,7 +17,7 @@ export const createSuppressionSchema = z.object({
   body: z
     .object({
       email: z
-        .string({ required_error: 'Email is required' })
+        .string({ error: 'Email is required' })
         .trim()
         .toLowerCase()
         .max(254, 'Email cannot exceed 254 characters')

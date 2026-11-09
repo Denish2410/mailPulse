@@ -46,7 +46,7 @@ export const criteriaSchema = z
   });
 
 const nameField = z
-  .string({ required_error: 'Segment name is required' })
+  .string({ error: 'Segment name is required' })
   .trim()
   .min(2, 'Segment name must be at least 2 characters long')
   .max(120, 'Segment name cannot exceed 120 characters');
@@ -55,7 +55,7 @@ const descriptionField = z.string().trim().max(500, 'Description cannot exceed 5
 const idParams = z
   .object({
     id: z
-      .string({ required_error: 'Segment ID is required' })
+      .string({ error: 'Segment ID is required' })
       .refine(isValidObjectId, { message: 'Invalid segment ID format' }),
   })
   .strict();

@@ -14,17 +14,17 @@ import { z } from 'zod';
 export const registerSchema = z.object({
   body: z.object({
     name: z
-      .string({ required_error: 'Name is required' })
+      .string({ error: 'Name is required' })
       .trim()
       .min(2, 'Name must be at least 2 characters long')
       .max(100, 'Name cannot exceed 100 characters'),
     email: z
-      .string({ required_error: 'Email is required' })
+      .string({ error: 'Email is required' })
       .trim()
       .toLowerCase()
       .email('Please provide a valid email address'),
     password: z
-      .string({ required_error: 'Password is required' })
+      .string({ error: 'Password is required' })
       .min(8, 'Password must be at least 8 characters long')
       .max(128, 'Password cannot exceed 128 characters'),
   }),
@@ -33,12 +33,12 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   body: z.object({
     email: z
-      .string({ required_error: 'Email is required' })
+      .string({ error: 'Email is required' })
       .trim()
       .toLowerCase()
       .email('Please provide a valid email address'),
     password: z
-      .string({ required_error: 'Password is required' })
+      .string({ error: 'Password is required' })
       .min(1, 'Password is required')
       .max(128, 'Password cannot exceed 128 characters'),
   }),
@@ -48,7 +48,7 @@ export const forgotPasswordSchema = z.object({
   body: z
     .object({
       email: z
-        .string({ required_error: 'Email is required' })
+        .string({ error: 'Email is required' })
         .trim()
         .toLowerCase()
         .email('Please provide a valid email address'),
@@ -60,10 +60,10 @@ export const resetPasswordSchema = z.object({
   body: z
     .object({
       token: z
-        .string({ required_error: 'Reset token is required' })
+        .string({ error: 'Reset token is required' })
         .regex(/^[a-f0-9]{64}$/, 'Invalid or expired reset link.'),
       password: z
-        .string({ required_error: 'Password is required' })
+        .string({ error: 'Password is required' })
         .min(8, 'Password must be at least 8 characters long')
         .max(128, 'Password cannot exceed 128 characters'),
     })
@@ -74,7 +74,7 @@ export const verifyEmailSchema = z.object({
   body: z
     .object({
       token: z
-        .string({ required_error: 'Verification token is required' })
+        .string({ error: 'Verification token is required' })
         .regex(/^[a-f0-9]{64}$/, 'Invalid or expired verification link.'),
     })
     .strict(),
@@ -104,7 +104,7 @@ export const updateProfileSchema = z.object({
 export const deleteAccountSchema = z.object({
   body: z
     .object({
-      password: z.string({ required_error: 'Password is required' }).min(1, 'Password is required').max(128),
+      password: z.string({ error: 'Password is required' }).min(1, 'Password is required').max(128),
     })
     .strict(),
 });

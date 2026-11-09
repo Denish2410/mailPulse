@@ -11,7 +11,7 @@ export const publicSubscribeSchema = z.object({
   body: z
     .object({
       email: z
-        .string({ required_error: 'Email is required' })
+        .string({ error: 'Email is required' })
         .trim()
         .toLowerCase()
         .max(254, 'Email cannot exceed 254 characters')
@@ -26,7 +26,7 @@ export const publicSubscribeSchema = z.object({
 export const confirmSubscriptionSchema = z.object({
   body: z
     .object({
-      token: z.string({ required_error: 'Token is required' }).regex(/^[a-f0-9]{64}$/, 'Invalid or expired confirmation link.'),
+      token: z.string({ error: 'Token is required' }).regex(/^[a-f0-9]{64}$/, 'Invalid or expired confirmation link.'),
     })
     .strict(),
 });
