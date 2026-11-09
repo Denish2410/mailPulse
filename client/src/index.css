@@ -1,13 +1,137 @@
 @import "tailwindcss";
 
+/*
+ * MailPulse light-blue theme.
+ *
+ * The components were written against a dark palette, using the `slate` scale for surfaces and
+ * text (950 = page background ... 50 = brightest text). Instead of rewriting thousands of class
+ * names, the SCALES BELOW ARE REASSIGNED so the same class names render a light theme:
+ *
+ *   slate-950  page / input background  (very pale blue)
+ *   slate-900  cards and panels         (white)
+ *   slate-800  borders, subtle fills    (light blue-grey)
+ *   slate-700  hover fills, strong borders
+ *   slate-500  placeholders, muted icons
+ *   slate-400  secondary text
+ *   slate-300  body text
+ *   slate-200/100/50  headings and primary text (deep navy)
+ *
+ * So `bg-slate-900` means "card surface" and `text-slate-100` means "primary text" everywhere.
+ * `indigo` is the brand blue. The tinted-alert text shades (rose/emerald/amber/purple/sky 100-400)
+ * are darkened so they stay readable on their pale tinted backgrounds.
+ */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+
+  /* Surfaces and text */
+  --color-slate-950: #f3f8ff;
+  --color-slate-900: #ffffff;
+  --color-slate-850: #e9f1fc;
+  --color-slate-800: #e1ebfa;
+  --color-slate-700: #c9dbf4;
+  --color-slate-600: #a9c1e6;
+  --color-slate-500: #7a92b8;
+  --color-slate-400: #566f96;
+  --color-slate-300: #3b5378;
+  --color-slate-200: #263e66;
+  --color-slate-100: #14284b;
+  --color-slate-50: #0b1a38;
+
+  /* Brand blue (replaces indigo) */
+  --color-indigo-950: #eaf3ff;
+  --color-indigo-500: #3b82f6;
+  --color-indigo-600: #2563eb;
+  --color-indigo-700: #1d4ed8;
+  --color-indigo-400: #1d6fe0;
+  --color-indigo-300: #1d4ed8;
+  --color-indigo-200: #1e40af;
+  --color-indigo-100: #1e3a8a;
+
+  /* Accent used for the second end of gradients */
+  --color-violet-500: #0ea5e9;
+  --color-cyan-400: #0e7490;
+  --color-cyan-500: #06b6d4;
+
+  /* Alert and status text on pale tinted backgrounds */
+  --color-rose-100: #9f1239;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #d11f45;
+  --color-emerald-100: #065f46;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-amber-200: #78350f;
+  --color-amber-300: #92400e;
+  --color-amber-400: #b45309;
+  --color-purple-100: #5b21b6;
+  --color-purple-200: #5b21b6;
+  --color-purple-300: #6d28d9;
+  --color-purple-400: #7c3aed;
+  --color-sky-300: #0369a1;
+}
+
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  color-scheme: light dark;
+  color-scheme: light;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: #0b0f19;
-  color: #f3f4f6;
+  color: var(--color-slate-100);
+  background-color: #f3f8ff;
+  /* Soft blue glow in the top corners keeps large pages from feeling flat */
+  background-image:
+    radial-gradient(900px 420px at 12% -8%, rgba(59, 130, 246, 0.16), transparent 70%),
+    radial-gradient(760px 380px at 92% -4%, rgba(14, 165, 233, 0.14), transparent 70%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Cards and panels get a gentle blue-tinted shadow instead of relying on dark contrast */
+.bg-slate-900\/60,
+.bg-slate-900\/50,
+.bg-slate-900\/70,
+.bg-slate-900\/80,
+.bg-slate-900 {
+  box-shadow: 0 1px 2px rgba(30, 64, 175, 0.05), 0 6px 20px -8px rgba(30, 64, 175, 0.12);
+}
+
+/* Native controls follow the light theme */
+input,
+select,
+textarea {
+  color-scheme: light;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+/* Thin, light scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #b6cbec transparent;
+}
+
+/* Primary buttons: a subtle blue gradient and a lift on hover */
+.bg-indigo-600 {
+  background-image: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  transition: filter 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+.bg-indigo-600:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+button.bg-indigo-600:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Cards that act as links or rows lift slightly on hover */
+tbody tr {
+  transition: background-color 120ms ease;
+}
+tbody tr:hover {
+  background-color: rgba(59, 130, 246, 0.05);
 }
