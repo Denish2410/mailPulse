@@ -62,7 +62,7 @@ export const SubscribePage = () => {
           )}
           {status === 'sent' && (
             <div role="status" className="space-y-2 text-sm">
-              <h1 className="text-xl font-bold text-white">Check your inbox</h1>
+              <h1 className="text-xl font-bold text-slate-50">Check your inbox</h1>
               <p className="text-emerald-300">
                 Almost done! We sent a message asking you to confirm your subscription. Nothing is subscribed until you click the link in it.
               </p>
@@ -71,18 +71,18 @@ export const SubscribePage = () => {
           {status === 'ready' && form && (
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div>
-                <h1 className="text-xl font-bold text-white">{form.name}</h1>
+                <h1 className="text-xl font-bold text-slate-50">{form.name}</h1>
                 {form.description && <p className="mt-1 text-sm text-slate-400">{form.description}</p>}
               </div>
               {serverError && <p className="text-xs text-rose-300" role="alert">{serverError}</p>}
               <div>
                 <label htmlFor="subscribe-name" className="block text-sm font-medium text-slate-300">Name (optional)</label>
-                <input id="subscribe-name" type="text" autoComplete="name" value={values.name} onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))} disabled={isSubmitting} className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <input id="subscribe-name" type="text" autoComplete="name" value={values.name} onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))} disabled={isSubmitting} className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 {errors.name && <p className="mt-1 text-xs text-rose-400" role="alert">{errors.name}</p>}
               </div>
               <div>
                 <label htmlFor="subscribe-email" className="block text-sm font-medium text-slate-300">Email address</label>
-                <input id="subscribe-email" type="email" autoComplete="email" value={values.email} onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))} disabled={isSubmitting} className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <input id="subscribe-email" type="email" autoComplete="email" value={values.email} onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))} disabled={isSubmitting} className="mt-1 block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 {errors.email && <p className="mt-1 text-xs text-rose-400" role="alert">{errors.email}</p>}
               </div>
               {/* Honeypot: hidden from people and assistive tech, bots tend to fill it */}

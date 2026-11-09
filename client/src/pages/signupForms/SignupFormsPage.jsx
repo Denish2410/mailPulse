@@ -108,7 +108,7 @@ export const SignupFormsPage = () => {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <Navbar />
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Signup forms</h1>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50 tracking-tight">Signup forms</h1>
         <p className="mt-1 mb-6 text-sm text-slate-400 max-w-2xl">
           Share a public link where people can subscribe. They must confirm by email (double opt-in) before they
           become contacts, and new contacts get the form&apos;s tags.
@@ -167,7 +167,7 @@ export const SignupFormsPage = () => {
               return (
                 <li key={form.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h2 className="font-semibold text-white">{form.name}</h2>
+                    <h2 className="font-semibold text-slate-50">{form.name}</h2>
                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${form.enabled ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-slate-800/80 text-slate-400 border-slate-700'}`}>
                       {form.enabled ? 'Live' : 'Disabled'}
                     </span>

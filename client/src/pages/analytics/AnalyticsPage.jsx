@@ -25,7 +25,7 @@ import {
 
 const card = 'bg-slate-900/60 border border-slate-800 rounded-2xl p-5';
 
-const StatCard = ({ label, value, hint, valueClass = 'text-white' }) => (
+const StatCard = ({ label, value, hint, valueClass = 'text-slate-50' }) => (
   <div className={card}>
     <div className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</div>
     <div className={`mt-2 text-2xl font-bold tabular-nums ${valueClass}`}>{value}</div>
@@ -53,7 +53,7 @@ export const AnalyticsPage = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-white">Analytics</h1>
+            <h1 className="text-2xl font-extrabold text-slate-50">Analytics</h1>
             <p className="mt-1 text-sm text-slate-400">
               Delivery performance across your campaigns. Times are grouped by UTC day.
             </p>
@@ -115,23 +115,23 @@ export const AnalyticsPage = () => {
             </div>
 
             <section className={card} aria-labelledby="trend-heading">
-              <h2 id="trend-heading" className="text-base font-semibold text-white mb-4">
+              <h2 id="trend-heading" className="text-base font-semibold text-slate-50 mb-4">
                 Daily deliveries
               </h2>
               {hasDeliveryActivity(data.daily) ? (
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-                      <CartesianGrid stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={16} />
-                      <YAxis stroke="#64748b" fontSize={11} tickLine={false} allowDecimals={false} />
+                      <CartesianGrid stroke="#dbe7f8" vertical={false} />
+                      <XAxis dataKey="label" stroke="#7a92b8" fontSize={11} tickLine={false} minTickGap={16} />
+                      <YAxis stroke="#7a92b8" fontSize={11} tickLine={false} allowDecimals={false} />
                       <Tooltip
-                        cursor={{ fill: 'rgba(99,102,241,0.08)' }}
-                        contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 12, fontSize: 12 }}
+                        cursor={{ fill: 'rgba(59,130,246,0.08)' }}
+                        contentStyle={{ background: '#ffffff', border: '1px solid #c9dbf4', borderRadius: 12, fontSize: 12, color: '#14284b', boxShadow: '0 8px 24px -8px rgba(30,64,175,0.2)' }}
                       />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="sent" name="Accepted" stackId="d" fill="#34d399" />
-                      <Bar dataKey="failed" name="Failed" stackId="d" fill="#fb7185" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="sent" name="Accepted" stackId="d" fill="#3b82f6" />
+                      <Bar dataKey="failed" name="Failed" stackId="d" fill="#f06a7d" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -145,7 +145,7 @@ export const AnalyticsPage = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <section className={`${card} lg:col-span-2`} aria-labelledby="recent-heading">
-                <h2 id="recent-heading" className="text-base font-semibold text-white mb-4">Recent campaigns</h2>
+                <h2 id="recent-heading" className="text-base font-semibold text-slate-50 mb-4">Recent campaigns</h2>
                 {data.recentCampaigns.length === 0 ? (
                   <p className="text-sm text-slate-400">No campaigns have been sent yet.</p>
                 ) : (
@@ -187,7 +187,7 @@ export const AnalyticsPage = () => {
               </section>
 
               <section className={card} aria-labelledby="failures-heading">
-                <h2 id="failures-heading" className="text-base font-semibold text-white mb-4">Failure reasons</h2>
+                <h2 id="failures-heading" className="text-base font-semibold text-slate-50 mb-4">Failure reasons</h2>
                 {failures.length === 0 ? (
                   <p className="text-sm text-slate-400">No failed deliveries.</p>
                 ) : (

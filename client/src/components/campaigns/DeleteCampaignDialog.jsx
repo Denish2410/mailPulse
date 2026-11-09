@@ -86,7 +86,7 @@ export const DeleteCampaignDialog = ({
           </div>
 
           <div className="flex-1">
-            <h2 id="delete-campaign-dialog-title" className="text-lg font-bold text-white tracking-tight">
+            <h2 id="delete-campaign-dialog-title" className="text-lg font-bold text-slate-50 tracking-tight">
               Delete Campaign
             </h2>
             <p id="delete-campaign-dialog-desc" className="text-xs text-slate-400 mt-1">
@@ -125,7 +125,7 @@ export const DeleteCampaignDialog = ({
             type="button"
             onClick={onClose}
             disabled={isDeleting}
-            className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
+            className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:text-slate-50 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
           >
             Cancel
           </button>

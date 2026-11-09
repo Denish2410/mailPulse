@@ -380,7 +380,7 @@ export const CampaignPreviewDialog = ({
             </div>
             <h2
               id="campaign-preview-title"
-              className="text-lg sm:text-xl font-bold text-white truncate"
+              className="text-lg sm:text-xl font-bold text-slate-50 truncate"
             >
               {campaign.name}
             </h2>
@@ -407,7 +407,7 @@ export const CampaignPreviewDialog = ({
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="min-w-0 flex-1">
               <span className="text-slate-400 font-medium block mb-0.5">Email Subject</span>
-              <span className="text-white font-semibold text-sm break-words">{campaign.subject}</span>
+              <span className="text-slate-50 font-semibold text-sm break-words">{campaign.subject}</span>
             </div>
 
             <div className="flex items-center gap-4 text-slate-400 shrink-0">
@@ -440,7 +440,7 @@ export const CampaignPreviewDialog = ({
                       type="datetime-local"
                       value={scheduleInput}
                       onChange={(e) => setScheduleInput(e.target.value)}
-                      className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                   </label>
                   <ScheduleTimeZone idPrefix="reschedule" value={scheduleZone} onChange={changeScheduleZone} inputValue={scheduleInput} />
@@ -546,7 +546,7 @@ export const CampaignPreviewDialog = ({
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h4 className="font-bold text-white text-sm sm:text-base">Ready for Review</h4>
+                  <h4 className="font-bold text-slate-50 text-sm sm:text-base">Ready for Review</h4>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${readinessBadge.pillClass}`}>
                     {readinessBadge.label}
                   </span>
@@ -574,7 +574,7 @@ export const CampaignPreviewDialog = ({
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-bold text-white text-sm sm:text-base">Needs Attention</h4>
+                    <h4 className="font-bold text-slate-50 text-sm sm:text-base">Needs Attention</h4>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${readinessBadge.pillClass}`}>
                       {readinessBadge.label}
                     </span>
@@ -605,7 +605,7 @@ export const CampaignPreviewDialog = ({
               <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider mb-1">
                 Eligible Contacts
               </span>
-              <span className="text-lg font-bold text-white font-mono">
+              <span className="text-lg font-bold text-slate-50 font-mono">
                 {isLoadingReadiness ? '—' : eligibleCount}
               </span>
               <span className="text-[11px] text-emerald-400 mt-0.5">Verified active</span>
@@ -633,7 +633,7 @@ export const CampaignPreviewDialog = ({
               <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider mb-1">
                 Total Selected
               </span>
-              <span className="text-lg font-bold text-white font-mono">
+              <span className="text-lg font-bold text-slate-50 font-mono">
                 {isLoadingReadiness
                   ? totalSelectedCount
                   : summary.totalRecipients || totalSelectedCount}
@@ -646,7 +646,7 @@ export const CampaignPreviewDialog = ({
               <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider mb-1">
                 Content Type
               </span>
-              <span className="text-sm font-semibold text-white truncate mt-1">
+              <span className="text-sm font-semibold text-slate-50 truncate mt-1">
                 {hasHtml && hasText
                   ? 'HTML & Plain Text'
                   : hasHtml
@@ -672,7 +672,7 @@ export const CampaignPreviewDialog = ({
                 onClick={() => setActiveTab('html')}
                 className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === 'html'
-                    ? 'border-indigo-500 text-white bg-slate-800/40 rounded-t-lg'
+                    ? 'border-indigo-500 text-slate-50 bg-slate-800/40 rounded-t-lg'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -690,7 +690,7 @@ export const CampaignPreviewDialog = ({
                 onClick={() => setActiveTab('text')}
                 className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === 'text'
-                    ? 'border-indigo-500 text-white bg-slate-800/40 rounded-t-lg'
+                    ? 'border-indigo-500 text-slate-50 bg-slate-800/40 rounded-t-lg'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -708,7 +708,7 @@ export const CampaignPreviewDialog = ({
                 onClick={() => setActiveTab('recipients')}
                 className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === 'recipients'
-                    ? 'border-indigo-500 text-white bg-slate-800/40 rounded-t-lg'
+                    ? 'border-indigo-500 text-slate-50 bg-slate-800/40 rounded-t-lg'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -818,7 +818,7 @@ export const CampaignPreviewDialog = ({
                         <tbody className="divide-y divide-slate-800/60 bg-slate-900/40 text-slate-200">
                           {readinessData.summary.eligibleRecipients.map((rec, i) => (
                             <tr key={rec.id || i} className="hover:bg-slate-800/40 transition-colors">
-                              <td className="py-2.5 px-4 font-medium text-white">{rec.name || '—'}</td>
+                              <td className="py-2.5 px-4 font-medium text-slate-50">{rec.name || '—'}</td>
                               <td className="py-2.5 px-4 text-slate-300 font-mono">{rec.email}</td>
                             </tr>
                           ))}
@@ -909,7 +909,7 @@ export const CampaignPreviewDialog = ({
                 type="datetime-local"
                 value={scheduleInput}
                 onChange={(e) => setScheduleInput(e.target.value)}
-                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </label>
             <ScheduleTimeZone idPrefix="schedule" value={scheduleZone} onChange={changeScheduleZone} inputValue={scheduleInput} />
@@ -1008,7 +1008,7 @@ export const CampaignPreviewDialog = ({
                   onClose();
                   onEdit(campaign);
                 }}
-                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 hover:text-slate-50 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
               >
                 Edit Campaign
               </button>

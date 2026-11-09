@@ -138,7 +138,7 @@ export const DeliveryStatusPanel = ({ campaignId, onStatusChange }) => {
       <div className="p-4 sm:p-5 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <h4 className="font-bold text-white text-sm sm:text-base">
+            <h4 className="font-bold text-slate-50 text-sm sm:text-base">
               {isSending ? 'Sending in progress' : 'Delivery report'}
             </h4>
             <span
@@ -211,7 +211,7 @@ export const DeliveryStatusPanel = ({ campaignId, onStatusChange }) => {
               {deliveries.map((delivery) => (
                 <tr key={delivery.id}>
                   <td className="py-2.5 px-4">
-                    <div className="font-medium text-white">{delivery.name || '—'}</div>
+                    <div className="font-medium text-slate-50">{delivery.name || '—'}</div>
                     <div className="text-slate-400 font-mono">{delivery.email}</div>
                   </td>
                   <td className="py-2.5 px-4">

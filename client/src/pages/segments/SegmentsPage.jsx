@@ -95,9 +95,9 @@ export const SegmentsPage = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <div className="inline-flex px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold tracking-wide uppercase mb-2 border border-indigo-500/20">
-              Phase 11 — Segmentation &amp; Tagging
+              Segments
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Segments</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-50 tracking-tight">Segments</h1>
             <p className="mt-1 text-sm text-slate-400 max-w-2xl">
               Save audience rules built from tags and engagement, then target campaigns with them.
             </p>
@@ -145,7 +145,7 @@ export const SegmentsPage = () => {
               return (
                 <li key={segment.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 flex flex-col gap-3">
                   <div>
-                    <h2 className="font-semibold text-white truncate">{segment.name}</h2>
+                    <h2 className="font-semibold text-slate-50 truncate">{segment.name}</h2>
                     {segment.description && <p className="text-xs text-slate-400 mt-0.5">{segment.description}</p>}
                   </div>
                   <p className="text-xs text-slate-300">{describeCriteria(segment.criteria)}</p>

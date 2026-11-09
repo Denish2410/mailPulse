@@ -1,3 +1,4 @@
+import AuthLayout from '../../components/layout/AuthLayout.jsx';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { verifyEmail } from '../../api/auth.js';
@@ -25,10 +26,10 @@ export const VerifyEmailPage = () => {
   }, [token, hasValidToken]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <AuthLayout>
       <div className="sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
         <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl text-center space-y-4">
-          <h1 className="text-xl font-bold text-white">Email verification</h1>
+          <h1 className="text-xl font-bold text-slate-50">Email verification</h1>
           {status === 'verifying' && <p className="text-sm text-slate-300" role="status">Verifying your email…</p>}
           {status === 'success' && (
             <p className="text-sm text-emerald-300" role="status">Your email address is verified. Thank you!</p>
@@ -45,7 +46,7 @@ export const VerifyEmailPage = () => {
           )}
         </div>
       </div>
-    </div>
+    </AuthLayout>
   );
 };
 

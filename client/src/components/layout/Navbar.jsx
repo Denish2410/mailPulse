@@ -21,7 +21,7 @@ export const Navbar = () => {
   };
 
   const navLinkClass = ({ isActive }) =>
-    `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+    `inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
       isActive
         ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 shadow-sm shadow-indigo-500/10'
         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
@@ -32,7 +32,7 @@ export const Navbar = () => {
       <VerifyEmailBanner />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand Logo & Main Nav */}
-        <div className="flex items-center gap-6 sm:gap-8">
+        <div className="flex items-center gap-4 xl:gap-6 min-w-0">
           <Link
             to="/dashboard"
             className="flex items-center gap-3 group focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-xl"
@@ -54,13 +54,13 @@ export const Navbar = () => {
                 />
               </svg>
             </div>
-            <span className="text-lg font-bold tracking-tight text-white group-hover:text-indigo-200 transition-colors">
+            <span className="text-lg font-bold tracking-tight text-slate-50 group-hover:text-indigo-200 transition-colors">
               MailPulse
             </span>
           </Link>
 
           {/* Navigation Links */}
-          <nav className="flex items-center gap-1 sm:gap-2" aria-label="Main Navigation">
+          <nav className="flex items-center gap-0.5 xl:gap-1.5" aria-label="Main Navigation">
             <NavLink to="/dashboard" end className={navLinkClass}>
               <svg
                 className="w-4 h-4"
@@ -157,7 +157,7 @@ export const Navbar = () => {
           <Link
             to="/settings"
             aria-label="Account settings"
-            className="hidden sm:flex flex-col items-end text-right rounded-lg px-2 py-1 hover:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="hidden 2xl:flex flex-col items-end text-right rounded-lg px-2 py-1 hover:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <span className="text-sm font-medium text-slate-200 leading-tight">
               {user?.name || 'User'}
@@ -171,7 +171,7 @@ export const Navbar = () => {
             type="button"
             onClick={handleLogout}
             aria-label="Sign out of your account"
-            className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 hover:text-white border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700/80 hover:text-slate-50 border border-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
             <svg
               className="w-4 h-4 text-slate-400"

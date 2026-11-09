@@ -1,3 +1,4 @@
+import AuthLayout from '../../components/layout/AuthLayout.jsx';
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth.js';
@@ -68,7 +69,7 @@ export const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8 selection:bg-indigo-500 selection:text-white">
+    <AuthLayout>
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6">
         <Link to="/" className="inline-flex items-center gap-2 group">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform duration-200">
@@ -87,9 +88,9 @@ export const LoginPage = () => {
               />
             </svg>
           </div>
-          <span className="text-2xl font-bold tracking-tight text-white">MailPulse</span>
+          <span className="text-2xl font-bold tracking-tight text-slate-50">MailPulse</span>
         </Link>
-        <h1 className="mt-4 text-2xl font-bold tracking-tight text-white">
+        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-50">
           Sign in to your account
         </h1>
         <p className="mt-2 text-sm text-slate-400">
@@ -140,7 +141,7 @@ export const LoginPage = () => {
                   onChange={handleChange}
                   aria-invalid={Boolean(errors.email)}
                   aria-describedby={errors.email ? 'email-error' : undefined}
-                  className={`block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white placeholder-slate-500 border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  className={`block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 placeholder-slate-500 border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                     errors.email
                       ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30'
                       : 'border-slate-700 hover:border-slate-600 focus:border-indigo-500'
@@ -177,7 +178,7 @@ export const LoginPage = () => {
                   onChange={handleChange}
                   aria-invalid={Boolean(errors.password)}
                   aria-describedby={errors.password ? 'password-error' : undefined}
-                  className={`block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-white placeholder-slate-500 border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  className={`block w-full rounded-xl px-3.5 py-2.5 text-sm bg-slate-800/80 text-slate-50 placeholder-slate-500 border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                     errors.password
                       ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30'
                       : 'border-slate-700 hover:border-slate-600 focus:border-indigo-500'
@@ -224,7 +225,7 @@ export const LoginPage = () => {
           </div>
         </div>
       </div>
-    </div>
+    </AuthLayout>
   );
 };
 
