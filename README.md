@@ -37,7 +37,7 @@ Add your contacts, write a campaign, preview it safely, send yourself a test, la
 
 ## 🚀 Up and running in 4 steps
 
-> **You'll need:** [Node.js 20+](https://nodejs.org) · npm 10+ · [MongoDB](https://www.mongodb.com/try/download/community) (local, or a free [Atlas](https://www.mongodb.com/atlas) URI)
+> **You'll need:** [Node.js 20+](https://nodejs.org) · npm 10+ · [MongoDB 4.2 or newer](https://www.mongodb.com/try/download/community) (local, or a free [Atlas](https://www.mongodb.com/atlas) URI)
 
 ### 1️⃣ Get the code
 

@@ -22,8 +22,8 @@ const EXPORT_LIMIT_PER_COLLECTION = 100000;
 /** Collections that hold user-owned documents, with the fields to leave out of exports. */
 const OWNED_COLLECTIONS = [
   { key: 'contacts', model: Contact },
-  { key: 'campaigns', model: Campaign, omit: ['dispatchLeaseOwner', 'dispatchLeaseUntil'] },
-  { key: 'deliveries', model: Delivery },
+  { key: 'campaigns', model: Campaign, omit: ['dispatchLeaseOwner', 'dispatchLeaseUntil', 'dispatchLeaseEpoch'] },
+  { key: 'deliveries', model: Delivery, omit: ['claimEpoch', 'fence'] },
   { key: 'templates', model: Template },
   { key: 'segments', model: Segment },
   { key: 'suppressions', model: Suppression },

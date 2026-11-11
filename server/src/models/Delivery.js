@@ -67,6 +67,19 @@ const deliverySchema = new mongoose.Schema(
       default: '',
       maxlength: [100, 'Recipient name cannot exceed 100 characters'],
     },
+    // Minimum lease epoch allowed to CLAIM this delivery while it is pending (absent = any epoch).
+    // Whoever takes over a campaign raises it, before acquiring the lease, to the epoch it is about
+    // to hold, so a stale worker's atomic claim (`fence <= myEpoch`) fails. It only ever increases.
+    fence: {
+      type: Number,
+      default: undefined,
+    },
+    // The lease epoch of the worker that claimed this delivery. Updates made by that worker are
+    // conditional on it, so a stale worker cannot overwrite state set under a newer epoch.
+    claimEpoch: {
+      type: Number,
+      default: undefined,
+    },
     // A/B subject test arm this recipient was assigned to ('A' = the campaign's main subject).
     variant: {
       type: String,

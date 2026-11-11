@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **974 automated tests** (641 server, 333 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **1029 automated tests** (696 server, 333 client), 0 failures, 0 skipped.
 
 ---
 
@@ -17,7 +17,8 @@ MailPulse is a full-stack email campaign management and analytics platform built
 
 1. **Deployment (single or multiple instances)**:
    - One instance works out of the box. Several instances need `RATE_LIMIT_STORE=mongo` (shared rate-limit counters) and, behind a proxy, `TRUST_PROXY=<hops>`.
-   - Campaigns in `sending` carry a dispatch lease (`dispatchLeaseOwner`/`dispatchLeaseUntil`, `dispatchLease.service.js`, `CAMPAIGN_LEASE_MS`); recovery and the watchdog never touch a campaign a live instance holds, and resume a crashed instance's campaigns once its lease expires.
+   - **Requires MongoDB >= 4.2.** Campaigns in `sending` carry a dispatch lease (`dispatchLeaseOwner`/`dispatchLeaseUntil`/`dispatchLeaseEpoch`, `dispatchLease.service.js`, `CAMPAIGN_LEASE_MS`). All lease decisions use MongoDB server time (`$$NOW` in atomic update pipelines), never app clocks. Ownership = (owner, epoch); the epoch increases on every ownership change and is never reset. A worker's `LeaseSession` keeps its epoch; the pre-claim read, delivery claims (`Delivery.claimEpoch`), delivery updates, stats and finalization are all conditional on it, and a worker that cannot confirm its lease self-fences permanently. Renewal is strict (an expired lease is never revived). Pending deliveries carry `fence` (minimum epoch allowed to claim); the claim is one atomic update requiring `fence` absent/null or `<= myEpoch`, and a takeover fences pending deliveries BEFORE it acquires the lease, via a compare-and-swap on the epoch it observed (`acquireLease` `beforeAcquire` hook: granted epoch == fence target; if fencing fails or the swap loses, nothing is acquired). A claimed delivery is never returned to `pending`: a worker that loses its lease after claiming leaves it `processing` and recovery records it `INTERRUPTED` (an unsent email may be skipped, never retried). No transactions or replica set are needed. Graceful shutdown releases leases (stamped as ended), so peers' watchdogs recover them at the next sweep. Details and limits: `docs/architecture.md` section 12.
+   - Guarantee: at most once per recipient (atomic delivery claim, never resend uncertain deliveries). NOT exactly-once and NOT strictly one active worker at every instant: SMTP and MongoDB cannot share a transaction, so a worker that already passed its last check may still complete an in-flight send (bounded by the send concurrency).
    - The scheduler is safe across instances (atomic claim). `activeDispatches`, the stop flag and the send throttle are per process: `CAMPAIGN_SEND_RATE_PER_MINUTE` applies per instance.
    - Design note: coordination uses MongoDB (atomic updates), not Redis/BullMQ, so no extra infrastructure is needed. Add Redis only if rate-limit write volume or queue throughput demands it.
 2. **Tenant Isolation**:
@@ -153,10 +154,10 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Fields: `userId`, `name`, `email`, `tags`, `customFields` (Map of text), `isUnsubscribed`, `unsubscribedAt`.
   - Indexes: `{ userId: 1, email: 1 }` (unique), `{ userId: 1, tags: 1 }`.
 - **Campaign** (`server/src/models/Campaign.js`):
-  - Fields: `userId`, `name`, `subject`, `subjectB`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`).
+  - Fields: `userId`, `name`, `subject`, `subjectB`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`), lease fields `dispatchLeaseOwner`/`dispatchLeaseUntil`/`dispatchLeaseEpoch` (internal, never exposed).
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
 - **Delivery** (`server/src/models/Delivery.js`):
-  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `variant` (`'A'`, `'B'`), `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
+  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `variant` (`'A'`, `'B'`), `claimEpoch` (lease epoch of the claiming worker), `fence` (minimum epoch allowed to claim while pending), `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
 - **SignupForm** (`server/src/models/SignupForm.js`): `userId`, `name`, `description`, `tags`, `slug` (unique, immutable), `enabled`.
 - **PendingSubscription** (`server/src/models/PendingSubscription.js`): `formId`, `userId`, `email`, `name`, `tokenHash` (unique), `expiresAt` (TTL), unique `{ formId, email }`.
 - **Template** (`server/src/models/Template.js`):

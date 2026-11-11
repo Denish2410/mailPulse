@@ -1,4 +1,13 @@
-import { acquireLease, leaseFields, releaseAllLeases, startLeaseHeartbeat, LEASE_UNSET } from './dispatchLease.service.js';
+import { performance } from 'node:perf_hooks';
+import {
+  acquireLeaseSession,
+  adoptLease,
+  getLeaseMs,
+  INSTANCE_ID,
+  leaseTakeoverFields,
+  releaseAllLeases,
+  LEASE_UNSET,
+} from './dispatchLease.service.js';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Campaign from '../models/Campaign.js';
@@ -112,13 +121,6 @@ const activeDispatches = new Map();
 const recoveringCampaigns = new Set();
 
 /**
- * Campaigns whose lease another instance took over while this process was sending them; the
- * local workers stop claiming deliveries for them.
- * @type {Set<string>}
- */
-const leaseLostCampaigns = new Set();
-
-/**
  * Set when the process is shutting down; workers stop claiming new deliveries.
  */
 let stopRequested = false;
@@ -178,6 +180,63 @@ export const resetDispatcherState = () => {
   stopRequested = false;
 };
 
+/** Filter fragment tying a campaign update to the lease owner and epoch the worker was granted. */
+const ownerFilter = (fence) =>
+  fence ? { dispatchLeaseOwner: INSTANCE_ID, dispatchLeaseEpoch: fence.epoch } : {};
+
+/** Filter for "this worker's own claimed delivery", conditional on its claim epoch. */
+const ownClaim = (deliveryId, fence) => ({
+  _id: deliveryId,
+  status: 'processing',
+  ...(fence ? { claimEpoch: fence.epoch } : {}),
+});
+
+/**
+ * Filter fragment: the delivery's fence allows a worker at this epoch to claim it. A missing or null
+ * fence (`{ fence: null }` matches both) allows anyone; otherwise the fence must not exceed the
+ * worker's epoch. This is part of the single-document atomic claim, so it cannot be raced.
+ */
+const claimableBy = (fence) =>
+  fence ? { $or: [{ fence: null }, { fence: { $lte: fence.epoch } }] } : {};
+
+/**
+ * Raises the fence of every still-pending delivery of a campaign to at least `epoch`. `$max` can
+ * never lower a fence, so it is idempotent and safe to run late, twice, or concurrently from
+ * several takers. Anything but a clean acknowledgement is an error.
+ */
+const raiseDeliveryFences = async (campaignId, epoch) => {
+  const result = await Delivery.updateMany(
+    { campaignId, status: 'pending' },
+    { $max: { fence: epoch } },
+    { timestamps: false }
+  );
+  if (!result?.acknowledged) {
+    throw new Error('Raising delivery fences was not acknowledged by the database.');
+  }
+  return result;
+};
+
+/**
+ * The `beforeAcquire` step of a takeover: fence the campaign's pending deliveries to the epoch the
+ * taker is about to hold, BEFORE the lease changes hands. If this throws, the lease is not
+ * acquired and nothing is recovered or dispatched.
+ *
+ * Why before: a stale worker's claim requires `fence <= its epoch`. The acquire that follows is a
+ * compare-and-swap on the epoch that was observed when `nextEpoch` was computed, so the epoch it
+ * grants is exactly `nextEpoch`. Every delivery that was pending at fencing time therefore refuses
+ * every older epoch from the moment the new owner holds the lease. A claim that wins before the
+ * fence reaches a delivery is a legitimate pre-takeover claim: the delivery is then `processing`
+ * under the old epoch and recovery records it INTERRUPTED. Nothing ever moves a delivery from
+ * `processing` back to `pending`, so no later write can lower that protection.
+ *
+ * @param {import('mongoose').Types.ObjectId|string} campaignId
+ */
+export const fenceDeliveriesBeforeTakeover =
+  (campaignId) =>
+  async ({ nextEpoch }) => {
+    await raiseDeliveryFences(campaignId, nextEpoch);
+  };
+
 /**
  * Recomputes per-status delivery counts for a campaign.
  *
@@ -207,10 +266,16 @@ export const getDeliveryCounts = async (campaignId) => {
  * Finalizes a campaign whose deliveries have all been processed.
  * Does nothing while pending/processing deliveries remain (e.g. after a shutdown request).
  *
+ * With a `fence` (the worker's LeaseSession) the update is conditional on that worker still being
+ * the current lease owner (same owner and epoch) of a campaign that is still 'sending', so a stale
+ * worker can never finalize. The final status is derived from the delivery counts, and only one of
+ * several concurrent callers can win the status change, so finalizing is idempotent.
+ *
  * @param {import('mongoose').Types.ObjectId|string} campaignId
+ * @param {{ epoch: number }|null} [fence]
  * @returns {Promise<object|null>} Updated campaign, or null if not finalized
  */
-export const finalizeCampaign = async (campaignId) => {
+export const finalizeCampaign = async (campaignId, fence = null) => {
   const counts = await getDeliveryCounts(campaignId);
 
   if (counts.pending > 0 || counts.processing > 0) {
@@ -218,7 +283,7 @@ export const finalizeCampaign = async (campaignId) => {
   }
 
   return Campaign.findOneAndUpdate(
-    { _id: campaignId, status: 'sending' },
+    { _id: campaignId, status: 'sending', ...ownerFilter(fence) },
     {
       $set: {
         status: counts.sent > 0 ? 'sent' : 'failed',
@@ -245,9 +310,9 @@ const toStoredMessageId = (result) =>
 /**
  * Records that the transport accepted a delivery.
  */
-const markDeliverySent = (deliveryId, result) =>
+const markDeliverySent = (deliveryId, result, fence = null) =>
   Delivery.updateOne(
-    { _id: deliveryId, status: 'processing' },
+    ownClaim(deliveryId, fence),
     {
       $set: {
         status: 'sent',
@@ -263,9 +328,14 @@ const markDeliverySent = (deliveryId, result) =>
  * recomputed from Delivery records when the campaign finalizes, so a missed increment must never
  * change how the delivery itself is recorded.
  */
-const incrementCampaignStat = async (campaignId, field, logger) => {
+const incrementCampaignStat = async (campaignId, field, logger, fence = null) => {
   try {
-    await Campaign.updateOne({ _id: campaignId }, { $inc: { [`stats.${field}`]: 1 } });
+    // Only while the campaign is still sending under this worker's epoch: a late update from a
+    // stale worker, or after finalization, matches nothing and cannot change the counts.
+    await Campaign.updateOne(
+      { _id: campaignId, status: 'sending', ...ownerFilter(fence) },
+      { $inc: { [`stats.${field}`]: 1 } }
+    );
   } catch (error) {
     logWarning(
       logger,
@@ -287,14 +357,48 @@ const incrementCampaignStat = async (campaignId, field, logger) => {
  *
  * @returns {Promise<boolean>}
  */
-export const processNextDelivery = async (campaignId, message, emailService, logger = console) => {
+export const processNextDelivery = async (
+  campaignId,
+  message,
+  emailService,
+  logger = console,
+  fence = null
+) => {
+  // Lease check before EVERY claim (one indexed read): a worker that lost, or can no longer prove,
+  // its lease claims nothing. `false` also tells the worker loop to stop. Every dispatch path
+  // passes a fence; only direct calls without one (tests) skip the check.
+  if (fence && !(await fence.canClaim())) {
+    return false;
+  }
+
+  // ONE atomic update on the delivery: it only matches while the delivery is pending AND its fence
+  // allows this worker's epoch, so a worker that has been taken over cannot claim, whatever its
+  // local state says.
   const delivery = await Delivery.findOneAndUpdate(
-    { campaignId, status: 'pending' },
-    { $set: { status: 'processing' }, $inc: { attempts: 1 } },
+    { campaignId, status: 'pending', ...claimableBy(fence) },
+    {
+      $set: { status: 'processing', ...(fence ? { claimEpoch: fence.epoch } : {}) },
+      $inc: { attempts: 1 },
+    },
     { new: true, sort: { _id: 1 } }
   );
 
   if (!delivery) {
+    // Nothing claimable. If deliveries are pending but fenced above our epoch, a newer owner took
+    // over: this worker is fenced out and must stop (not merely "out of work").
+    if (fence && (await Delivery.exists({ campaignId, status: 'pending', fence: { $gt: fence.epoch } }))) {
+      fence.fenceNow?.('fenced-out');
+    }
+    return false;
+  }
+
+  // The fence can trip between the check and the claim. CONSERVATIVE rule: a delivery this worker
+  // has claimed is never handed back to 'pending' (a late write from a stale worker could leave
+  // it claimable by an intermediate epoch). Nothing is sent; the delivery stays 'processing' under
+  // this worker's claim epoch, and the next owner's recovery records it INTERRUPTED. A recipient
+  // that was provably never emailed may therefore be skipped. Preventing an unsafe retry is more
+  // important than preserving that one delivery.
+  if (fence?.isFenced()) {
     return false;
   }
 
@@ -310,7 +414,7 @@ export const processNextDelivery = async (campaignId, message, emailService, log
 
     if (isSuppressed || isContactUnsubscribed) {
       await Delivery.updateOne(
-        { _id: delivery._id, status: 'processing' },
+        ownClaim(delivery._id, fence),
         {
           $set: {
             status: 'failed',
@@ -319,7 +423,7 @@ export const processNextDelivery = async (campaignId, message, emailService, log
           },
         }
       );
-      await incrementCampaignStat(campaignId, 'failed', logger);
+      await incrementCampaignStat(campaignId, 'failed', logger, fence);
       return true;
     }
   }
@@ -416,7 +520,16 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     textToSend = withAddress.text;
   }
 
-  // 4. Hand the message to the transport with custom headers
+  // 3d. Last local check before the SMTP call (no database read). If the lease was lost while this
+  //     message was being prepared, nothing is sent and the worker stops. As above, the claimed
+  //     delivery stays 'processing' for recovery to record as INTERRUPTED; it is never returned
+  //     to 'pending'.
+  if (fence?.isFenced()) {
+    return false;
+  }
+
+  // 4. Hand the message to the transport with custom headers. From here on the outcome may be
+  //    uncertain, so this delivery can never go back to 'pending'.
   let result;
   try {
     result = await emailService.sendEmail({
@@ -428,7 +541,7 @@ export const processNextDelivery = async (campaignId, message, emailService, log
     });
   } catch (error) {
     await Delivery.updateOne(
-      { _id: delivery._id, status: 'processing' },
+      ownClaim(delivery._id, fence),
       {
         $set: {
           status: 'failed',
@@ -437,22 +550,22 @@ export const processNextDelivery = async (campaignId, message, emailService, log
         },
       }
     );
-    await incrementCampaignStat(campaignId, 'failed', logger);
+    await incrementCampaignStat(campaignId, 'failed', logger, fence);
     return true;
   }
 
   // 2. The transport accepted the message: record it, retrying once for transient write errors
   try {
-    await markDeliverySent(delivery._id, result);
+    await markDeliverySent(delivery._id, result, fence);
   } catch {
     try {
-      await markDeliverySent(delivery._id, result);
+      await markDeliverySent(delivery._id, result, fence);
     } catch (persistError) {
       logger.error(
         `[Dispatcher] Campaign ${String(campaignId)} delivery ${String(delivery._id)} was accepted by the transport but could not be recorded: ${persistError?.name || 'Error'}`
       );
       await Delivery.updateOne(
-        { _id: delivery._id, status: 'processing' },
+        ownClaim(delivery._id, fence),
         {
           $set: {
             status: 'failed',
@@ -462,12 +575,12 @@ export const processNextDelivery = async (campaignId, message, emailService, log
           },
         }
       );
-      await incrementCampaignStat(campaignId, 'failed', logger);
+      await incrementCampaignStat(campaignId, 'failed', logger, fence);
       return true;
     }
   }
 
-  await incrementCampaignStat(campaignId, 'sent', logger);
+  await incrementCampaignStat(campaignId, 'sent', logger, fence);
   return true;
 };
 
@@ -485,9 +598,11 @@ export const processNextDelivery = async (campaignId, message, emailService, log
  */
 export const processCampaignDeliveries = async (
   campaignId,
-  { emailService, concurrency = getSendConcurrency(), logger = console } = {}
+  { emailService, concurrency = getSendConcurrency(), logger = console, leaseSession = null } = {}
 ) => {
-  let stopHeartbeat = () => {};
+  // The worker's lease: handed in by the code that already took it atomically (the draft ->
+  // sending transition, or recovery), otherwise taken here. Its epoch fences everything below.
+  let session = leaseSession;
   try {
     const campaign = await Campaign.findOne({ _id: campaignId, status: 'sending' })
       .select('userId subject subjectB textContent htmlContent')
@@ -497,14 +612,28 @@ export const processCampaignDeliveries = async (
       return;
     }
 
-    // Another live instance already owns this campaign: leave it alone
-    if (!(await acquireLease(campaignId))) {
+    // INTERNAL / TEST-ONLY PATH: in production a lease session is always handed in (by the
+    // draft -> sending transition or by recovery), so this branch is not reachable there. It exists
+    // for direct callers (tests). It uses the same fence-then-compare-and-swap takeover as
+    // recovery, but it has no recovery sweep, so it does not mark older processing deliveries
+    // INTERRUPTED. Another live owner means: leave the campaign alone.
+    if (!session) {
+      try {
+        session = await acquireLeaseSession(campaignId, {
+          beforeAcquire: fenceDeliveriesBeforeTakeover(campaignId),
+          onFenced: (reason) =>
+            logWarning(logger, `[Dispatcher] Campaign ${String(campaignId)} worker fenced itself (${reason}); it stops claiming deliveries.`),
+        });
+      } catch (error) {
+        logger.error(
+          `[Dispatcher] Campaign ${String(campaignId)} not dispatched: delivery fencing failed (${error?.name || 'Error'}).`
+        );
+        return;
+      }
+    }
+    if (!session) {
       return;
     }
-    leaseLostCampaigns.delete(String(campaignId));
-    stopHeartbeat = startLeaseHeartbeat(campaignId, {
-      onLost: () => leaseLostCampaigns.add(String(campaignId)),
-    });
 
     // The owner's postal address goes into every footer (CAN-SPAM); read once per dispatch
     const owner = await User.findById(campaign.userId).select('mailingAddress').lean();
@@ -522,11 +651,11 @@ export const processCampaignDeliveries = async (
     const throttle = getSharedSendThrottle();
 
     const worker = async () => {
-      while (!stopRequested && !leaseLostCampaigns.has(String(campaignId))) {
+      while (!stopRequested && !session.isFenced()) {
         // Reserve a send slot first (no-op when CAMPAIGN_SEND_RATE_PER_MINUTE is unset)
         await throttle.wait();
-        if (stopRequested || leaseLostCampaigns.has(String(campaignId))) return;
-        const hadWork = await processNextDelivery(campaignId, message, emailService, logger);
+        if (stopRequested || session.isFenced()) return;
+        const hadWork = await processNextDelivery(campaignId, message, emailService, logger, session);
         if (!hadWork) {
           return;
         }
@@ -548,16 +677,18 @@ export const processCampaignDeliveries = async (
       return;
     }
 
-    if (!stopRequested && !leaseLostCampaigns.has(String(campaignId))) {
-      await finalizeCampaign(campaignId);
+    if (!stopRequested && !session.isFenced()) {
+      await finalizeCampaign(campaignId, session);
     }
   } catch (error) {
     logger.error(
       `[Dispatcher] Campaign ${String(campaignId)} dispatch halted: ${error?.name || 'Error'}`
     );
   } finally {
-    stopHeartbeat();
-    leaseLostCampaigns.delete(String(campaignId));
+    // Stop renewing and give the lease back (conditional on our epoch, so a no-op once finalized
+    // or taken by a newer owner). A halted or stopped dispatch is then recoverable at the next
+    // watchdog sweep instead of waiting out the lease or the stall timeout.
+    if (session) await session.release();
   }
 };
 
@@ -571,6 +702,8 @@ export const scheduleCampaignProcessing = (campaignId, options = {}) => {
   const key = String(campaignId);
   const existing = activeDispatches.get(key);
   if (existing) {
+    // A lease session handed to a dispatch that will not run must not keep renewing
+    options.leaseSession?.release();
     return existing;
   }
 
@@ -611,9 +744,11 @@ export const startCampaignDispatch = async ({
     throw new Error('startCampaignDispatch requires at least one eligible contact.');
   }
 
-  const now = new Date();
-
-  // 1. Atomic draft -> sending transition on the exact evaluated version
+  // 1. Atomic draft -> sending transition on the exact evaluated version. The lease is taken in
+  //    the SAME update (an update pipeline using MongoDB server time), so there is never a moment
+  //    when the campaign is 'sending' without an owner that a peer's watchdog could grab.
+  const leaseMs = getLeaseMs();
+  const confirmedAt = performance.now(); // monotonic, captured before the request (conservative)
   const locked = await Campaign.findOneAndUpdate(
     {
       _id: campaign._id,
@@ -621,23 +756,34 @@ export const startCampaignDispatch = async ({
       status: { $in: ['draft', 'scheduled'] },
       updatedAt: campaign.updatedAt,
     },
-    {
-      $set: {
-        status: 'sending',
-        sendStartedAt: now,
-        sendCompletedAt: null,
-        ...leaseFields(now.getTime()),
-        'stats.total': eligibleContacts.length,
-        'stats.sent': 0,
-        'stats.failed': 0,
+    [
+      {
+        $set: {
+          status: 'sending',
+          sendStartedAt: '$$NOW',
+          sendCompletedAt: null,
+          'stats.total': eligibleContacts.length,
+          'stats.sent': 0,
+          'stats.failed': 0,
+          updatedAt: '$$NOW', // pipeline updates do not maintain timestamps on their own
+          ...leaseTakeoverFields(leaseMs),
+        },
       },
-    },
+    ],
     { new: true }
   );
 
   if (!locked) {
     return null;
   }
+
+  // The lease granted by that update, with its epoch and a running heartbeat
+  const leaseSession = adoptLease(locked._id, locked.dispatchLeaseEpoch, {
+    leaseMs,
+    confirmedAt,
+    onFenced: (reason) =>
+      logWarning(logger, `[Dispatcher] Campaign ${String(locked._id)} worker fenced itself (${reason}); it stops claiming deliveries.`),
+  });
 
   // 2. One pending delivery per eligible recipient (address snapshot)
   try {
@@ -656,9 +802,10 @@ export const startCampaignDispatch = async ({
     );
   } catch (error) {
     // Roll back so the user can retry; nothing has been sent yet
+    leaseSession.stop();
     await Delivery.deleteMany({ campaignId: locked._id, status: 'pending' });
     await Campaign.updateOne(
-      { _id: locked._id, status: 'sending' },
+      { _id: locked._id, status: 'sending', dispatchLeaseEpoch: leaseSession.epoch },
       {
         $set: {
           status: 'draft',
@@ -673,8 +820,8 @@ export const startCampaignDispatch = async ({
     throw error;
   }
 
-  // 3. Background processing
-  scheduleCampaignProcessing(locked._id, { emailService, concurrency, logger });
+  // 3. Background processing, as the owner of the lease granted above
+  scheduleCampaignProcessing(locked._id, { emailService, concurrency, logger, leaseSession });
 
   return locked;
 };
@@ -705,22 +852,47 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
   }
   recoveringCampaigns.add(key);
 
+  let session = null;
+  let handedOff = false;
   try {
-    // Another live instance holds the lease: it is still sending this campaign
-    if (!(await acquireLease(campaignId))) {
+    // Take over in this order: (1) read the expired lease and the next epoch, (2) fence every
+    // pending delivery to that epoch, (3) only then acquire the lease atomically (MongoDB server
+    // time, new epoch). If fencing fails nothing is acquired, recovered or dispatched and the
+    // campaign stays eligible for another attempt. If another live instance holds the lease it is
+    // still sending this campaign and nothing below may touch it.
+    try {
+      session = await acquireLeaseSession(campaignId, {
+        beforeAcquire: fenceDeliveriesBeforeTakeover(campaignId),
+        onFenced: (reason) =>
+          logWarning(logger, `[Dispatcher] Campaign ${String(campaignId)} worker fenced itself (${reason}); it stops claiming deliveries.`),
+      });
+    } catch (error) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} takeover aborted: delivery fencing failed (${error?.name || 'Error'}). The lease was NOT acquired and nothing was recovered; the campaign stays eligible for another attempt.`
+      );
+      return 'skipped';
+    }
+    if (!session) {
       return 'skipped';
     }
 
+    // Anything still 'processing' belongs to an older epoch (we only just became the owner). Its
+    // outcome is unknown, so it is recorded as INTERRUPTED and NEVER re-sent.
     await Delivery.updateMany(
-      { campaignId, status: 'processing' },
+      { campaignId, status: 'processing', claimEpoch: { $ne: session.epoch } },
       { $set: { status: 'failed', errorCode: 'INTERRUPTED', failedAt: new Date() } }
     );
+
+    // Defense in depth: the acquire was a compare-and-swap against the epoch the pending deliveries
+    // were fenced to, so they already carry exactly our epoch. Re-asserting it after the sweep is
+    // idempotent (`$max` never lowers) and costs one update.
+    await raiseDeliveryFences(campaignId, session.epoch);
 
     const counts = await getDeliveryCounts(campaignId);
 
     if (counts.total === 0) {
       const reverted = await Campaign.updateOne(
-        { _id: campaignId, status: 'sending' },
+        { _id: campaignId, status: 'sending', dispatchLeaseEpoch: session.epoch },
         {
           $set: {
             status: 'draft',
@@ -737,7 +909,7 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
     }
 
     await Campaign.updateOne(
-      { _id: campaignId, status: 'sending' },
+      { _id: campaignId, status: 'sending', dispatchLeaseEpoch: session.epoch },
       {
         $set: {
           'stats.total': counts.total,
@@ -747,10 +919,14 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
       }
     );
 
-    // Registers in `activeDispatches` synchronously, before the lock below is released
-    scheduleCampaignProcessing(campaignId, { emailService, concurrency, logger });
+    // Registers in `activeDispatches` synchronously, before the lock below is released. The
+    // dispatch continues under the lease (and epoch) acquired above.
+    scheduleCampaignProcessing(campaignId, { emailService, concurrency, logger, leaseSession: session });
+    handedOff = true;
     return 'resumed';
   } finally {
+    // Not handed to a dispatch (skipped, reverted or failed): stop renewing and give it back
+    if (session && !handedOff) await session.release();
     recoveringCampaigns.delete(key);
   }
 };
@@ -840,11 +1016,18 @@ export const reapStalledCampaigns = async ({
   }
 
   const cutoff = new Date(now.getTime() - stallTimeoutMs);
-  // Stalled = started long ago, or its owner's lease ran out (the owning instance died).
-  // recoverCampaign still refuses campaigns whose lease is held by a live instance.
+  // Candidates: started long ago (this also covers a campaign that never had a lease, e.g. one
+  // still running on an older version), OR its lease has ended by MongoDB's clock. A lease ends
+  // either because its owner died (it stopped renewing) or because the owner released it during a
+  // graceful shutdown (a release stamps the lease with the current database time). recoverCampaign
+  // takes the lease atomically and refuses any campaign a live owner still holds, so listing a
+  // campaign here never interferes with its owner.
   const stalled = await Campaign.find({
     status: 'sending',
-    $or: [{ sendStartedAt: { $lte: cutoff } }, { dispatchLeaseUntil: { $lte: now } }],
+    $or: [
+      { sendStartedAt: { $lte: cutoff } },
+      { dispatchLeaseUntil: { $type: 'date' }, $expr: { $lte: ['$dispatchLeaseUntil', '$$NOW'] } },
+    ],
   })
     .select('_id')
     .lean();

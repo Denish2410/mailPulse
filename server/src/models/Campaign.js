@@ -117,13 +117,19 @@ const campaignSchema = new mongoose.Schema(
       index: true,
     },
     // Multi-instance dispatch lease (see dispatchLease.service.js): which instance is sending this
-    // campaign and until when. Absent/expired means any instance may recover it.
+    // campaign, until when (MongoDB server time) and under which epoch. Absent/expired means any
+    // instance may recover it. The epoch only ever increases (it survives releases) and is what
+    // fences a stale worker: its claims, updates and finalization are conditional on it.
     dispatchLeaseOwner: {
       type: String,
       default: undefined,
     },
     dispatchLeaseUntil: {
       type: Date,
+      default: undefined,
+    },
+    dispatchLeaseEpoch: {
+      type: Number,
       default: undefined,
     },
     sendStartedAt: {
