@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { createRateLimitStore } from './middleware/rateLimitStore.js';
 
@@ -19,6 +18,7 @@ import signupFormRoutes from './routes/signupForm.routes.js';
 import publicRoutes from './routes/public.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { resolveTrustProxy } from './config/proxy.js';
+import { createRequestLogger } from './middleware/requestLogger.js';
 
 const app = express();
 
@@ -64,11 +64,9 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 4. Request logging (Morgan)
 if (process.env.NODE_ENV !== 'test') {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const logFormat = isProduction ? 'combined' : 'dev';
-
   app.use(
-    morgan(logFormat, {
+    createRequestLogger({
+      production: process.env.NODE_ENV === 'production',
       skip: (req, res) => {
         // Skip logging successful health probes to avoid log spamming in development and production
         if (req.originalUrl?.startsWith('/api/v1/health') && res.statusCode < 400) {

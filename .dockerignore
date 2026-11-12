@@ -1,9 +1,43 @@
+# Dependencies are installed inside the image (npm ci), never copied from the host
 node_modules
 **/node_modules
 client/dist
+
+# Version control and CI
 .git
 .github
+.gitignore
+
+# Secrets and local configuration (never bake them into an image)
 .env
 **/.env
-*.log
+**/.env.*
+*.pem
+*.key
+
+# Tests and test helpers are not needed to build or run production images
+server/tests
+client/tests
+**/*.test.js
+**/*.test.jsx
+**/*.tap
+
+# Documentation, local notes and agent context
+docs
+README.md
+**/README.md
+CLAUDE.md
+graphify-out
+.claude
+
+# Compose and proxy files, linters and editor/OS leftovers
+docker-compose*.yml
+Caddyfile
+**/eslint.config.js
+.vscode
+.idea
 .DS_Store
+**/.DS_Store
+*.log
+*.tmp
+coverage

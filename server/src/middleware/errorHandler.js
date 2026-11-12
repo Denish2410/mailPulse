@@ -1,5 +1,6 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { getErrorReporter } from '../services/errorReporter.service.js';
+import { redactUrl } from './requestLogger.js';
 
 /**
  * Custom application error class for operational errors with explicit HTTP status codes.
@@ -61,7 +62,7 @@ export const errorHandler = (err, req, res, next) => {
     // Structured log line plus optional webhook alert; fire-and-forget so the response is never delayed
     void getErrorReporter().reportError(err, {
       method: req.method,
-      path: req.originalUrl,
+      path: redactUrl(req.originalUrl),
       status: statusCode,
     });
   }

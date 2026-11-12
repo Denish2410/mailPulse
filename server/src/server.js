@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { getErrorReporter } from './services/errorReporter.service.js';
 import { getSecurityWarnings } from './config/securityWarnings.js';
+import { getShutdownTimeoutMs, validateShutdownConfig } from './config/shutdown.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,7 +51,7 @@ export const isMainModule = () => {
 export const createShutdownHandler = ({
   serverGetter = () => activeServer,
   mongooseInstance = mongoose,
-  timeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000,
+  timeoutMs = getShutdownTimeoutMs(),
   exitFn = process.exit,
   logger = console,
   stopDispatches = stopAllDispatches,
@@ -169,6 +170,7 @@ export const startServer = async (options = {}) => {
     const shouldValidateConfig = options.validateConfig ?? isMainModule();
     if (shouldValidateConfig) {
       validateAuthConfig();
+      validateShutdownConfig();
       for (const warning of getSecurityWarnings()) {
         console.warn(`[Security] ${warning}`);
       }

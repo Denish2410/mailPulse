@@ -8,6 +8,16 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    # (YAML anchors do not cross files, so the rotation settings from docker-compose.yml are repeated)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
     ports:
       - "80:80"
       - "443:443"
@@ -18,7 +28,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      - client
+      client:
+        condition: service_healthy
 
   server:
     environment:

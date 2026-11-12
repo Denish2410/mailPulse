@@ -1,8 +1,57 @@
-# {$DOMAIN} comes from docker-compose.prod.yml. Caddy obtains and renews the certificate.
+# {$DOMAIN} comes from docker-compose.prod.yml. Caddy obtains and renews the certificate and
+# redirects HTTP to HTTPS automatically.
+{
+	# Slow-client protection and connection hygiene
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 120s
+			idle 2m
+		}
+	}
+
+	# Runtime/error log. Caddy includes the request URI in error entries, and click, open and
+	# unsubscribe links (and reset/verify/confirm pages) carry one-time tokens in the path or
+	# query string, so the URI is dropped from every log entry.
+	log {
+		output stderr
+		format filter {
+			wrap json
+			request>uri delete
+			request>headers>Referer delete
+		}
+	}
+}
+
 {$DOMAIN} {
 	encode gzip
 
+	# Same body limit as nginx's /api/ (2m); larger requests are refused early.
+	request_body {
+		max_size 2MB
+	}
+
+	# Access log with no URI (see the global log above), no Referer; cookies and the
+	# Authorization header are redacted by Caddy by default.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			request>uri delete
+			request>headers>Referer delete
+		}
+	}
+
 	# Browsers must use HTTPS for this host from now on (Caddy terminates TLS here)
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
-	reverse_proxy client:80
+
+	# nginx (client:80) serves the SPA and proxies /api/. Docker DNS re-resolves the name for
+	# every new connection, so a restarted client container is found again.
+	reverse_proxy client:80 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 70s
+		}
+	}
 }
