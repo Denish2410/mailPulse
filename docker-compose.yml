@@ -5,9 +5,33 @@
 # Required in your shell or a .env file next to this file:
 #   JWT_SECRET             random string, 32+ characters   (openssl rand -hex 32)
 #   MONGO_ROOT_PASSWORD    database password, use hex only (openssl rand -hex 24)
+#
+# Operational defaults (tune for your host):
+#   - Logs rotate (10 MB x 3 files per container) so they cannot fill the disk.
+#   - Memory limits below are starting points, not measurements.
+#   - stop_grace_period must stay LONGER than the server's SHUTDOWN_TIMEOUT_MS (20 s here, checked at startup
+#     against STOP_GRACE_SECONDS, default 40): the
+#     server needs that time to finish in-flight sends and release its campaign leases on SIGTERM.
+#     If a stop is cut short (SIGKILL), nothing is lost: leases expire and a peer or the next start
+#     recovers the campaign (unsent claims are recorded INTERRUPTED, never re-sent).
+#   - `docker compose down` stops client, then server, then mongo (reverse dependency order), so the
+#     database outlives the server's shutdown work.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mongo:
     image: mongo:7
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     environment:
       MONGO_INITDB_ROOT_USERNAME: mailpulse
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD (hex characters only, e.g. openssl rand -hex 24)}
@@ -25,8 +49,18 @@ services:
       context: .
       dockerfile: server/Dockerfile
     restart: unless-stopped
+    # SIGTERM first, SIGKILL only after this period. The server also receives it as
+    # STOP_GRACE_SECONDS and refuses to start if SHUTDOWN_TIMEOUT_MS is not at least 5 s shorter.
+    stop_grace_period: ${STOP_GRACE_SECONDS:-40}s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 768m
     environment:
       NODE_ENV: production
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-20000}
+      STOP_GRACE_SECONDS: ${STOP_GRACE_SECONDS:-40}
       PORT: 5000
       MONGODB_URI: mongodb://mailpulse:${MONGO_ROOT_PASSWORD}@mongo:27017/mailpulse?authSource=admin
       CLIENT_URL: ${CLIENT_URL:-http://localhost:8080}
@@ -45,9 +79,21 @@ services:
       ERROR_WEBHOOK_URL: ${ERROR_WEBHOOK_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
+      # "true" = implicit TLS from the first byte (port 465 always uses it). Otherwise the
+      # connection starts in plaintext and upgrades with STARTTLS when the server offers it.
+      SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      # Bounce & complaint webhooks. A provider is enabled only when its value is non-empty;
+      # an empty value (the default) keeps that provider's endpoint answering 404.
+      SENDGRID_WEBHOOK_PUBLIC_KEY: ${SENDGRID_WEBHOOK_PUBLIC_KEY:-}
+      MAILGUN_WEBHOOK_SIGNING_KEY: ${MAILGUN_WEBHOOK_SIGNING_KEY:-}
+      SES_SNS_TOPIC_ARNS: ${SES_SNS_TOPIC_ARNS:-}
+      WEBHOOK_MAX_AGE_SECONDS: ${WEBHOOK_MAX_AGE_SECONDS:-}
+      # Multi-instance tuning (empty = application defaults)
+      CAMPAIGN_LEASE_MS: ${CAMPAIGN_LEASE_MS:-}
+      CAMPAIGN_SEND_RATE_PER_MINUTE: ${CAMPAIGN_SEND_RATE_PER_MINUTE:-}
     depends_on:
       mongo:
         condition: service_healthy
@@ -57,10 +103,18 @@ services:
       context: .
       dockerfile: client/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 128m
     ports:
       - "8080:80"
+    # Start the web server once the API reports ready. nginx resolves the API at request time,
+    # so later API restarts need no nginx restart.
     depends_on:
-      - server
+      server:
+        condition: service_healthy
 
 volumes:
   mongo-data:

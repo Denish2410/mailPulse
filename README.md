@@ -195,6 +195,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 
 Caddy gets and renews the certificate automatically (DNS must point at the host; ports 80 and 443 open). Links in sent emails use `TRACKING_BASE_URL`, which defaults to `CLIENT_URL`. In production an account must verify its email before it can send campaigns (`REQUIRE_VERIFIED_EMAIL=false` turns that off). Back up the `mongo-data` volume, for example with `docker compose exec mongo mongodump --archive -u mailpulse -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin > backup.archive`.
 
+**Container operations.** Health: `/api/v1/health` is *liveness* (the process is up; it answers even while MongoDB is down) and `/api/v1/health/ready` is *readiness* (MongoDB answers a ping). The server container's Docker health check uses readiness, so it shows `unhealthy` during a database outage; Docker does not restart a container for that, only for a crash, so an outage does not cause a restart loop. Through the web container the liveness route is blocked (it reports Node and memory details); point external monitors at `/api/v1/health/ready`. nginx resolves the `server` container through Docker DNS at request time, so restarting `server` needs no nginx restart. Access logs (nginx, Caddy and the API's own request log) omit query strings and tracking/unsubscribe tokens. `docker compose stop` gives the server `STOP_GRACE_SECONDS` (default 40 s) to finish in-flight sends; the server refuses to start unless its `SHUTDOWN_TIMEOUT_MS` (20 s in compose) is at least 5 s shorter; after a hard kill, leases expire and campaigns are recovered without re-sending (unsent claims become `INTERRUPTED`). Log rotation (10 MB x 3) and memory limits are set in the compose files; adjust them to your host. Validate the configuration without starting anything:
+
+```bash
+MONGO_ROOT_PASSWORD=x JWT_SECRET=$(printf 'x%.0s' {1..32}) docker compose config -q
+MONGO_ROOT_PASSWORD=x JWT_SECRET=$(printf 'x%.0s' {1..32}) DOMAIN=example.com CLIENT_URL=https://example.com docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=example.com caddy:2 caddy validate --config /etc/caddy/Caddyfile
+```
+
 Before going live, run `npm run smtp:check -- --to you@example.com` (in `server/`, with your SMTP settings in `server/.env`) to confirm real delivery works.
 
 ---
