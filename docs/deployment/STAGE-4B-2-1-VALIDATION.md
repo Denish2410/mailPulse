@@ -5,6 +5,11 @@ This report records what was actually run to validate the Stage 4B.2 deployment 
 as PR #16). It is a validation record, **not** a production-readiness statement. Several checks are
 explicitly NOT VERIFIED or PARTIAL; they are listed in [Outstanding work](#9-outstanding-work).
 
+Sections 1-9 are the original validation record and are kept as written. Sections 10-12 were added
+later and record two follow-up tasks: Task H (Caddy configuration validation) and Task I (Docker DNS
+recovery validation). Where a later result changes the status of an earlier item, the earlier section
+carries a pointer to it.
+
 Status labels used throughout:
 
 - **PASS**: executed and succeeded.
@@ -97,7 +102,7 @@ touched (IDs and start times unchanged).
 | nginx kept serving the API **without a client restart** | PASS |
 | One transient 502, then continuous 200 responses from about 0.5 s onward | PASS |
 | Server container IP before and after the restart | `172.18.0.3` both times (unchanged) |
-| **Recovery after a backend IP change, in Docker** | **NOT VERIFIED** |
+| **Recovery after a backend IP change, in Docker** | **NOT VERIFIED** in this run (addressed later by Task I: [section 11](#11-task-i-docker-dns-recovery-validation)) |
 
 Because Docker reassigned the same IP, this test would also have passed with the old literal
 `proxy_pass`, so it does **not** prove the DNS fix. Separately, an earlier test on a local nginx
@@ -128,30 +133,208 @@ refused at startup, and valid values were accepted.
 
 ## 7. Caddy and HTTPS
 
+*Historical status: at the time of this original run, every Caddy item below was **NOT VERIFIED**.
+Task H later checked only the Caddyfile **syntax** and its **adapted configuration** (see
+[section 10](#10-task-h-caddy-configuration-validation)); it did not run Caddy, so Caddy runtime
+behaviour was not tested and is still NOT VERIFIED.*
+
 NOT VERIFIED. Caddy was not run. The Caddyfile syntax, the `request>uri delete` log filter, the
 timeouts, the body limit, certificate issuance, HTTP-to-HTTPS redirection and HTTPS behaviour have
 not been tested. The production overlay was never started.
 
 ## 8. State of the validation environment
 
-At the time of writing the validation environment has **not** been cleaned up:
+At the time of the original run the validation environment had **not** been cleaned up. Tasks H and I
+did not change that; their own state is recorded in sections 10 and 11. At that time:
 
-- The MongoDB and client containers are running; the server container is intentionally stopped.
+- The MongoDB and client containers were running; the server container was intentionally stopped.
 - The project volume (`mailpulse-stage4b2-validation_mongo-data`) and network
-  (`mailpulse-stage4b2-validation_default`) are intact.
-- The temporary Compose override that remaps the client port is outside the repository.
-- No repository files were modified by the validation, and no emails were sent.
+  (`mailpulse-stage4b2-validation_default`) were intact.
+- The temporary Compose override that remaps the client port was outside the repository.
+- No repository files had been modified by the validation, and no emails had been sent.
 
 ## 9. Outstanding work
 
-1. **Docker IP-change recovery:** prove nginx recovers after the backend's address changes,
-   for example on a disposable network where another container takes the server's IP before the
-   restart.
-2. **Caddy validation:** run `caddy validate` on the exact Caddyfile and, separately, test the
-   overlay (logging filter, timeouts, body limit). Do not use a real domain or issue certificates.
+1. **Docker IP-change recovery:**
+   - *Done (Task I, [section 11](#11-task-i-docker-dns-recovery-validation)):* recovery of nginx after
+     the backend's IP changed, without an nginx restart or reload, was demonstrated on a disposable
+     Docker network (PASS, with one transient 504).
+   - *Remaining, NOT VERIFIED:* a controlled experiment that waits out the full 10 s resolver
+     validity interval, and an explanation for why the first post-swap request already reached the
+     new backend.
+2. **Caddy validation:**
+   - *Done (Task H, [section 10](#10-task-h-caddy-configuration-validation)):* Caddyfile syntax
+     validation and configuration adaptation (PASS).
+   - *Remaining, NOT VERIFIED:* actual removal of the URI and Referer from real Caddy log lines,
+     certificate issuance, runtime HTTPS and HTTP-to-HTTPS redirect behaviour, runtime timeout and
+     body-limit behaviour, and Caddy recovery after the client container's IP changes. These need a
+     running Caddy, tested without a real domain or real certificates.
 3. **Shutdown under load:** stop the server during an in-flight campaign (using the mock transport,
    never real SMTP) and confirm lease release and recovery.
 4. **Tracking-path redaction in Docker:** verify token paths are redacted in container logs.
 5. **Final merge review** of the deployment changes, and the later-stage findings that are out of
    scope here (SMTP timeouts and TLS enforcement, backups and restore, data retention, metrics,
    CI Docker jobs).
+
+## 10. Task H: Caddy configuration validation
+
+Task H validated the repository `Caddyfile` with the Caddy image the production overlay references.
+No Caddy server was started. Nothing in the repository was changed.
+
+### Environment and preflight
+
+- Docker Engine 29.9.3, `aarch64` (ARM64).
+- MongoDB: running and healthy, container ID `106d260ca046` (unchanged).
+- Client: running and healthy, container ID `b79af27a7cda` (unchanged).
+- Server: stopped, exit code 0, container ID `13370407166d` (unchanged).
+- The five unrelated pre-existing containers were unchanged.
+- Git was on `docs/stage-4b21-validation-report` at `d585f0a` with a clean working tree.
+
+MongoDB and the client showed new start times because Docker's `unless-stopped` restart policy brought
+them back when the Docker daemon restarted. Their container IDs were unchanged and their restart
+counts were zero.
+
+### Caddy image
+
+| Item | Value |
+|---|---|
+| Image | `caddy:2` (the tag used by `docker-compose.prod.yml`) |
+| Resolved version | Caddy v2.11.9 |
+| Platform | linux/arm64 |
+| Image ID and repository digest | `sha256:4e2425f6009577e7c651010f16679c28f7d12df3e7b1914f941a7a3370746b3c` |
+| Obtained by | pulled (it was not available locally) |
+
+`caddy:2` is a **floating tag**, not a pinned one: a later pull can resolve to a different release.
+The digest above identifies only the image that was validated.
+
+### How validation was run
+
+Each command used a disposable container (`docker run --rm`) with `--network none`, `--read-only`,
+temporary in-memory filesystems for writable paths, the repository mounted read-only, no published
+ports, and no named volumes. The validation domain was `mailpulse-validation.invalid`.
+
+| Command | Result |
+|---|---|
+| `caddy validate --config /workspace/Caddyfile --adapter caddyfile` | **PASS** (exit 0, "Valid configuration") |
+| `caddy adapt --pretty` (to inspect the generated JSON) | **PASS** (exit 0) |
+| `caddy fmt --diff` | exit 0; reports that the file differs from Caddy's canonical formatting (cosmetic only) |
+
+### What the adapted configuration contains
+
+| Item | Adapted value |
+|---|---|
+| Reverse proxy | single upstream `client:80`, HTTP transport |
+| Server timeouts | read header 10 s, read body 30 s, write 120 s, idle 120 s |
+| Upstream timeouts | dial 5 s, response header 70 s |
+| Request body maximum | 2,000,000 bytes |
+| Access log | JSON to stdout |
+| Default/error log | JSON to stderr |
+| Log filters (both loggers) | `request>uri` delete and `request>headers>Referer` delete |
+| Response header | `Strict-Transport-Security` set |
+| Compression | gzip |
+| TLS | site on port 443 with Caddy's automatic HTTPS; automatic HTTP-to-HTTPS redirect enabled by default |
+
+Two observations:
+
+- **Body-limit difference between layers:** Caddy's limit is 2,000,000 bytes, while nginx's `2m` is
+  2 MiB (2,097,152 bytes). Caddy is therefore slightly more restrictive. This is conservative and
+  harmless, but the two layers are not identical.
+- **Logging trade-off:** deleting the request URI from Caddy's logs removes path-level information
+  from them, which reduces debugging detail. The redacted nginx log behind Caddy remains the place
+  for request paths.
+
+### Status
+
+| Item | Status |
+|---|---|
+| Caddyfile syntax | **PASS** |
+| Configuration adaptation | **PASS** |
+| Log filters present in the adapted configuration | **PASS** (configuration only) |
+| Actual removal of URI and Referer from real Caddy log lines | **NOT VERIFIED** |
+| Certificate issuance | **NOT VERIFIED** |
+| Runtime HTTPS and HTTP-to-HTTPS redirect behaviour | **NOT VERIFIED** |
+| Runtime timeout behaviour | **NOT VERIFIED** |
+| Runtime body-limit behaviour | **NOT VERIFIED** |
+| Caddy recovery after the client container's IP changes | **NOT VERIFIED** |
+
+Syntax validation and the adapted JSON do not prove runtime logging behaviour, so none of the runtime
+rows above should be read as verified. The only persistent resource added by Task H is the pulled
+`caddy:2` image; no repository files changed.
+
+## 11. Task I: Docker DNS recovery validation
+
+Task I tested whether the repository's nginx configuration recovers when the hostname it proxies to
+moves to a different IP address, without nginx being restarted or reloaded. This addresses the item
+that section 5 recorded as NOT VERIFIED.
+
+### Test environment
+
+- nginx 1.27.5, from the locally built client image, which carries the repository's
+  `client/nginx.conf` (resolver `127.0.0.11`, 10 s validity, variable-based `proxy_pass` to
+  `server:5000`).
+- A completely separate disposable Docker network (`172.30.77.0/24`, checked for overlap with the
+  existing networks beforehand).
+- No existing MailPulse container or network was used or modified, no host ports were published, and
+  no persistent volumes were created.
+- Two tiny disposable backends that answer with `BACKEND_A` or `BACKEND_B`, both registered under the
+  Docker network alias `server`, with different static IPs. They ran as small Node.js HTTP servers in
+  the already-local `node:20-alpine` image.
+- Requests were sent from inside the nginx container with `wget` to `http://127.0.0.1/api/v1/health/ready`.
+
+### Results
+
+| Test | Result |
+|---|---|
+| **A. Initial backend:** backend A (`172.30.77.10`); three requests through nginx returned `BACKEND_A` | **PASS** |
+| **B. Replacement:** backend A removed, backend B (`172.30.77.11`, same alias) started; the first request after the swap returned `BACKEND_B`, and 118 of 118 further requests over 45 s did too | **PASS** (recovery without nginx restart or reload) |
+| **C. Process preservation:** nginx container ID and start time unchanged; master PID stayed 1; all ten worker PIDs unchanged; no reload or signal entries in the logs | **PASS** |
+
+### Transient failure
+
+One request, about 3.4 s after the backend swap (a figure derived from the test script's own
+timestamps), failed with **HTTP 504**. The 504 and nginx's logged request time of about 5.007 s are
+consistent with the configured 5 s connection timeout, for example an attempt against the old address.
+The cause was **not conclusively confirmed**: nginx's error log is set to critical entries only (to
+keep tokens out of it), so it held no line that confirms what timed out. The transient failure is
+recorded here and is **not** a permanent failure: every later request succeeded. Users could see a
+brief error while an upstream is replaced.
+
+### DNS cache timing qualification
+
+The test did **not** deliberately wait out the configured 10 s resolver validity interval before the
+first post-swap request, and that first request already reached backend B. The reason for the
+immediate recovery was **not established**. Per-worker resolver caching was suggested as one possible
+explanation but was not proven.
+
+| Item | Status |
+|---|---|
+| Docker DNS recovery without nginx restart or reload | **PASS** |
+| Controlled experiment that waits out the full 10 s cache interval | **NOT VERIFIED** |
+| Explanation for the immediate recovery | **NOT VERIFIED** |
+
+### Cleanup and preserved state
+
+The disposable backend containers and the test network were removed; no disposable Task I resources
+remain. MongoDB and the client stayed healthy, the server stayed stopped, and the five unrelated
+containers were unchanged. Git remained on `docs/stage-4b21-validation-report` at `d585f0a` with a
+clean working tree. No repository files were modified.
+
+## 12. Updated status summary
+
+| Area | Status |
+|---|---|
+| Caddy syntax validation | PASS |
+| Caddy configuration adaptation | PASS |
+| Caddy runtime log redaction | NOT VERIFIED |
+| Caddy runtime HTTPS and certificate behaviour | NOT VERIFIED |
+| Docker DNS recovery after a backend IP replacement | PASS |
+| Same nginx process, no reload or restart | PASS |
+| Transient failure during replacement | one 504 observed |
+| Controlled full 10 s cache-expiration experiment | NOT VERIFIED |
+
+These results validate specific deployment configuration and behaviour. They do **not** establish that
+the MailPulse production deployment as a whole is ready. Still open from this report and from the
+original audit: backup and restore readiness, production secrets management, real external HTTPS and
+certificate validation, shutdown under load, tracking-path redaction in Docker, full end-to-end
+deployment testing, and the remaining application and operational gaps (SMTP timeouts and TLS
+enforcement, data retention, metrics, CI Docker jobs).
