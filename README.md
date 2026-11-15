@@ -114,7 +114,7 @@ Send a `[TEST]` copy to **only yourself** with one click. Real recipients are ne
 <td valign="top">
 
 ### 🚀 One-Time Sending
-Confirm and launch. Live progress, a per-recipient report, and a guarantee nobody gets it twice.
+Confirm and launch. Live progress and a per-recipient delivery report, backed by at-most-once safeguards.
 
 </td>
 <td valign="top">
@@ -131,11 +131,11 @@ KPI cards, daily charts, failure reasons and recent campaigns — for the last 7
 
 <br>
 
-- **Atomic launch:** a campaign moves `draft → sending` in a single step, so it can never be sent twice.
+- **Atomic launch:** a campaign transitions from `draft` to `sending` through an atomic state change, preventing competing launches.
 - **Background delivery** with bounded concurrency and one delivery record per recipient.
-- **Crash-safe:** interrupted sends resume on restart without re-sending, and a watchdog recovers stalled campaigns.
+- **Recovery:** interrupted deliveries are reconciled after worker or server failure. Uncertain SMTP outcomes are not automatically retried.
 - **Locked after sending:** sent campaigns can't be edited or deleted.
-- **At most once per recipient.** "Sent" means *accepted by your SMTP provider*, not opened or delivered — so treat counts as a lower bound.
+- **At-most-once safeguards.** Delivery claims use fencing and recovery protections to avoid automatic duplicate retries. This is not an exactly-once guarantee. "Sent" means *accepted by your SMTP provider*, not opened or delivered.
 - **Limits:** up to **5,000 recipients** per campaign. Test emails are rate-limited per user.
 - ⚠️ **Run a single server instance.** Delivery bookkeeping and rate limits live in memory.
 
@@ -150,10 +150,6 @@ KPI cards, daily charts, failure reasons and recent campaigns — for the last 7
 | `GET` | `/api/v1/analytics/overview?days=7\|30\|90` | Analytics summary |
 
 </details>
-
-### 🛣️ Coming soon
-
-`⏰ Scheduled sends` · `👤 Personalization` · `🔕 Unsubscribe links` · `👀 Open / click / bounce tracking`
 
 ---
 
