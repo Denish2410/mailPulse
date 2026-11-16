@@ -195,10 +195,68 @@ export const isSmtpConfigured = (env = process.env) => {
 };
 
 /**
+ * SMTP timeouts, in milliseconds. Nodemailer's own defaults (2 minutes to connect, 10 minutes of
+ * socket inactivity) are far longer than the graceful-shutdown window, so a hung SMTP server could
+ * keep a send open past it. Each phase is now bounded below the default SHUTDOWN_TIMEOUT_MS (10 s)
+ * so a send stuck in any single phase gives up before a normal shutdown ends. The phases are
+ * sequential, so one send can still take longer in total; if the shutdown timeout fires first the
+ * process exits and that delivery is recorded INTERRUPTED by the next owner (never re-sent).
+ *
+ * A timeout is a FAILED send, never a retried one: the delivery is recorded failed with
+ * TRANSPORT_ERROR and is not sent again. If the timeout happens after the server accepted the
+ * message, the recipient may still receive it while the delivery says failed; that is the same
+ * uncertain-outcome rule the dispatcher already applies.
+ */
+export const SMTP_TIMEOUT_DEFAULTS_MS = Object.freeze({
+  connectionTimeout: 5_000,
+  greetingTimeout: 5_000,
+  socketTimeout: 8_000,
+});
+export const SMTP_TIMEOUT_BOUNDS_MS = Object.freeze({ min: 1_000, max: 120_000 });
+
+const SMTP_TIMEOUT_ENV = Object.freeze({
+  connectionTimeout: 'SMTP_CONNECTION_TIMEOUT_MS',
+  greetingTimeout: 'SMTP_GREETING_TIMEOUT_MS',
+  socketTimeout: 'SMTP_SOCKET_TIMEOUT_MS',
+});
+
+/**
+ * Resolves the three SMTP timeouts. Unset or empty means the default; anything else must be an
+ * integer within SMTP_TIMEOUT_BOUNDS_MS, otherwise configuration fails closed.
+ *
+ * @param {object} [env=process.env]
+ * @returns {{ connectionTimeout: number, greetingTimeout: number, socketTimeout: number }}
+ * @throws {EmailConfigurationError}
+ */
+export const getSmtpTimeouts = (env = process.env) => {
+  const timeouts = {};
+  for (const [key, name] of Object.entries(SMTP_TIMEOUT_ENV)) {
+    const raw = env[name];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      timeouts[key] = SMTP_TIMEOUT_DEFAULTS_MS[key];
+      continue;
+    }
+    const text = String(raw).trim();
+    const value = /^\d+$/.test(text) ? Number(text) : NaN; // plain digits only (no 1e4, 1.0, +5)
+    if (
+      !Number.isInteger(value) ||
+      value < SMTP_TIMEOUT_BOUNDS_MS.min ||
+      value > SMTP_TIMEOUT_BOUNDS_MS.max
+    ) {
+      throw new EmailConfigurationError(
+        `Invalid ${name}: must be an integer between ${SMTP_TIMEOUT_BOUNDS_MS.min} and ${SMTP_TIMEOUT_BOUNDS_MS.max} milliseconds.`
+      );
+    }
+    timeouts[key] = value;
+  }
+  return timeouts;
+};
+
+/**
  * Parses and validates SMTP configuration from environment variables.
  *
  * @param {object} [env=process.env]
- * @returns {{ host: string, port: number, secure: boolean, auth?: { user: string, pass: string }, from: string }}
+ * @returns {{ host: string, port: number, secure: boolean, auth?: { user: string, pass: string }, from: string, timeouts: { connectionTimeout: number, greetingTimeout: number, socketTimeout: number } }}
  * @throws {EmailConfigurationError}
  */
 export const getSmtpConfig = (env = process.env) => {
@@ -250,6 +308,7 @@ export const getSmtpConfig = (env = process.env) => {
     secure,
     auth,
     from,
+    timeouts: getSmtpTimeouts(env),
   };
 };
 
@@ -276,10 +335,15 @@ export const createSmtpTransport = (config, { env = process.env } = {}) => {
     );
   }
 
+  const timeouts = { ...SMTP_TIMEOUT_DEFAULTS_MS, ...(config.timeouts || {}) };
   const transportOptions = {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    // Bounded so a hung server cannot hold a send open past the shutdown window (see above)
+    connectionTimeout: timeouts.connectionTimeout,
+    greetingTimeout: timeouts.greetingTimeout,
+    socketTimeout: timeouts.socketTimeout,
   };
 
   if (config.auth) {
