@@ -14,6 +14,11 @@ import {
 } from '../services/email.service.js';
 import { evaluateCampaignReadiness } from '../services/campaignReadiness.service.js';
 import {
+  buildDispatchManifest,
+  DispatchManifestError,
+  measureBsonBytes,
+} from '../utils/dispatchManifest.js';
+import {
   startCampaignDispatch,
   getDeliveryCounts,
 } from '../services/campaignDispatch.service.js';
@@ -439,6 +444,64 @@ export const getTestEmailContentIssues = (campaign) => {
 };
 
 /**
+ * Fixed, recipient-free explanations for a recipient list that cannot be stored as a dispatch
+ * manifest. Keyed by DispatchManifestError code; never built from recipient data.
+ */
+const MANIFEST_ISSUE_MESSAGES = Object.freeze({
+  TOO_MANY_RECIPIENTS: 'The campaign has too many recipients. Reduce the number of recipients.',
+  MANIFEST_TOO_LARGE: 'The recipient list is too large to send. Reduce the number of recipients.',
+  DOCUMENT_TOO_LARGE:
+    'The campaign content and recipient list are too large to send together. Reduce the content size or the number of recipients.',
+});
+const MANIFEST_ISSUE_FALLBACK = 'The recipient list could not be prepared for sending.';
+
+/**
+ * Verifies, before a campaign is accepted for sending or scheduling, that its eligible recipients
+ * can be stored as a dispatch manifest: every entry valid, no duplicates, within the recipient cap
+ * and within the measured BSON size limits (see utils/dispatchManifest.js).
+ *
+ * This is validation only. Nothing is stored and dispatch behaviour is unchanged.
+ *
+ * `app.locals.dispatchManifestLimits` may LOWER the limits (tests); the builder never lets a
+ * caller raise one above its hard cap.
+ *
+ * @param {import('express').Request} req
+ * @param {object} campaign - The campaign as loaded for this request (scoped to its owner)
+ * @param {Array<{ _id: any, email: string, name?: string }>} eligibleContacts
+ * @param {'sending'|'scheduling'} action
+ * @throws {AppError} 422 with a recipient-free message
+ */
+export const assertDispatchManifestWithinLimits = (req, campaign, eligibleContacts, action) => {
+  const overrides = req.app?.locals?.dispatchManifestLimits;
+  const limits =
+    overrides && typeof overrides === 'object'
+      ? {
+          maxRecipients: overrides.maxRecipients,
+          maxManifestBytes: overrides.maxManifestBytes,
+          maxDocumentBytes: overrides.maxDocumentBytes,
+        }
+      : {};
+  const document = typeof campaign?.toObject === 'function' ? campaign.toObject() : campaign;
+
+  try {
+    buildDispatchManifest(eligibleContacts, {
+      ...limits,
+      campaignDocumentBytes: measureBsonBytes(document),
+    });
+  } catch (error) {
+    if (error instanceof DispatchManifestError) {
+      throw new AppError(`Campaign is not ready for ${action}.`, 422, [
+        {
+          path: 'campaign.recipientIds',
+          message: MANIFEST_ISSUE_MESSAGES[error.code] || MANIFEST_ISSUE_FALLBACK,
+        },
+      ]);
+    }
+    throw error;
+  }
+};
+
+/**
  * Resolves the email service for a request.
  * Tests (and future composition roots) inject a service via `app.locals.emailService`;
  * otherwise a fail-closed default service configured from environment variables is used.
@@ -622,6 +685,8 @@ export const sendCampaign = asyncHandler(async (req, res) => {
     ]);
   }
 
+  assertDispatchManifestWithinLimits(req, campaign, eligibleContacts, 'sending');
+
   // 4. Verify a transport exists before locking the campaign
   const emailService = resolveEmailService(req);
   try {
@@ -716,6 +781,8 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
       },
     ]);
   }
+
+  assertDispatchManifestWithinLimits(req, campaign, eligibleContacts, 'scheduling');
 
   // 5. Verify email transport configured
   const emailService = resolveEmailService(req);
