@@ -30,6 +30,7 @@ import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
 import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
 import { buildDispatchManifest, measureBsonBytes } from '../utils/dispatchManifest.js';
+import { ensureDeliveriesFromManifest } from './deliveryGeneration.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -808,21 +809,12 @@ export const startCampaignDispatch = async ({
       logWarning(logger, `[Dispatcher] Campaign ${String(locked._id)} worker fenced itself (${reason}); it stops claiming deliveries.`),
   });
 
-  // 2. One pending delivery per eligible recipient (address snapshot)
+  // 2. One pending delivery per manifest entry (address snapshot), generated from the manifest
+  //    STORED by the lock above and then verified to be exactly that list. Processing below is
+  //    only ever scheduled after this verification, so no delivery of an incomplete or mismatched
+  //    recipient list can be claimed.
   try {
-    await Delivery.insertMany(
-      eligibleContacts.map((contact, index) => ({
-        campaignId: locked._id,
-        // Alternate A/B so the split is exactly even; without a test everyone is 'A'
-        variant: locked.subjectB && index % 2 === 1 ? 'B' : 'A',
-        userId: locked.userId,
-        contactId: contact._id,
-        email: contact.email,
-        name: typeof contact.name === 'string' ? contact.name.slice(0, 100) : '',
-        status: 'pending',
-      })),
-      { ordered: false }
-    );
+    await ensureDeliveriesFromManifest(locked._id);
   } catch (error) {
     // Roll back so the user can retry; nothing has been sent yet
     leaseSession.stop();
