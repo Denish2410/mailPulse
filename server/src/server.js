@@ -16,15 +16,9 @@ import app from './app.js';
 import { connectDB } from './config/db.js';
 import { validateAuthConfig } from './config/auth.js';
 import { getDefaultEmailService } from './services/email.service.js';
-import {
-  resumeInterruptedDispatches,
-  startDispatchWatchdog,
-  stopAllDispatches,
-} from './services/campaignDispatch.service.js';
-import {
-  startCampaignScheduler,
-  stopCampaignScheduler,
-} from './services/campaignScheduler.service.js';
+import { stopAllDispatches } from './services/campaignDispatch.service.js';
+import { stopCampaignScheduler } from './services/campaignScheduler.service.js';
+import { startDispatchRuntime } from './services/dispatchRuntime.service.js';
 
 let activeServer = null;
 let isStarting = false;
@@ -187,16 +181,11 @@ export const startServer = async (options = {}) => {
     // 1. Await database connection before opening port
     await dbConnector();
 
-    // 1b. Resume campaign sends interrupted by a previous shutdown or crash (non-blocking), then
-    //     keep watching for dispatches that stall while the server runs
+    // 1b. Start the dispatch runtime: resume campaign sends interrupted by a previous shutdown or
+    //     crash (non-blocking), the stalled-campaign watchdog and the scheduled-campaign poller
     const shouldResume = options.resumeDispatches ?? process.env.NODE_ENV !== 'test';
     if (shouldResume) {
-      const emailService = getDefaultEmailService();
-      resumeInterruptedDispatches({ emailService }).catch((err) => {
-        console.error(`[Dispatcher] Failed to resume interrupted dispatches: ${err.name || 'Error'}`);
-      });
-      startDispatchWatchdog({ emailService });
-      startCampaignScheduler({ emailService });
+      startDispatchRuntime({ emailService: getDefaultEmailService() });
     }
 
     // 2. Start HTTP server only after database connection succeeds
