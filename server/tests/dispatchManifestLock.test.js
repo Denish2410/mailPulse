@@ -403,7 +403,7 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       }
     });
 
-    it('a later lock of the same campaign replaces the whole manifest with its own snapshot', async (t) => {
+    it('a campaign that already carries a manifest can never be locked again, so it is never replaced', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       const contacts = await makeContacts(['First Lock A', 'First Lock B', 'Second Lock Only']);
       const campaign = await makeCampaign(contacts);
@@ -411,9 +411,10 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       await lock(campaign, contacts.slice(0, 2), { emailService: first.emailService });
       first.open();
       await waitForCampaignDispatch(campaign._id);
+      const before = await rawCampaign(campaign._id);
 
-      // Simulate the campaign coming back as a draft (as today's rollback paths do), then send again
-      await Delivery.deleteMany({ campaignId: campaign._id });
+      // Even if the campaign were forced back to 'draft' (no supported path does this), a second
+      // lock must not match: the stored manifest stays exactly the first one.
       await mongoose.connection
         .collection('campaigns')
         .updateOne({ _id: campaign._id }, { $set: { status: 'draft' }, $unset: { dispatchLeaseOwner: '', dispatchLeaseUntil: '' } });
@@ -421,12 +422,13 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       const second = gatedEmailService();
       const relocked = await lock(again, [contacts[2]], { emailService: second.emailService });
 
-      assert.ok(relocked);
+      assert.equal(relocked, null);
       const raw = await rawCampaign(campaign._id);
-      assert.equal(raw.dispatchLeaseEpoch, 2);
-      assert.equal(raw.dispatchManifestVersion, 1);
-      assert.equal(raw.dispatchManifestCount, 1);
-      assert.deepEqual(raw.dispatchManifest.map((entry) => String(entry.c)), [String(contacts[2]._id)]);
+      assert.equal(raw.status, 'draft');
+      assert.equal(raw.dispatchLeaseEpoch, before.dispatchLeaseEpoch);
+      assert.equal(raw.dispatchManifestCount, 2);
+      assert.deepEqual(raw.dispatchManifest, before.dispatchManifest);
+      assert.equal(second.transport.count, 0);
     });
   });
 

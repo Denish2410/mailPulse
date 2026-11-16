@@ -28,6 +28,7 @@ import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
+import { manifestFieldsFor } from './helpers/manifest.js';
 import { signAccessToken } from '../src/utils/token.js';
 import { hashPassword } from '../src/services/password.service.js';
 import {
@@ -557,6 +558,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         status: 'sending',
         sendStartedAt: new Date(),
         stats: { total: 2, sent: 0, failed: 0 },
+        ...manifestFieldsFor([contactA, contactB]),
       });
       await Delivery.create([
         {
@@ -747,6 +749,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         status: 'sending',
         sendStartedAt: minutesAgo(30),
         stats: { total: 2, sent: 0, failed: 0 },
+        ...manifestFieldsFor([contactA, contactB]),
       });
       await Delivery.create([
         seedDelivery(campaign, contactA, 'processing'),
@@ -776,6 +779,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         status: 'sending',
         sendStartedAt: minutesAgo(1),
         stats: { total: 1, sent: 0, failed: 0 },
+        ...manifestFieldsFor([contactA]),
       });
       await Delivery.create([seedDelivery(campaign, contactA, 'processing')]);
 
@@ -797,6 +801,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         status: 'sending',
         sendStartedAt: minutesAgo(30),
         stats: { total: 1, sent: 0, failed: 0 },
+        ...manifestFieldsFor([contactA]),
       });
       await Delivery.create([seedDelivery(campaign, contactA, 'pending')]);
 
@@ -853,13 +858,14 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       assert.equal(transport.count, 1);
     });
 
-    it('Returns a stalled campaign that never got deliveries to draft', async (t) => {
+    it('Completes a stalled campaign that never got deliveries from its manifest, never to draft', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       const campaign = await createCampaignFor(userOne, {
         recipientIds: [contactA._id],
         status: 'sending',
         sendStartedAt: minutesAgo(30),
         stats: { total: 1, sent: 0, failed: 0 },
+        ...manifestFieldsFor([contactA]),
       });
 
       const recovered = await reapStalledCampaigns({
@@ -868,10 +874,36 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         stallTimeoutMs: 15 * 60 * 1000,
       });
       assert.equal(recovered, 1);
+      await waitForCampaignDispatch(campaign._id);
 
       const stored = await Campaign.findById(campaign._id).lean();
-      assert.equal(stored.status, 'draft');
-      assert.equal(stored.sendStartedAt, null);
+      assert.equal(stored.status, 'sent');
+      assert.equal(transport.count, 1);
+      assert.equal(transport.sentEmails[0].to, contactA.email);
+    });
+
+    it('Refuses a stalled campaign without a manifest and changes nothing', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const errors = [];
+      const campaign = await createCampaignFor(userOne, {
+        recipientIds: [contactA._id],
+        status: 'sending',
+        sendStartedAt: minutesAgo(30),
+        stats: { total: 1, sent: 0, failed: 0 },
+      });
+      await Delivery.create([seedDelivery(campaign, contactA, 'processing')]);
+
+      const recovered = await reapStalledCampaigns({
+        emailService: app.locals.emailService,
+        logger: { ...silentLogger, error: (m) => errors.push(m) },
+        stallTimeoutMs: 15 * 60 * 1000,
+      });
+      assert.equal(recovered, 0);
+      assert.ok(errors.some((m) => /no dispatch manifest/.test(m)));
+      const stored = await Campaign.findById(campaign._id).lean();
+      assert.equal(stored.status, 'sending');
+      const delivery = await Delivery.findOne({ campaignId: campaign._id }).lean();
+      assert.equal(delivery.status, 'processing', 'nothing was swept');
       assert.equal(transport.count, 0);
     });
   });

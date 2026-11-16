@@ -27,6 +27,7 @@ import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
+import { manifestFieldsFor } from './helpers/manifest.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import {
   recoverCampaign,
@@ -286,6 +287,7 @@ describe('Fenced dispatch work', () => {
       sendStartedAt: new Date(),
       recipientIds: contacts.map((c) => c._id),
       stats: { total: n, sent: 0, failed: 0 },
+      ...manifestFieldsFor(contacts),
       ...overrides,
     });
     await Delivery.insertMany(contacts.map((c) => ({ campaignId: campaign._id, userId: user._id, contactId: c._id, email: c.email, status: 'pending' })));
@@ -650,6 +652,7 @@ describe('Takeover fencing hook and the atomic claim', () => {
       sendStartedAt: new Date(),
       recipientIds: contacts.map((c) => c._id),
       stats: { total: n, sent: 0, failed: 0 },
+      ...manifestFieldsFor(contacts),
       ...overrides,
     });
     await Delivery.collection.insertMany(

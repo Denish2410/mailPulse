@@ -11,6 +11,7 @@ import mongoose from 'mongoose';
 import Contact from '../../src/models/Contact.js';
 import Campaign from '../../src/models/Campaign.js';
 import Delivery from '../../src/models/Delivery.js';
+import { manifestFieldsFor } from './manifest.js';
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'dispatchChild.js');
 
@@ -60,6 +61,7 @@ export const seedSendingCampaign = async (user, n, overrides = {}) => {
     sendStartedAt: new Date(),
     recipientIds: contacts.map((c) => c._id),
     stats: { total: n, sent: 0, failed: 0 },
+    ...manifestFieldsFor(contacts),
     ...overrides,
   });
   await Delivery.insertMany(

@@ -488,6 +488,16 @@ describe('Delivery generation from the stored manifest', () => {
       assert.equal((await Campaign.findById(campaign._id).lean()).status, 'sent');
     });
 
+    const assertAcceptedButNotDispatched = async (campaignId) => {
+      await waitForCampaignDispatch(campaignId);
+      assert.equal(transport.count, 0, 'nothing was sent');
+      const stored = await mongoose.connection.collection('campaigns').findOne({ _id: campaignId });
+      assert.equal(stored.status, 'sending', 'accepted, not returned to draft');
+      assert.equal(stored.dispatchManifestVersion, 1);
+      assert.ok(stored.dispatchLeaseUntil <= new Date(), 'lease handed back for recovery');
+      assert.equal(await Delivery.countDocuments({ campaignId, status: { $ne: 'pending' } }), 0, 'nothing was claimed');
+    };
+
     it('does not dispatch anything when the deliveries do not match the manifest', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       useTransport();
@@ -496,32 +506,36 @@ describe('Delivery generation from the stored manifest', () => {
       const campaign = await draftFor(contacts);
       // A delivery that does not belong to this campaign's manifest already exists
       await Delivery.create({ campaignId: campaign._id, userId: owner._id, contactId: stray._id, email: stray.email, status: 'pending' });
+      const errors = [];
 
-      await rejectsWith(
-        startCampaignDispatch({ campaign, userId: owner._id, eligibleContacts: contacts, emailService, logger: quiet }),
-        'MEMBERSHIP_MISMATCH'
-      );
-      await waitForCampaignDispatch(campaign._id);
-      assert.equal(transport.count, 0);
-      assert.equal(await Delivery.countDocuments({ campaignId: campaign._id, status: { $ne: 'pending' } }), 0);
+      const locked = await startCampaignDispatch({
+        campaign, userId: owner._id, eligibleContacts: contacts, emailService,
+        logger: { ...quiet, error: (m) => errors.push(m) },
+      });
+      assert.ok(locked);
+      assert.ok(errors.some((m) => /MEMBERSHIP_MISMATCH/.test(m)));
+      await assertAcceptedButNotDispatched(campaign._id);
+      assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 4, 'no delivery was deleted');
     });
 
-    it('does not dispatch anything when generation fails', async (t) => {
+    it('does not dispatch anything when generation fails, and deletes nothing', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       useTransport();
       const contacts = await makeContacts(3);
       const campaign = await draftFor(contacts);
+      const errors = [];
       const mock = t.mock.method(Delivery, 'insertMany', async () => {
         throw Object.assign(new Error('boom'), { name: 'MongoNetworkError' });
       });
 
-      await rejectsWith(
-        startCampaignDispatch({ campaign, userId: owner._id, eligibleContacts: contacts, emailService, logger: quiet }),
-        'INSERT_FAILED'
-      );
+      const locked = await startCampaignDispatch({
+        campaign, userId: owner._id, eligibleContacts: contacts, emailService,
+        logger: { ...quiet, error: (m) => errors.push(m) },
+      });
       mock.mock.restore();
-      await waitForCampaignDispatch(campaign._id);
-      assert.equal(transport.count, 0);
+      assert.ok(locked);
+      assert.ok(errors.some((m) => /INSERT_FAILED/.test(m)));
+      await assertAcceptedButNotDispatched(campaign._id);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 0);
     });
   });

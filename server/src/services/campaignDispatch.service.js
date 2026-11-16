@@ -30,7 +30,13 @@ import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
 import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
 import { buildDispatchManifest, measureBsonBytes } from '../utils/dispatchManifest.js';
-import { ensureDeliveriesFromManifest } from './deliveryGeneration.service.js';
+import {
+  ensureDeliveriesFromManifest,
+  loadCampaignManifest,
+  classifyStoredManifest,
+  generateDeliveriesFromManifest,
+  verifyDeliveriesMatchManifest,
+} from './deliveryGeneration.service.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -776,6 +782,9 @@ export const startCampaignDispatch = async ({
       userId,
       status: { $in: ['draft', 'scheduled'] },
       updatedAt: campaign.updatedAt,
+      // A manifest is written exactly once. A campaign that already carries one was locked before
+      // and can never be locked (and so never have its recipient list replaced) again.
+      dispatchManifestVersion: { $exists: false },
     },
     [
       {
@@ -816,23 +825,19 @@ export const startCampaignDispatch = async ({
   try {
     await ensureDeliveriesFromManifest(locked._id);
   } catch (error) {
-    // Roll back so the user can retry; nothing has been sent yet
-    leaseSession.stop();
-    await Delivery.deleteMany({ campaignId: locked._id, status: 'pending' });
-    await Campaign.updateOne(
-      { _id: locked._id, status: 'sending', dispatchLeaseEpoch: leaseSession.epoch },
-      {
-        $set: {
-          status: 'draft',
-          sendStartedAt: null,
-          'stats.total': 0,
-          'stats.sent': 0,
-          'stats.failed': 0,
-        },
-        $unset: LEASE_UNSET,
-      }
+    // Generation or verification did not complete, so nothing was scheduled, claimed or sent. The
+    // campaign is durably accepted: it stays 'sending' with its manifest, no delivery is deleted
+    // and it is NOT returned to draft. The lease is given back so recovery can complete the
+    // generation from the stored manifest (and verify it) at its next sweep.
+    logger.error(
+      `[Dispatcher] Campaign ${String(locked._id)} delivery generation did not complete (${error?.code || error?.name || 'Error'}). It stays 'sending' and will be completed from its manifest by recovery.`
     );
-    throw error;
+    try {
+      await leaseSession.release();
+    } catch {
+      leaseSession.stop(); // the lease then simply expires
+    }
+    return locked;
   }
 
   // 3. Background processing, as the owner of the lease granted above
@@ -844,11 +849,14 @@ export const startCampaignDispatch = async ({
 /**
  * Recovers one campaign left in 'sending' with no dispatch running in this process.
  *
+ * - Only a campaign with a valid stored dispatch manifest is recovered. One without a manifest
+ *   (locked before manifests existed) or with a damaged one is 'refused' untouched.
  * - Deliveries stuck in 'processing' are failed with 'INTERRUPTED' instead of being re-sent.
- * - A campaign that was locked but never got any deliveries (the process died between the lock
- *   and the insert) sent nothing, so it is returned to 'draft' for the user to retry.
- * - Otherwise stats are recomputed and remaining 'pending' deliveries are dispatched; the
- *   campaign finalizes when they are done.
+ * - Delivery generation is completed from the manifest and verified to be exactly it. A campaign
+ *   whose owner died between the lock and the last delivery insert is therefore finished and
+ *   sent; it is never dispatched to a partial list and never returned to draft.
+ * - Stats are recomputed and remaining 'pending' deliveries are dispatched; the campaign finalizes
+ *   when they are done.
  *
  * Mutually exclusive per campaign within this process: if the campaign is already dispatching
  * or being recovered, this returns 'skipped' without touching it. The check and the lock are
@@ -858,7 +866,7 @@ export const startCampaignDispatch = async ({
  * Multi-instance: the campaign's lease is taken first; if another live instance holds it, this
  * returns 'skipped' and the campaign is left alone.
  *
- * @returns {Promise<'resumed'|'reverted'|'skipped'>}
+ * @returns {Promise<'resumed'|'refused'|'skipped'>}
  */
 export const recoverCampaign = async (campaignId, { emailService, concurrency, logger = console } = {}) => {
   const key = String(campaignId);
@@ -870,6 +878,22 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
   let session = null;
   let handedOff = false;
   try {
+    // Only a campaign with a VALID stored manifest is ever recovered. A campaign locked before
+    // manifests existed ('legacy') or whose manifest is damaged ('corrupt') is refused before
+    // anything is touched (before the lease is even taken, so no delivery is fenced and no lease or
+    // epoch changes): its recipient list cannot be proven complete, so nothing is swept,
+    // generated or sent, and it is left in 'sending' for an operator.
+    const stored = await loadCampaignManifest(campaignId);
+    const manifestKind = classifyStoredManifest(stored);
+    if (!stored || manifestKind !== 'valid') {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} NOT recovered: ${
+          manifestKind === 'legacy' ? 'it has no dispatch manifest' : 'its dispatch manifest is invalid'
+        }. Nothing was changed or sent; it needs operator review.`
+      );
+      return 'refused';
+    }
+
     // Take over in this order: (1) read the expired lease and the next epoch, (2) fence every
     // pending delivery to that epoch, (3) only then acquire the lease atomically (MongoDB server
     // time, new epoch). If fencing fails nothing is acquired, recovered or dispatched and the
@@ -898,30 +922,32 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
       { $set: { status: 'failed', errorCode: 'INTERRUPTED', failedAt: new Date() } }
     );
 
+    // Complete delivery generation from the stored manifest (idempotent: only entries without a
+    // delivery are inserted, and they carry our epoch as their fence like every other pending
+    // delivery), then verify the deliveries are EXACTLY the manifest. An interrupted generation is
+    // therefore finished here, and an incomplete or mismatched recipient list is never dispatched.
+    try {
+      const generation = {
+        campaignId: stored._id,
+        userId: stored.userId,
+        subjectB: stored.subjectB,
+        entries: stored.dispatchManifest,
+      };
+      await generateDeliveriesFromManifest({ ...generation, fence: session.epoch });
+      await verifyDeliveriesMatchManifest(generation);
+    } catch (error) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} NOT resumed: its deliveries could not be completed and verified against its manifest (${error?.code || error?.name || 'Error'}). Nothing was dispatched.`
+      );
+      return 'refused';
+    }
+
     // Defense in depth: the acquire was a compare-and-swap against the epoch the pending deliveries
     // were fenced to, so they already carry exactly our epoch. Re-asserting it after the sweep is
     // idempotent (`$max` never lowers) and costs one update.
     await raiseDeliveryFences(campaignId, session.epoch);
 
     const counts = await getDeliveryCounts(campaignId);
-
-    if (counts.total === 0) {
-      const reverted = await Campaign.updateOne(
-        { _id: campaignId, status: 'sending', dispatchLeaseEpoch: session.epoch },
-        {
-          $set: {
-            status: 'draft',
-            sendStartedAt: null,
-            sendCompletedAt: null,
-            'stats.total': 0,
-            'stats.sent': 0,
-            'stats.failed': 0,
-          },
-          $unset: LEASE_UNSET,
-        }
-      );
-      return reverted.modifiedCount > 0 ? 'reverted' : 'skipped';
-    }
 
     await Campaign.updateOne(
       { _id: campaignId, status: 'sending', dispatchLeaseEpoch: session.epoch },
@@ -940,7 +966,7 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
     handedOff = true;
     return 'resumed';
   } finally {
-    // Not handed to a dispatch (skipped, reverted or failed): stop renewing and give it back
+    // Not handed to a dispatch (skipped, refused or failed): stop renewing and give it back
     if (session && !handedOff) await session.release();
     recoveringCampaigns.delete(key);
   }
@@ -954,7 +980,7 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
  * @param {{ sendEmail: Function }} options.emailService
  * @param {number} [options.concurrency]
  * @param {object} [options.logger=console]
- * @returns {Promise<number>} Number of campaigns resumed or returned to draft
+ * @returns {Promise<number>} Number of campaigns resumed
  */
 export const resumeInterruptedDispatches = async ({
   emailService,
@@ -970,7 +996,7 @@ export const resumeInterruptedDispatches = async ({
     }
 
     const outcome = await recoverCampaign(campaignId, { emailService, concurrency, logger });
-    if (outcome !== 'skipped') {
+    if (outcome === 'resumed') {
       recovered += 1;
     }
   }
@@ -1057,7 +1083,7 @@ export const reapStalledCampaigns = async ({
     }
 
     const outcome = await recoverCampaign(campaignId, { emailService, concurrency, logger });
-    if (outcome !== 'skipped') {
+    if (outcome === 'resumed') {
       recovered += 1;
     }
   }
