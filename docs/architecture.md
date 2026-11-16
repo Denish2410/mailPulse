@@ -374,6 +374,7 @@ flowchart TD
 - **Renewal is strict:** it succeeds only for the exact owner and epoch **and only while the lease is still unexpired by database time**. An expired lease is never revived, even if nobody has taken it yet. A worker that loses its lease this way stays fenced.
 - A worker keeps the epoch it was granted (a `LeaseSession`). Renewal, the pre-claim check, delivery updates, statistics and finalization are all conditional on that exact owner and epoch. The process-wide `INSTANCE_ID` is not an acquisition identity.
 - The draft/scheduled -> `sending` transition takes the lease in the same atomic update, so a campaign is never `sending` without an owner.
+- The same update stores the campaign's dispatch manifest (version, count and recipients). It is written once: a campaign that already has one cannot be locked again. Deliveries are generated from it and verified before any claim.
 
 ### Per-delivery fencing (no transactions, no replica set)
 Checking the lease and then claiming a delivery are two separate database operations, so a worker could verify its lease, stall, lose the lease, and still claim. That race is closed by making the **claim itself** the fence:
@@ -396,6 +397,7 @@ A worker that cannot confirm its lease within 3/4 of the lease length (renewal f
 
 ### Recovery
 - Startup recovery and the watchdog take the lease first (new epoch) and leave any campaign a live owner holds untouched. Deliveries still `processing` under an older epoch are recorded `INTERRUPTED`; they are **never re-sent**.
+- Recovery only resumes a campaign with a valid **dispatch manifest** (the recipient list stored by the send lock). It completes delivery generation from that list and verifies the deliveries are exactly it before resuming. A campaign without a manifest, or with a damaged one, is refused untouched. See `docs/deployment/MANIFEST-UPGRADE.md`.
 - A graceful shutdown **releases** its leases: a released lease is stamped as ended with the database's current time, so peers may take it immediately and the watchdog lists it at its next sweep (`CAMPAIGN_WATCHDOG_INTERVAL_MS`, default 5 minutes) instead of waiting for `CAMPAIGN_STALL_TIMEOUT_MS` (15 minutes). A crashed instance's lease lapses after `CAMPAIGN_LEASE_MS` (default 60 s). A campaign that never had a lease (for example one still running on an older version) is only recovered by the stall timeout.
 
 ### Delivery guarantees, and what is NOT guaranteed
