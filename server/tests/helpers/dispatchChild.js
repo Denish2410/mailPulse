@@ -74,6 +74,46 @@ const handlers = {
     return { locked: Boolean(locked), epoch: locked?.dispatchLeaseEpoch ?? null, recipients: eligibleContacts.length };
   },
 
+  /**
+   * The real send lock, but delivery generation is interrupted: the first `insertBefore` manifest
+   * entries are inserted, then this process reports 'generation-paused' and stops itself (SIGSTOP)
+   * BEFORE inserting the rest. The parent can then SIGKILL it (a crash part-way through
+   * generation) or SIGCONT it later (a stale generator that resumes after another owner took over).
+   * When resumed it inserts the remaining entries and carries on with the real code path. Sends are
+   * recorded in probe_sends. Reported as 'lock-finished'.
+   */
+  lockWithInterruptedGeneration: async ({ campaignId, contactIds, insertBefore }) => {
+    const campaign = await Campaign.findById(campaignId);
+    const eligibleContacts = await Contact.find({ _id: { $in: contactIds }, userId: campaign.userId })
+      .select('name email')
+      .sort({ _id: 1 })
+      .lean();
+    const realInsertMany = Delivery.insertMany.bind(Delivery);
+    let interrupted = false;
+    Delivery.insertMany = async (docs, options) => {
+      if (interrupted) return realInsertMany(docs, options);
+      interrupted = true;
+      if (insertBefore > 0) await realInsertMany(docs.slice(0, insertBefore), options);
+      await new Promise((resolve) => process.send({ event: 'generation-paused', inserted: insertBefore }, resolve));
+      process.kill(process.pid, 'SIGSTOP');
+      // Resumed (SIGCONT): finish inserting exactly like the interrupted generator would
+      return realInsertMany(docs.slice(insertBefore), options);
+    };
+    (async () => {
+      const locked = await dispatch.startCampaignDispatch({
+        campaign,
+        userId: campaign.userId,
+        eligibleContacts,
+        emailService: makeEmailService({}),
+        concurrency: 1,
+        logger: quiet,
+      });
+      if (locked) await dispatch.waitForCampaignDispatch(campaignId);
+      process.send({ event: 'lock-finished', locked: Boolean(locked), epoch: locked?.dispatchLeaseEpoch ?? null });
+    })().catch((error) => process.send({ event: 'lock-error', error: error.message }));
+    return true;
+  },
+
   /** Take a campaign's lease and keep it (heartbeat running). */
   acquire: async ({ campaignId, startAt }) => {
     if (startAt) await new Promise((resolve) => setTimeout(resolve, Math.max(0, startAt - Date.now())));
