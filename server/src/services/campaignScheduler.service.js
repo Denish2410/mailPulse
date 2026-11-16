@@ -2,6 +2,7 @@ import Campaign from '../models/Campaign.js';
 import User from '../models/User.js';
 import { evaluateCampaignReadiness } from './campaignReadiness.service.js';
 import { startCampaignDispatch } from './campaignDispatch.service.js';
+import { DispatchManifestError } from '../utils/dispatchManifest.js';
 
 /**
  * MailPulse Campaign Scheduler (Phase 9)
@@ -64,9 +65,10 @@ const failScheduledCampaign = async (campaign, reason, logger) => {
  * @param {object} options.emailService
  * @param {object} [options.logger]
  * @param {Date} [options.now]
+ * @param {object} [options.manifestLimits] - May only LOWER the dispatch manifest limits (tests)
  * @returns {Promise<{ due: number, dispatched: number, failed: number, skipped: number }>}
  */
-export const pollScheduledCampaigns = async ({ emailService, logger = console, now } = {}) => {
+export const pollScheduledCampaigns = async ({ emailService, logger = console, now, manifestLimits } = {}) => {
   const result = { due: 0, dispatched: 0, failed: 0, skipped: 0 };
   const due = await Campaign.find({
     status: 'scheduled',
@@ -100,6 +102,7 @@ export const pollScheduledCampaigns = async ({ emailService, logger = console, n
         eligibleContacts,
         emailService,
         logger,
+        manifestLimits,
       });
       if (locked) {
         result.dispatched += 1;
@@ -109,6 +112,17 @@ export const pollScheduledCampaigns = async ({ emailService, logger = console, n
         result.skipped += 1;
       }
     } catch (error) {
+      // The recipients cannot be stored as a dispatch manifest. This is thrown before the lock, so
+      // nothing was sent or changed; retrying every poll could never succeed, so fail it visibly.
+      if (error instanceof DispatchManifestError) {
+        try {
+          await failScheduledCampaign(campaign, `recipient list cannot be stored (${error.code})`, logger);
+          result.failed += 1;
+          continue;
+        } catch {
+          // fall through: counted as skipped and retried at the next poll
+        }
+      }
       result.skipped += 1;
       log(
         logger,

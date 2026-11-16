@@ -706,6 +706,7 @@ export const sendCampaign = asyncHandler(async (req, res) => {
     userId,
     eligibleContacts,
     emailService,
+    manifestLimits: req.app?.locals?.dispatchManifestLimits,
   });
 
   if (!locked) {

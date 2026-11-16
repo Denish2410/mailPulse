@@ -29,6 +29,7 @@ import {
 import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
 import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
+import { buildDispatchManifest, measureBsonBytes } from '../utils/dispatchManifest.js';
 
 /**
  * MailPulse Campaign Dispatcher (Phase 5)
@@ -729,8 +730,12 @@ export const scheduleCampaignProcessing = (campaignId, options = {}) => {
  * @param {{ sendEmail: Function }} params.emailService
  * @param {number} [params.concurrency]
  * @param {object} [params.logger]
+ * @param {{ maxRecipients?: number, maxManifestBytes?: number, maxDocumentBytes?: number }} [params.manifestLimits]
+ *   May only LOWER the dispatch manifest limits (tests); see utils/dispatchManifest.js
  * @returns {Promise<object|null>} The campaign in 'sending' state, or null when the draft
  *   changed or was already sent since it was evaluated (caller should respond 409).
+ * @throws {import('../utils/dispatchManifest.js').DispatchManifestError} When the eligible
+ *   recipients cannot be stored as a manifest. Thrown BEFORE the lock: nothing has changed.
  */
 export const startCampaignDispatch = async ({
   campaign,
@@ -739,14 +744,29 @@ export const startCampaignDispatch = async ({
   emailService,
   concurrency,
   logger = console,
+  manifestLimits,
 }) => {
   if (!Array.isArray(eligibleContacts) || eligibleContacts.length === 0) {
     throw new Error('startCampaignDispatch requires at least one eligible contact.');
   }
 
+  // 0. The dispatch manifest: the exact eligible-recipient snapshot this campaign is locked to.
+  //    Built (and size-checked against the measured campaign document) before anything is written;
+  //    a list that cannot be stored safely throws here and the campaign is left untouched.
+  const campaignDocument = typeof campaign?.toObject === 'function' ? campaign.toObject() : campaign;
+  const manifest = buildDispatchManifest(eligibleContacts, {
+    maxRecipients: manifestLimits?.maxRecipients,
+    maxManifestBytes: manifestLimits?.maxManifestBytes,
+    maxDocumentBytes: manifestLimits?.maxDocumentBytes,
+    campaignDocumentBytes: measureBsonBytes(campaignDocument),
+  });
+
   // 1. Atomic draft -> sending transition on the exact evaluated version. The lease is taken in
   //    the SAME update (an update pipeline using MongoDB server time), so there is never a moment
-  //    when the campaign is 'sending' without an owner that a peer's watchdog could grab.
+  //    when the campaign is 'sending' without an owner that a peer's watchdog could grab. The
+  //    manifest is written by that same update too: a campaign is never 'sending' under this lock
+  //    without its complete recipient list, and a lock that loses writes no manifest at all.
+  //    `$literal` stores the entries as data, so a name such as "$status" is never evaluated.
   const leaseMs = getLeaseMs();
   const confirmedAt = performance.now(); // monotonic, captured before the request (conservative)
   const locked = await Campaign.findOneAndUpdate(
@@ -766,6 +786,9 @@ export const startCampaignDispatch = async ({
           'stats.sent': 0,
           'stats.failed': 0,
           updatedAt: '$$NOW', // pipeline updates do not maintain timestamps on their own
+          dispatchManifestVersion: manifest.version,
+          dispatchManifestCount: manifest.count,
+          dispatchManifest: { $literal: manifest.entries },
           ...leaseTakeoverFields(leaseMs),
         },
       },

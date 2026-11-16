@@ -51,6 +51,16 @@ export const CAMPAIGN_STATUSES = ['draft', 'scheduled', 'sending', 'sent', 'fail
  */
 export const MAX_CAMPAIGN_RECIPIENTS = 5000;
 
+/** One recipient of a locked campaign: contact id, email and name snapshot (short keys by design). */
+const dispatchManifestEntrySchema = new mongoose.Schema(
+  {
+    c: { type: mongoose.Schema.Types.ObjectId, required: true },
+    e: { type: String, required: true },
+    n: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const campaignSchema = new mongoose.Schema(
   {
     userId: {
@@ -131,6 +141,31 @@ const campaignSchema = new mongoose.Schema(
     dispatchLeaseEpoch: {
       type: Number,
       default: undefined,
+    },
+    // Dispatch manifest (see utils/dispatchManifest.js): the exact recipient list this campaign was
+    // locked to. All three fields are written ONLY by the update that moves the campaign to
+    // 'sending' and takes the lease (an update pipeline), never one without the others. They are
+    // immutable for every other write path (save(), updateOne/$set, $unset, ...).
+    //   version - absent on campaigns locked before manifests existed; never inferred from data
+    //   count   - number of entries the lock intended to write
+    //   entries - { c: contact id, e: email, n: name }; excluded from every query unless explicitly
+    //             selected with '+dispatchManifest', so it is never loaded or returned by accident
+    dispatchManifestVersion: {
+      type: Number,
+      default: undefined,
+      immutable: true,
+    },
+    dispatchManifestCount: {
+      type: Number,
+      default: undefined,
+      min: 0,
+      immutable: true,
+    },
+    dispatchManifest: {
+      type: [dispatchManifestEntrySchema],
+      default: undefined,
+      select: false,
+      immutable: true,
     },
     sendStartedAt: {
       type: Date,

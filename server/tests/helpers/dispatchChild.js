@@ -18,6 +18,8 @@ const dispatch = await import('../../src/services/campaignDispatch.service.js');
 const lease = await import('../../src/services/dispatchLease.service.js');
 const { createEmailService } = await import('../../src/services/email.service.js');
 const { default: Delivery } = await import('../../src/models/Delivery.js');
+const { default: Campaign } = await import('../../src/models/Campaign.js');
+const { default: Contact } = await import('../../src/models/Contact.js');
 
 const quiet = { log() {}, warn() {}, error() {} };
 const sessions = new Map();
@@ -49,6 +51,28 @@ const announceWhenDone = (campaignId) => {
 
 const handlers = {
   info: async () => ({ pid: process.pid, instanceId: lease.INSTANCE_ID }),
+  /**
+   * The real draft/scheduled -> sending lock, with `contactIds` (owned by the campaign's user) as
+   * this worker's eligible-recipient snapshot. Sends are gated by default so the winner keeps the
+   * campaign in 'sending' while the parent inspects it.
+   */
+  lock: async ({ campaignId, contactIds, startAt, gated = true }) => {
+    const campaign = await Campaign.findById(campaignId);
+    const eligibleContacts = await Contact.find({ _id: { $in: contactIds }, userId: campaign.userId })
+      .select('name email')
+      .sort({ _id: 1 })
+      .lean();
+    if (startAt) await new Promise((resolve) => setTimeout(resolve, Math.max(0, startAt - Date.now())));
+    const locked = await dispatch.startCampaignDispatch({
+      campaign,
+      userId: campaign.userId,
+      eligibleContacts,
+      emailService: makeEmailService({ gated }),
+      concurrency: 1,
+      logger: quiet,
+    });
+    return { locked: Boolean(locked), epoch: locked?.dispatchLeaseEpoch ?? null, recipients: eligibleContacts.length };
+  },
 
   /** Take a campaign's lease and keep it (heartbeat running). */
   acquire: async ({ campaignId, startAt }) => {
