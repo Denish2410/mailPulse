@@ -46,6 +46,7 @@ export const isMainModule = () => {
  * @param {Function} [options.exitFn] - Process termination function
  * @param {object} [options.logger] - Logger interface
  * @param {Function} [options.stopDispatches] - Stops campaign dispatch workers and awaits in-flight sends
+ * @param {Function} [options.stopScheduler] - Stops the scheduled-campaign poller and awaits an in-flight poll
  * @returns {Function} Graceful shutdown function accepting a signal name
  */
 export const createShutdownHandler = ({
@@ -55,6 +56,7 @@ export const createShutdownHandler = ({
   exitFn = process.exit,
   logger = console,
   stopDispatches = stopAllDispatches,
+  stopScheduler = stopCampaignScheduler,
 } = {}) => {
   let isShuttingDown = false;
 
@@ -104,13 +106,19 @@ export const createShutdownHandler = ({
         });
       }
 
-      // 3b. Stop campaign dispatch workers (pending deliveries resume on next start)
+      // 3b. Stop the scheduled-campaign poller FIRST and wait for an in-flight poll. A poll can be
+      //     locking a campaign and generating its deliveries; it must finish (with MongoDB still
+      //     open) and register its dispatch before the dispatches are stopped, so that dispatch is
+      //     included in the set awaited below instead of being started after it.
+      if (typeof stopScheduler === 'function') {
+        await stopScheduler();
+      }
+
+      // 3c. Stop campaign dispatch workers: no new claims, await in-flight sends (never cancelled),
+      //     release leases so peers can resume pending deliveries at once
       if (typeof stopDispatches === 'function') {
         await stopDispatches();
       }
-
-      // 3c. Stop the scheduled-campaign poller and wait for an in-flight poll
-      await stopCampaignScheduler();
 
       // 4. Close Mongoose database connection
       if (mongooseInstance?.connection?.readyState !== 0) {
