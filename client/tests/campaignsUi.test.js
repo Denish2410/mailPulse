@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 import {
   formatCampaignDate,
   getCampaignStatusBadge,
+  isCampaignQueued,
   normalizeSearchQuery,
   computePageAfterDeletion,
   toggleRecipientId,
@@ -73,6 +74,30 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       const sent = getCampaignStatusBadge('sent');
       assert.equal(sent.label, 'Sent');
       assert.ok(sent.pillClass.includes('emerald'));
+    });
+
+    it('5b. Shows a scheduled campaign whose send time has passed ("send now") as Queued', () => {
+      const now = Date.parse('2026-11-17T10:00:00.000Z');
+      const queued = getCampaignStatusBadge('scheduled', { scheduledAt: '2026-11-17T09:59:59.000Z', now });
+      assert.equal(queued.label, 'Queued');
+      assert.ok(queued.pillClass.includes('sky'));
+      assert.equal(getCampaignStatusBadge('scheduled', { scheduledAt: '2026-11-17T10:00:00.000Z', now }).label, 'Queued');
+
+      // Still in the future, unknown, or not scheduled: unchanged labels
+      assert.equal(getCampaignStatusBadge('scheduled', { scheduledAt: '2026-11-17T10:00:01.000Z', now }).label, 'Scheduled');
+      assert.equal(getCampaignStatusBadge('scheduled').label, 'Scheduled');
+      assert.equal(getCampaignStatusBadge('scheduled', { scheduledAt: 'not a date', now }).label, 'Scheduled');
+      assert.equal(getCampaignStatusBadge('sending', { scheduledAt: '2026-11-17T09:00:00.000Z', now }).label, 'Sending');
+      assert.equal(getCampaignStatusBadge('draft', { scheduledAt: '2026-11-17T09:00:00.000Z', now }).label, 'Draft');
+    });
+
+    it('5c. isCampaignQueued only accepts a scheduled campaign that is already due', () => {
+      const now = Date.parse('2026-11-17T10:00:00.000Z');
+      assert.equal(isCampaignQueued({ status: 'scheduled', scheduledAt: '2026-11-17T09:00:00.000Z' }, now), true);
+      assert.equal(isCampaignQueued({ status: 'scheduled', scheduledAt: '2026-11-17T11:00:00.000Z' }, now), false);
+      assert.equal(isCampaignQueued({ status: 'scheduled', scheduledAt: null }, now), false);
+      assert.equal(isCampaignQueued({ status: 'draft', scheduledAt: '2026-11-17T09:00:00.000Z' }, now), false);
+      assert.equal(isCampaignQueued(null, now), false);
     });
 
     it('6. Handles unknown or unexpected status values safely', () => {

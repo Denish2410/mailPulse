@@ -100,7 +100,7 @@ export const CampaignAnalyticsDialog = ({
 
   if (!isOpen || !campaign) return null;
 
-  const statusBadge = getCampaignStatusBadge(campaign.status);
+  const statusBadge = getCampaignStatusBadge(campaign.status, { scheduledAt: campaign.scheduledAt });
   const metrics = analyticsData?.metrics || {};
   const formatted = formatAnalyticsMetrics(metrics);
   const linkBreakdown = analyticsData?.linkBreakdown || [];

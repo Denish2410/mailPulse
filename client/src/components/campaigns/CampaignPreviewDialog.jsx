@@ -16,6 +16,7 @@ import {
   getReadinessBadge,
   formatReadinessSummary,
   getCampaignStatusBadge,
+  isCampaignQueued,
   formatCampaignDate,
   getTestEmailAvailability,
   formatTestEmailSuccess,
@@ -146,10 +147,16 @@ export const CampaignPreviewDialog = ({
     try {
       const data = await sendCampaign(campaign.id);
       if (currentRequestId !== sendRequestIdRef.current) return;
-      setSentStatus(data?.campaign?.status || 'sending');
+      if (data?.campaign?.status === 'scheduled') {
+        // "Send now" queues the campaign (scheduled, due now) for the worker. Kept as a schedule
+        // override, not a sent status, so canceling it before the worker starts works as usual.
+        setScheduleOverride({ status: 'scheduled', scheduledAt: data.campaign.scheduledAt ?? new Date().toISOString() });
+      } else {
+        setSentStatus(data?.campaign?.status || 'sending');
+      }
       setSendState({ status: 'idle', message: '' });
       if (typeof onCampaignUpdated === 'function') {
-        onCampaignUpdated(data?.campaign || { ...campaign, status: 'sending' });
+        onCampaignUpdated(data?.campaign || { ...campaign, status: 'scheduled' });
       }
     } catch (err) {
       if (currentRequestId !== sendRequestIdRef.current) return;
@@ -312,7 +319,9 @@ export const CampaignPreviewDialog = ({
   if (!isOpen || !campaign) return null;
 
   // Presentation summaries
-  const statusBadge = getCampaignStatusBadge(sentStatus || scheduleOverride?.status || campaign.status);
+  const statusBadge = getCampaignStatusBadge(sentStatus || scheduleOverride?.status || campaign.status, {
+    scheduledAt: scheduleOverride ? scheduleOverride.scheduledAt : campaign.scheduledAt,
+  });
   const summary = formatReadinessSummary(readinessData?.summary || {});
   const issues = formatReadinessIssues(readinessData?.issues || []);
   const readinessBadge = getReadinessBadge(readinessData?.isReady === true);
@@ -332,6 +341,7 @@ export const CampaignPreviewDialog = ({
   const effectiveStatus = sentStatus || scheduleOverride?.status || campaign.status;
   const effectiveScheduledAt = scheduleOverride ? scheduleOverride.scheduledAt : campaign.scheduledAt;
   const isScheduled = effectiveStatus === 'scheduled';
+  const isQueued = isCampaignQueued({ status: effectiveStatus, scheduledAt: effectiveScheduledAt });
   const isScheduling = scheduleState.status === 'saving';
   const isDraft = effectiveStatus === 'draft';
   const isSendingCampaign = sendState.status === 'sending';
@@ -427,9 +437,13 @@ export const CampaignPreviewDialog = ({
               className="p-4 sm:p-5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-200 text-sm flex flex-col gap-3"
             >
               <div>
-                <p className="font-semibold">Scheduled to send {formatScheduledAt(effectiveScheduledAt)}</p>
+                <p className="font-semibold">
+                  {isQueued ? 'Queued for sending' : `Scheduled to send ${formatScheduledAt(effectiveScheduledAt)}`}
+                </p>
                 <p className="text-xs text-purple-300/80 mt-1">
-                  This campaign is locked. Cancel the schedule to edit it.
+                  {isQueued
+                    ? 'Sending starts within moments. Until it starts, you can cancel it to edit the campaign.'
+                    : 'This campaign is locked. Cancel the schedule to edit it.'}
                 </p>
               </div>
               {isRescheduling && (

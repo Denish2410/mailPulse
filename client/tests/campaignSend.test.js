@@ -56,7 +56,7 @@ describe('Campaign Sending (Phase 5)', () => {
 
   describe('sendCampaign API client', () => {
     it('1. POSTs { confirm: true } to /campaigns/:id/send and returns response data', async () => {
-      const responseData = { campaign: { id: CAMPAIGN_ID, status: 'sending' }, queuedRecipients: 2 };
+      const responseData = { campaign: { id: CAMPAIGN_ID, status: 'scheduled', scheduledAt: '2026-11-17T10:00:00.000Z' }, queuedRecipients: 2 };
       let captured = null;
       mock.method(apiClient, 'post', async (url, body, config) => {
         captured = { url, body, config };

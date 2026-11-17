@@ -118,7 +118,7 @@ export const CampaignsTable = ({
         </thead>
         <tbody className="divide-y divide-slate-800/60">
           {campaigns.map((campaign) => {
-            const statusBadge = getCampaignStatusBadge(campaign.status);
+            const statusBadge = getCampaignStatusBadge(campaign.status, { scheduledAt: campaign.scheduledAt });
             const recipientCount = Number(campaign.recipientsCount) || 0;
 
             return (

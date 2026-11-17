@@ -29,13 +29,39 @@ export const formatCampaignDate = (dateValue) => {
 };
 
 /**
- * Maps campaign status to human-readable label and Tailwind badge classes.
+ * True for a campaign queued for immediate sending: 'scheduled' with a send time that has already
+ * passed. "Send now" queues a campaign this way; the worker picks it up within seconds.
+ *
+ * @param {{ status?: string, scheduledAt?: string|Date|null }|null|undefined} campaign
+ * @param {number} [now=Date.now()]
+ * @returns {boolean}
+ */
+export const isCampaignQueued = (campaign, now = Date.now()) => {
+  if (!campaign || typeof campaign.status !== 'string' || campaign.status.trim().toLowerCase() !== 'scheduled') {
+    return false;
+  }
+  if (!campaign.scheduledAt) return false;
+  const time = new Date(campaign.scheduledAt).getTime();
+  return Number.isFinite(time) && time <= now;
+};
+
+/**
+ * Maps campaign status to human-readable label and Tailwind badge classes. A scheduled campaign
+ * whose send time has passed (pass `scheduledAt`) is shown as "Queued".
  *
  * @param {string|unknown} status
+ * @param {{ scheduledAt?: string|Date|null, now?: number }} [options]
  * @returns {{ label: string, pillClass: string }}
  */
-export const getCampaignStatusBadge = (status) => {
+export const getCampaignStatusBadge = (status, { scheduledAt = null, now = Date.now() } = {}) => {
   const normalized = typeof status === 'string' ? status.trim().toLowerCase() : '';
+
+  if (isCampaignQueued({ status: normalized, scheduledAt }, now)) {
+    return {
+      label: 'Queued',
+      pillClass: 'bg-sky-500/10 text-sky-300 border border-sky-500/20',
+    };
+  }
 
   switch (normalized) {
     case 'draft':
@@ -929,6 +955,7 @@ export default {
   formatDeliverySummary,
   describeDeliveryError,
   getCampaignStatusBadge,
+  isCampaignQueued,
   formatScheduledAt,
   localInputToFutureIso,
   toDatetimeLocalValue,
