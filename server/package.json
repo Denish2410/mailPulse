@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "worker": "node src/worker.js",
+    "dev:worker": "nodemon src/worker.js",
     "smtp:check": "node scripts/smtp-check.js",
     "anonymize:tracking-ips": "node scripts/anonymize-tracking-ips.js",
     "test": "node --test tests/**/*.test.js"

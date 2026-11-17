@@ -1,10 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
 import { getErrorReporter } from './services/errorReporter.service.js';
 import { getSecurityWarnings } from './config/securityWarnings.js';
-import { getShutdownTimeoutMs, validateShutdownConfig } from './config/shutdown.js';
+import { validateShutdownConfig } from './config/shutdown.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,9 +15,8 @@ import app from './app.js';
 import { connectDB } from './config/db.js';
 import { validateAuthConfig } from './config/auth.js';
 import { getDefaultEmailService } from './services/email.service.js';
-import { stopAllDispatches } from './services/campaignDispatch.service.js';
-import { stopCampaignScheduler } from './services/campaignScheduler.service.js';
 import { startDispatchRuntime } from './services/dispatchRuntime.service.js';
+import { createShutdownHandler as createGracefulShutdownHandler } from './utils/gracefulShutdown.js';
 
 let activeServer = null;
 let isStarting = false;
@@ -31,107 +29,14 @@ export const isMainModule = () => {
 };
 
 /**
- * Factory creating an idempotent graceful shutdown handler
+ * Graceful shutdown handler for the API process (see utils/gracefulShutdown.js). It closes this
+ * module's HTTP server unless another server getter is given.
  *
- * @param {object} options
- * @param {Function} [options.serverGetter] - Function returning current HTTP server instance
- * @param {typeof mongoose} [options.mongooseInstance] - Mongoose instance
- * @param {number} [options.timeoutMs] - Maximum milliseconds allowed before forced termination
- * @param {Function} [options.exitFn] - Process termination function
- * @param {object} [options.logger] - Logger interface
- * @param {Function} [options.stopDispatches] - Stops campaign dispatch workers and awaits in-flight sends
- * @param {Function} [options.stopScheduler] - Stops the scheduled-campaign poller and awaits an in-flight poll
+ * @param {Parameters<typeof createGracefulShutdownHandler>[0]} [options]
  * @returns {Function} Graceful shutdown function accepting a signal name
  */
-export const createShutdownHandler = ({
-  serverGetter = () => activeServer,
-  mongooseInstance = mongoose,
-  timeoutMs = getShutdownTimeoutMs(),
-  exitFn = process.exit,
-  logger = console,
-  stopDispatches = stopAllDispatches,
-  stopScheduler = stopCampaignScheduler,
-} = {}) => {
-  let isShuttingDown = false;
-
-  return async (signal = 'SIGTERM') => {
-    // 1. Prevent duplicate shutdown execution if multiple signals arrive
-    if (isShuttingDown) {
-      logger.warn(`[Server] ${signal} received, but shutdown is already in progress. Ignoring duplicate signal.`);
-      return;
-    }
-    isShuttingDown = true;
-
-    logger.log(`[Server] ${signal} received. Initiating graceful shutdown...`);
-
-    const currentServer = serverGetter();
-    let pendingReject = null;
-
-    // 2. Bounded shutdown timer: force termination if cleanup stalls
-    const forceExitTimer = setTimeout(() => {
-      logger.error(`[Server Error] Shutdown timed out after ${timeoutMs}ms. Forcing process termination.`);
-      if (currentServer) {
-        currentServer.closeAllConnections?.();
-      }
-      if (mongooseInstance?.connection?.readyState !== 0) {
-        mongooseInstance.connection.close(true).catch(() => {});
-      }
-      if (pendingReject) {
-        pendingReject(new Error(`Shutdown timed out after ${timeoutMs}ms`));
-      }
-      exitFn(1);
-    }, timeoutMs);
-
-    try {
-      // 3. Stop accepting new HTTP connections and drain in-flight requests
-      if (currentServer && currentServer.listening) {
-        logger.log('[Server] Closing HTTP server and stopping new connections...');
-
-        // Close idle keep-alive connections so they do not hold the process open
-        currentServer.closeIdleConnections?.();
-
-        await new Promise((resolve, reject) => {
-          pendingReject = reject;
-          currentServer.close((err) => {
-            if (err) return reject(err);
-            logger.log('[Server] HTTP server closed cleanly.');
-            resolve();
-          });
-        });
-      }
-
-      // 3b. Stop the scheduled-campaign poller FIRST and wait for an in-flight poll. A poll can be
-      //     locking a campaign and generating its deliveries; it must finish (with MongoDB still
-      //     open) and register its dispatch before the dispatches are stopped, so that dispatch is
-      //     included in the set awaited below instead of being started after it.
-      if (typeof stopScheduler === 'function') {
-        await stopScheduler();
-      }
-
-      // 3c. Stop campaign dispatch workers: no new claims, await in-flight sends (never cancelled),
-      //     release leases so peers can resume pending deliveries at once
-      if (typeof stopDispatches === 'function') {
-        await stopDispatches();
-      }
-
-      // 4. Close Mongoose database connection
-      if (mongooseInstance?.connection?.readyState !== 0) {
-        logger.log('[Server] Closing MongoDB connection...');
-        await mongooseInstance.connection.close(false);
-        logger.log('[Server] MongoDB connection closed cleanly.');
-      }
-
-      // 5. Clear timeout and exit cleanly
-      clearTimeout(forceExitTimer);
-      logger.log('[Server] Graceful shutdown completed successfully.');
-      exitFn(0);
-    } catch (error) {
-      clearTimeout(forceExitTimer);
-      logger.error(`[Server Error] Error during graceful shutdown: ${error.message}`);
-      exitFn(1);
-    }
-  };
-};
+export const createShutdownHandler = (options = {}) =>
+  createGracefulShutdownHandler({ serverGetter: () => activeServer, ...options });
 
 /**
  * Bootstrap function ensuring correct startup order:
