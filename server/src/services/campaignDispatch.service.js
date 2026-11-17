@@ -134,9 +134,23 @@ const activeDispatches = new Map();
 const recoveringCampaigns = new Set();
 
 /**
- * Set when the process is shutting down; workers stop claiming new deliveries.
+ * Set when the process is shutting down. From that moment workers stop claiming new deliveries,
+ * no recovery starts, no recovery hands a campaign to a dispatch, and no dispatch is started.
  */
 let stopRequested = false;
+
+/**
+ * Recoveries running in this process (startup resume, watchdog sweeps, direct calls), so shutdown
+ * can wait for them before MongoDB closes. Each settles without throwing.
+ * @type {Set<Promise<unknown>>}
+ */
+const inFlightRecoveries = new Set();
+
+/**
+ * The watchdog sweep in progress, if any (sweeps never overlap).
+ * @type {Promise<unknown>|null}
+ */
+let activeSweep = null;
 
 /**
  * Logs a warning, falling back to `error` for loggers without `warn`. Logging must never be
@@ -166,8 +180,18 @@ export const waitForCampaignDispatch = (campaignId) =>
   activeDispatches.get(String(campaignId)) || Promise.resolve();
 
 /**
- * Asks every running dispatch to stop claiming new work and waits for in-flight sends.
- * Campaigns left in 'sending' are picked up by `resumeInterruptedDispatches` on next start.
+ * Shuts dispatching down in this process. Order:
+ *   1. `stopRequested` is set: from here no sweep or recovery starts, no recovery hands a campaign
+ *      to a dispatch, no dispatch starts, and running workers stop claiming deliveries;
+ *   2. the watchdog timer is cleared, so no new sweep is scheduled;
+ *   3. the in-flight watchdog sweep and every in-flight recovery are awaited (a recovery that
+ *      already holds a lease finishes its database work, then gives the lease back instead of
+ *      dispatching), together with every running dispatch (in-flight sends are never cancelled);
+ *      this repeats until nothing is left, so work registered while waiting is awaited too;
+ *   4. the leases this process still holds are released.
+ * Lease, epoch and fencing rules are unchanged: anything stopped here stays 'sending' with its
+ * deliveries 'pending' and is picked up by the next owner (`resumeInterruptedDispatches` or a
+ * peer's watchdog).
  *
  * @returns {Promise<void>}
  */
@@ -175,7 +199,15 @@ export const stopAllDispatches = async () => {
   stopRequested = true;
   stopDispatchWatchdog();
   cancelSharedSendThrottle();
-  await Promise.allSettled([...activeDispatches.values()]);
+  for (;;) {
+    const pending = [
+      ...(activeSweep ? [activeSweep] : []),
+      ...inFlightRecoveries,
+      ...activeDispatches.values(),
+    ];
+    if (pending.length === 0) break;
+    await Promise.allSettled(pending);
+  }
   // Hand our campaigns to peers immediately instead of making them wait for the lease to expire
   // (skipped when the database is not connected, and bounded so shutdown can never hang on it)
   if (mongoose.connection.readyState === 1) {
@@ -192,6 +224,9 @@ export const stopAllDispatches = async () => {
 export const resetDispatcherState = () => {
   stopRequested = false;
 };
+
+/** @returns {boolean} True once `stopAllDispatches` has been called (until reset) */
+export const isDispatchStopRequested = () => stopRequested;
 
 /** Filter fragment tying a campaign update to the lease owner and epoch the worker was granted. */
 const ownerFilter = (fence) =>
@@ -736,6 +771,21 @@ export const scheduleCampaignProcessing = (campaignId, options = {}) => {
     return existing;
   }
 
+  // Shutting down: no dispatch starts. The lease is given back (tracked, so shutdown waits for
+  // the release before MongoDB closes) and the campaign stays 'sending' with its deliveries
+  // pending, for the next owner to recover.
+  if (stopRequested) {
+    if (!options.leaseSession) return Promise.resolve();
+    const release = Promise.resolve()
+      .then(() => options.leaseSession.release())
+      .catch(() => options.leaseSession.stop?.())
+      .finally(() => {
+        activeDispatches.delete(key);
+      });
+    activeDispatches.set(key, release);
+    return release;
+  }
+
   const run = new Promise((resolve) => setImmediate(resolve))
     .then(() => processCampaignDeliveries(campaignId, options))
     .finally(() => {
@@ -889,12 +939,23 @@ export const startCampaignDispatch = async ({
  *
  * @returns {Promise<'resumed'|'refused'|'skipped'>}
  */
-export const recoverCampaign = async (campaignId, { emailService, concurrency, logger = console } = {}) => {
+export const recoverCampaign = (campaignId, options = {}) => {
   const key = String(campaignId);
-  if (isDispatchActive(key) || recoveringCampaigns.has(key)) {
-    return 'skipped';
+  if (stopRequested || isDispatchActive(key) || recoveringCampaigns.has(key)) {
+    return Promise.resolve('skipped');
   }
+  // Registered synchronously, so shutdown can never miss a recovery that has started
   recoveringCampaigns.add(key);
+  const run = recoverCampaignLocked(campaignId, options).finally(() => {
+    recoveringCampaigns.delete(key);
+    inFlightRecoveries.delete(run);
+  });
+  inFlightRecoveries.add(run);
+  return run;
+};
+
+/** The body of `recoverCampaign`, run while this process holds the campaign's recovery lock. */
+const recoverCampaignLocked = async (campaignId, { emailService, concurrency, logger = console } = {}) => {
 
   let session = null;
   let handedOff = false;
@@ -933,6 +994,10 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
       return 'skipped';
     }
     if (!session) {
+      return 'skipped';
+    }
+    // Shutdown began while the lease was being taken: touch nothing, give the lease back (finally)
+    if (stopRequested) {
       return 'skipped';
     }
 
@@ -981,15 +1046,21 @@ export const recoverCampaign = async (campaignId, { emailService, concurrency, l
       }
     );
 
-    // Registers in `activeDispatches` synchronously, before the lock below is released. The
-    // dispatch continues under the lease (and epoch) acquired above.
+    // Shutdown began during the recovery work above (all of it idempotent and done under our
+    // lease): do not start a dispatch. The lease is given back below and the campaign stays
+    // 'sending' with its deliveries pending for the next owner.
+    if (stopRequested) {
+      return 'skipped';
+    }
+
+    // Registers in `activeDispatches` synchronously, before the lock is released. The dispatch
+    // continues under the lease (and epoch) acquired above.
     scheduleCampaignProcessing(campaignId, { emailService, concurrency, logger, leaseSession: session });
     handedOff = true;
     return 'resumed';
   } finally {
     // Not handed to a dispatch (skipped, refused or failed): stop renewing and give it back
     if (session && !handedOff) await session.release();
-    recoveringCampaigns.delete(key);
   }
 };
 
@@ -1008,10 +1079,16 @@ export const resumeInterruptedDispatches = async ({
   concurrency,
   logger = console,
 } = {}) => {
+  if (stopRequested) {
+    return 0;
+  }
   const stuck = await Campaign.find({ status: 'sending' }).select('_id').lean();
   let recovered = 0;
 
   for (const { _id: campaignId } of stuck) {
+    if (stopRequested) {
+      break;
+    }
     if (isDispatchActive(campaignId)) {
       continue;
     }
@@ -1151,20 +1228,20 @@ export const startDispatchWatchdog = ({
   const config = getWatchdogConfig();
   const every = intervalMs ?? config.intervalMs;
   const timeout = stallTimeoutMs ?? config.stallTimeoutMs;
-  let sweeping = false;
 
   watchdogTimer = setInterval(() => {
-    if (sweeping || stopRequested) {
+    if (activeSweep || stopRequested) {
       return;
     }
-    sweeping = true;
-    reapStalledCampaigns({ emailService, concurrency, logger, stallTimeoutMs: timeout })
+    // Tracked so shutdown can await a sweep that is already running
+    const sweep = reapStalledCampaigns({ emailService, concurrency, logger, stallTimeoutMs: timeout })
       .catch((error) => {
         logger.error(`[Dispatcher] Watchdog sweep failed: ${error?.name || 'Error'}`);
       })
       .finally(() => {
-        sweeping = false;
+        if (activeSweep === sweep) activeSweep = null;
       });
+    activeSweep = sweep;
   }, every);
   watchdogTimer.unref?.();
 

@@ -20,9 +20,11 @@ import {
  * separate worker process own it later without the API starting any of these timers.
  *
  * Stopping follows the required order: the scheduler first (awaiting an in-flight poll, which may
- * be locking a campaign and generating its deliveries), then the dispatches (no new claims, await
- * in-flight sends without cancelling them, release leases). MongoDB must still be open for both;
- * closing it is the caller's job, afterwards.
+ * be locking a campaign and generating its deliveries), then the dispatches: no new watchdog sweep,
+ * recovery or dispatch starts, the sweep and recoveries already running are awaited (a recovery
+ * holding a lease gives it back instead of dispatching), in-flight sends are awaited without being
+ * cancelled, and leases are released. MongoDB must still be open for all of it; closing it is the
+ * caller's job, afterwards.
  */
 
 let running = false;
