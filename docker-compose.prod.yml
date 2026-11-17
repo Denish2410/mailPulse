@@ -37,6 +37,11 @@ services:
       # Caddy -> nginx -> server is two proxy hops
       TRUST_PROXY: 2
 
+  worker:
+    environment:
+      # Links in sent emails are built from this (via TRACKING_BASE_URL), so it must be the real URL
+      CLIENT_URL: ${CLIENT_URL:?set CLIENT_URL to https://your-domain}
+
   client:
     # Only reachable through Caddy; drop the plain-HTTP port published by the base file
     ports: !reset []

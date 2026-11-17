@@ -190,25 +190,25 @@ describe('Dispatch runtime', () => {
     }
   });
 
-  it('startServer starts the runtime only when dispatches are enabled', async (t) => {
+  it('the API server never starts the dispatch runtime (the worker owns it)', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const noop = async () => {};
 
-    const without = await startServer({ port: 0, connectDB: noop, exitFn: () => {}, resumeDispatches: false, validateConfig: false });
+    const api = await startServer({ port: 0, connectDB: noop, exitFn: () => {}, validateConfig: false });
     try {
       assert.equal(isDispatchRuntimeRunning(), false);
       assert.equal(isCampaignSchedulerRunning(), false);
     } finally {
-      await new Promise((resolve) => without.close(resolve));
+      await new Promise((resolve) => api.close(resolve));
     }
 
-    const withRuntime = await startServer({ port: 0, connectDB: noop, exitFn: () => {}, resumeDispatches: true, validateConfig: false });
+    // Not even when asked the old way: the option no longer exists
+    const legacy = await startServer({ port: 0, connectDB: noop, exitFn: () => {}, resumeDispatches: true, validateConfig: false });
     try {
-      assert.equal(isDispatchRuntimeRunning(), true);
-      assert.equal(isCampaignSchedulerRunning(), true);
+      assert.equal(isDispatchRuntimeRunning(), false);
+      assert.equal(isCampaignSchedulerRunning(), false);
     } finally {
-      await new Promise((resolve) => withRuntime.close(resolve));
-      await stopDispatchRuntime();
+      await new Promise((resolve) => legacy.close(resolve));
     }
   });
 });

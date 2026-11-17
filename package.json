@@ -8,12 +8,14 @@
     "server"
   ],
   "scripts": {
-    "dev": "concurrently -k --names \"server,client\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently -k --names \"server,worker,client\" -c \"cyan,yellow,magenta\" \"npm run dev:server\" \"npm run dev:worker\" \"npm run dev:client\"",
     "dev:client": "npm --prefix client run dev",
     "dev:server": "npm --prefix server run dev",
+    "dev:worker": "npm --prefix server run dev:worker",
     "build": "npm run build:client",
     "build:client": "npm --prefix client run build",
     "start:server": "npm --prefix server start",
+    "start:worker": "npm --prefix server run worker",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm --prefix server test",
     "test:client": "npm --prefix client test"

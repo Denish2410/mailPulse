@@ -14,8 +14,6 @@ dotenv.config();
 import app from './app.js';
 import { connectDB } from './config/db.js';
 import { validateAuthConfig } from './config/auth.js';
-import { getDefaultEmailService } from './services/email.service.js';
-import { startDispatchRuntime } from './services/dispatchRuntime.service.js';
 import { createShutdownHandler as createGracefulShutdownHandler } from './utils/gracefulShutdown.js';
 
 let activeServer = null;
@@ -49,8 +47,6 @@ export const createShutdownHandler = (options = {}) =>
  * @param {number} [options.port] - Port number to bind to
  * @param {Function} [options.connectDB] - Database connection function
  * @param {Function} [options.exitFn] - Exit function on fatal failure
- * @param {boolean} [options.resumeDispatches] - Resume campaigns interrupted mid-send and start
- *   the stalled-campaign watchdog (defaults to true outside the test environment)
  * @param {boolean} [options.validateConfig] - Validate required configuration (JWT settings)
  *   before connecting, so a missing or weak secret fails at boot instead of on the first login
  *   (defaults to true when this module is the process entry point)
@@ -86,12 +82,9 @@ export const startServer = async (options = {}) => {
     // 1. Await database connection before opening port
     await dbConnector();
 
-    // 1b. Start the dispatch runtime: resume campaign sends interrupted by a previous shutdown or
-    //     crash (non-blocking), the stalled-campaign watchdog and the scheduled-campaign poller
-    const shouldResume = options.resumeDispatches ?? process.env.NODE_ENV !== 'test';
-    if (shouldResume) {
-      startDispatchRuntime({ emailService: getDefaultEmailService() });
-    }
+    // 1b. The API never sends campaigns: it does not start the dispatch runtime (resume, watchdog,
+    //     scheduler). "Send now" and scheduled sends are queued in MongoDB and sent by the worker
+    //     process (src/worker.js, the `worker` Compose service).
 
     // 2. Start HTTP server only after database connection succeeds
     return await new Promise((resolve, reject) => {

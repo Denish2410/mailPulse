@@ -2,6 +2,13 @@
 # Production with HTTPS: see docker-compose.prod.yml and the README.
 # Scale the `server` service only with RATE_LIMIT_STORE=mongo (set below); see server/.env.example.
 #
+# Two application processes, one image:
+#   server   the API. It never sends a campaign: "send now" and scheduled sends are queued in MongoDB.
+#   worker   the only process that sends campaigns (scheduler, startup resume, stalled-campaign
+#            watchdog). It serves no API; its health endpoint is loopback-only inside the container.
+#            Without a running worker, queued campaigns wait (nothing is lost). Running more than one
+#            worker is safe (leases and atomic locks), but one is enough for this deployment.
+#
 # Required in your shell or a .env file next to this file:
 #   JWT_SECRET             random string, 32+ characters   (openssl rand -hex 32)
 #   MONGO_ROOT_PASSWORD    database password, use hex only (openssl rand -hex 24)
@@ -11,11 +18,11 @@
 #   - Memory limits below are starting points, not measurements.
 #   - stop_grace_period must stay LONGER than the server's SHUTDOWN_TIMEOUT_MS (20 s here, checked at startup
 #     against STOP_GRACE_SECONDS, default 40): the
-#     server needs that time to finish in-flight sends and release its campaign leases on SIGTERM.
+#     worker needs that time to finish in-flight sends and release its campaign leases on SIGTERM.
 #     If a stop is cut short (SIGKILL), nothing is lost: leases expire and a peer or the next start
 #     recovers the campaign (unsent claims are recorded INTERRUPTED, never re-sent).
-#   - `docker compose down` stops client, then server, then mongo (reverse dependency order), so the
-#     database outlives the server's shutdown work.
+#   - `docker compose down` stops client, then server and worker, then mongo (reverse dependency
+#     order), so the database outlives their shutdown work.
 x-logging: &default-logging
   driver: json-file
   options:
@@ -57,7 +64,7 @@ services:
       resources:
         limits:
           memory: 768m
-    environment:
+    environment: &app-env
       NODE_ENV: production
       SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-20000}
       STOP_GRACE_SECONDS: ${STOP_GRACE_SECONDS:-40}
@@ -98,6 +105,36 @@ services:
       # Multi-instance tuning (empty = application defaults)
       CAMPAIGN_LEASE_MS: ${CAMPAIGN_LEASE_MS:-}
       CAMPAIGN_SEND_RATE_PER_MINUTE: ${CAMPAIGN_SEND_RATE_PER_MINUTE:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    command: ["node", "src/worker.js"]
+    restart: unless-stopped
+    # Same rule as the server: SIGTERM first, so in-flight sends finish and leases are released.
+    stop_grace_period: ${STOP_GRACE_SECONDS:-40}s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    environment:
+      <<: *app-env
+      # Health endpoint for the check below; loopback only, nothing is published.
+      WORKER_HEALTH_HOST: 127.0.0.1
+      WORKER_HEALTH_PORT: 5001
+    # Readiness: MongoDB connected and the dispatch runtime running. Like the server's check it
+    # only marks the container unhealthy; crashes are handled by the restart policy.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     depends_on:
       mongo:
         condition: service_healthy
