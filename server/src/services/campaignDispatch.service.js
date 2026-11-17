@@ -410,30 +410,46 @@ export const processNextDelivery = async (
     return false;
   }
 
-  // 1. Suppression & Unsubscribe Check: Never dispatch to unsubscribed or suppressed recipients
-  if (delivery.userId) {
-    const isSuppressed = await Suppression.exists({
-      userId: delivery.userId,
-      email: delivery.email.toLowerCase().trim(),
-    });
-    const isContactUnsubscribed = delivery.contactId
-      ? await Contact.exists({ _id: delivery.contactId, isUnsubscribed: true })
-      : false;
+  // 1. Eligibility check, immediately before sending, against LIVE data. The manifest fixed WHO the
+  //    campaign was locked to; it never makes anyone eligible. In order of precedence:
+  //    - SUPPRESSED       the address is on the owner's suppression list
+  //    - CONTACT_REMOVED  the contact no longer exists for this owner (deleted after the lock, or
+  //                       not the owner's: the lookup is tenant-scoped)
+  //    - SUPPRESSED       the contact has unsubscribed
+  //    - CONTACT_CHANGED  the contact's address is no longer the one the campaign was locked to
+  //    Any of these: the delivery is recorded failed under our claim and nothing is sent.
+  const lockedEmail = String(delivery.email || '').toLowerCase().trim();
+  const isSuppressed = await Suppression.exists({ userId: delivery.userId, email: lockedEmail });
+  const contact = isSuppressed
+    ? null
+    : await Contact.findOne({ _id: delivery.contactId, userId: delivery.userId })
+        .select('email isUnsubscribed')
+        .lean();
 
-    if (isSuppressed || isContactUnsubscribed) {
-      await Delivery.updateOne(
-        ownClaim(delivery._id, fence),
-        {
-          $set: {
-            status: 'failed',
-            errorCode: 'SUPPRESSED',
-            failedAt: new Date(),
-          },
-        }
-      );
-      await incrementCampaignStat(campaignId, 'failed', logger, fence);
-      return true;
-    }
+  let ineligibleCode = null;
+  if (isSuppressed) {
+    ineligibleCode = 'SUPPRESSED';
+  } else if (!contact) {
+    ineligibleCode = 'CONTACT_REMOVED';
+  } else if (contact.isUnsubscribed) {
+    ineligibleCode = 'SUPPRESSED';
+  } else if (String(contact.email || '').toLowerCase().trim() !== lockedEmail) {
+    ineligibleCode = 'CONTACT_CHANGED';
+  }
+
+  if (ineligibleCode) {
+    await Delivery.updateOne(
+      ownClaim(delivery._id, fence),
+      {
+        $set: {
+          status: 'failed',
+          errorCode: ineligibleCode,
+          failedAt: new Date(),
+        },
+      }
+    );
+    await incrementCampaignStat(campaignId, 'failed', logger, fence);
+    return true;
   }
 
   // 2. Resolve Unsubscribe URL and RFC 8058 One-Click headers

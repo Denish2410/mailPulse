@@ -746,6 +746,12 @@ export const describeDeliveryError = (code) => {
       return 'Interrupted by a server restart (may have been delivered)';
     case 'PERSIST_ERROR':
       return 'Accepted by the provider, but not recorded (likely delivered)';
+    case 'SUPPRESSED':
+      return 'Not sent: unsubscribed or suppressed';
+    case 'CONTACT_REMOVED':
+      return 'Not sent: contact was deleted after sending started';
+    case 'CONTACT_CHANGED':
+      return 'Not sent: contact email changed after sending started';
     case null:
     case undefined:
     case '':

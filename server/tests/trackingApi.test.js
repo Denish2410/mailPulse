@@ -285,10 +285,17 @@ describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analy
         },
       };
 
+      // Deliveries are only sent to contacts that still exist with the locked address.
+      const trackedContact = await Contact.create({
+        userId: ownerUser._id,
+        email: 'delivery-tracked@example.com',
+        name: 'Tracked Recipient',
+      });
+
       await Delivery.create({
         campaignId: testCampaign._id,
         userId: ownerUser._id,
-        contactId: new mongoose.Types.ObjectId(),
+        contactId: trackedContact._id,
         email: 'delivery-tracked@example.com',
         name: 'Tracked Recipient',
         status: 'pending',

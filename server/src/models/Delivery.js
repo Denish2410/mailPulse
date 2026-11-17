@@ -34,6 +34,10 @@ export const DELIVERY_ERROR_CODES = [
   'INTERRUPTED',
   'PERSIST_ERROR',
   'SUPPRESSED',
+  // The contact was deleted (or is no longer this owner's) after the campaign was locked
+  'CONTACT_REMOVED',
+  // The contact's email address was changed after the campaign was locked
+  'CONTACT_CHANGED',
   'UNKNOWN_ERROR',
 ];
 

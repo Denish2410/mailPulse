@@ -193,6 +193,9 @@ describe('Campaign Sending (Phase 5)', () => {
       assert.match(describeDeliveryError('INTERRUPTED'), /restart/);
       assert.match(describeDeliveryError('PERSIST_ERROR'), /not recorded/);
       assert.notEqual(describeDeliveryError('PERSIST_ERROR'), 'Unknown error');
+      assert.match(describeDeliveryError('SUPPRESSED'), /unsubscribed or suppressed/);
+      assert.match(describeDeliveryError('CONTACT_REMOVED'), /deleted/);
+      assert.match(describeDeliveryError('CONTACT_CHANGED'), /email changed/);
       assert.equal(describeDeliveryError(null), '');
       assert.equal(describeDeliveryError('SOMETHING'), 'Unknown error');
     });
