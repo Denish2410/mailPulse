@@ -34,6 +34,7 @@ import {
   getSharedSendThrottle,
   MAX_SEND_RATE_PER_MINUTE,
 } from '../src/services/sendThrottle.service.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('Send throttle (no DB)', () => {
   it('parses the configured rate safely', () => {
@@ -157,7 +158,7 @@ describe('Throttled dispatch', () => {
       body: JSON.stringify({ confirm: true }),
     });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
     const elapsed = Date.now() - started;
 
     assert.equal(transport.count, 4);

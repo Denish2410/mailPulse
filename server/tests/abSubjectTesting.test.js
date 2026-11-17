@@ -31,6 +31,7 @@ import { createEmailService, createMockTransport } from '../src/services/email.s
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
 import { getCampaignVariantStats } from '../src/services/tracking.service.js';
 import { createCampaignSchema, updateCampaignSchema } from '../src/validators/campaign.validator.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('A/B subject validation (no DB)', () => {
   it('accepts an optional subjectB and defaults it to empty', () => {
@@ -155,7 +156,7 @@ describe('A/B subject testing', () => {
     const c = await makeCampaign();
     const res = await request('POST', `/api/v1/campaigns/${c._id}/send`, { confirm: true });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(c._id);
+    await runQueuedSend(c._id);
 
     const deliveries = await Delivery.find({ campaignId: c._id }).lean();
     assert.equal(deliveries.filter((d) => d.variant === 'A').length, 2);
@@ -173,7 +174,7 @@ describe('A/B subject testing', () => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const c = await makeCampaign({ subjectB: '' });
     await request('POST', `/api/v1/campaigns/${c._id}/send`, { confirm: true });
-    await waitForCampaignDispatch(c._id);
+    await runQueuedSend(c._id);
 
     assert.equal(await Delivery.countDocuments({ campaignId: c._id, variant: 'B' }), 0);
     assert.ok(transport.sentEmails.every((m) => m.subject === 'Subject A'));

@@ -36,6 +36,7 @@ import { hashPassword } from '../src/services/password.service.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
 import { buildSnsStringToSign, DELIVERY_TAG } from '../src/services/webhookProviders.service.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('ESP webhook endpoints', () => {
   let server;
@@ -295,7 +296,7 @@ describe('ESP webhook endpoints', () => {
       body: JSON.stringify({ confirm: true }),
     });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
 
     const sent = await Delivery.findOne({ campaignId: campaign._id }).lean();
     const headers = transport.sentEmails[0].headers;
@@ -317,7 +318,7 @@ describe('ESP webhook endpoints', () => {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ confirm: true }),
     });
-    await waitForCampaignDispatch(campaign2._id);
+    await runQueuedSend(campaign2._id);
     const untagged = transport.sentEmails[0].headers;
     assert.equal(untagged['X-SMTPAPI'], undefined);
     assert.equal(untagged['X-SES-MESSAGE-TAGS'], undefined);

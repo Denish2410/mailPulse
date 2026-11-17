@@ -36,6 +36,7 @@ import { waitForCampaignDispatch } from '../src/services/campaignDispatch.servic
 import { appendMailingAddress } from '../src/services/tracking.service.js';
 import { isMailingAddressRequired, assertAccountMaySend } from '../src/utils/sendingPolicy.js';
 import { updateProfileSchema, deleteAccountSchema } from '../src/validators/auth.validator.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 const PASSWORD = 'StrongPassword123!';
 
@@ -285,7 +286,7 @@ describe('Account settings, export and deletion', () => {
       });
       const res = await req('POST', `/api/v1/campaigns/${campaign._id}/send`, user, { confirm: true });
       assert.equal(res.status, 202);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
     };
 
     await User.updateOne({ _id: owner._id }, { $set: { mailingAddress: '42 Footer Lane\nSpringfield' } });
@@ -318,6 +319,6 @@ describe('Account settings, export and deletion', () => {
     await User.updateOne({ _id: owner._id }, { $set: { mailingAddress: '1 Main St' } });
     const ok = await req('POST', `/api/v1/campaigns/${campaign._id}/send`, owner, { confirm: true });
     assert.equal(ok.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
   });
 });

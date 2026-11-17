@@ -31,6 +31,7 @@ import { hashPassword } from '../src/services/password.service.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
 import { applyAudienceSchema } from '../src/validators/campaign.validator.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('Audience validator (no DB)', () => {
   const id = new mongoose.Types.ObjectId().toString();
@@ -188,7 +189,7 @@ describe('Campaign audience API', () => {
     await apply(campaign._id, { tags: ['vip'] });
     const res = await request('POST', `/api/v1/campaigns/${campaign._id}/send`, { body: { confirm: true } });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
 
     const recipients = transport.sentEmails.map((m) => m.to).sort();
     assert.deepEqual(recipients, [c.alice.email, c.bobby.email].sort());

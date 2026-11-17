@@ -18,10 +18,7 @@ import {
   DispatchManifestError,
   measureBsonBytes,
 } from '../utils/dispatchManifest.js';
-import {
-  startCampaignDispatch,
-  getDeliveryCounts,
-} from '../services/campaignDispatch.service.js';
+import { getDeliveryCounts } from '../services/campaignDispatch.service.js';
 import { getCampaignTrackingSummary } from '../services/tracking.service.js';
 import { personalizeMessage } from '../services/personalization.service.js';
 import { resolveSegment } from '../services/segment.service.js';
@@ -630,11 +627,15 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
  * - Explicit intent: the body must contain `{ "confirm": true }` (enforced by the validator).
  * - Fail closed: readiness is re-evaluated server-side (422 with issues if not ready), and the
  *   email transport is verified before anything is locked (503 if not configured).
- * - Exactly one dispatch: the draft -> sending transition is atomic and bound to the evaluated
- *   version; a concurrent send or an edit made in between returns 409 and sends nothing.
- * - Asynchronous: responds 202 once deliveries are queued. Progress is available from
- *   GET /campaigns/:id and GET /campaigns/:id/deliveries.
- * - Recipients are only owned contacts that still exist; deleted contacts are skipped.
+ * - Queued, not sent here: the API never sends a campaign. "Send now" atomically moves the draft
+ *   to 'scheduled' with `scheduledAt` = the database's current time, bound to the evaluated
+ *   version (a concurrent send or an edit made in between returns 409). The worker's scheduler
+ *   picks it up at its next poll (CAMPAIGN_SCHEDULER_INTERVAL_MS, default 15 s), re-evaluates
+ *   readiness, locks it 'scheduled' -> 'sending' with its dispatch manifest and sends it. Until
+ *   then it can be canceled like any scheduled campaign.
+ * - Asynchronous: responds 202 once queued. Progress is available from GET /campaigns/:id and
+ *   GET /campaigns/:id/deliveries.
+ * - Recipients are only owned contacts that still exist when the worker locks the campaign.
  *
  * Route: POST /api/v1/campaigns/:id/send
  * Access: Protected (Bearer JWT) + per-user send rate limit
@@ -700,16 +701,22 @@ export const sendCampaign = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  // 5. Atomically lock, create deliveries, and start background dispatch
-  const locked = await startCampaignDispatch({
-    campaign,
-    userId,
-    eligibleContacts,
-    emailService,
-    manifestLimits: req.app?.locals?.dispatchManifestLimits,
-  });
+  // 5. Queue it for the worker: one atomic draft -> scheduled transition on the exact evaluated
+  //    version, due immediately by MongoDB's clock (the same clock the worker's lock uses). It
+  //    never touches a campaign that was already locked (one carrying a dispatch manifest).
+  const queued = await Campaign.findOneAndUpdate(
+    {
+      _id: campaign._id,
+      userId,
+      status: 'draft',
+      updatedAt: campaign.updatedAt,
+      dispatchManifestVersion: { $exists: false },
+    },
+    [{ $set: { status: 'scheduled', scheduledAt: '$$NOW', updatedAt: '$$NOW' } }],
+    { new: true }
+  );
 
-  if (!locked) {
+  if (!queued) {
     throw new AppError(
       'Campaign was modified or is already being sent. Refresh and try again.',
       409
@@ -718,9 +725,9 @@ export const sendCampaign = asyncHandler(async (req, res) => {
 
   res.status(202).json({
     success: true,
-    message: 'Campaign sending started',
+    message: 'Campaign queued for sending',
     data: {
-      campaign: formatSafeCampaign(locked),
+      campaign: formatSafeCampaign(queued),
       queuedRecipients: eligibleContacts.length,
     },
   });

@@ -320,31 +320,32 @@ The following endpoints will be introduced in subsequent phases:
 #### Campaign Send Contract (`POST /api/v1/campaigns/:id/send`)
 - **Access**: Protected (Bearer JWT) plus a dedicated per-user rate limit (default 10 requests per hour, configurable via `CAMPAIGN_SEND_RATE_LIMIT_WINDOW_MS` and `CAMPAIGN_SEND_RATE_LIMIT_MAX`).
 - **Request Body** (required, strict): `{ "confirm": true }`. Anything else, including recipients, addresses or content, returns `400`.
-- **Recipients**: The campaign's stored recipients, resolved against contacts the user still owns. Deleted or foreign contacts are skipped. The address is snapshotted onto a Delivery record when the send starts.
+- **Recipients**: The campaign's stored recipients, resolved against contacts the user still owns. Deleted or foreign contacts are skipped. The list is resolved again, and each address snapshotted onto a Delivery record, when the worker locks the campaign; a contact deleted, moved to another account or whose address changed after that is skipped with `CONTACT_REMOVED` / `CONTACT_CHANGED`.
 - **Preconditions** (re-evaluated server-side; never trusted from the client):
   - The campaign is owned by the user (`404` otherwise) and is a `draft` (`409` otherwise).
   - The account is active (`403` otherwise).
   - The campaign passes the readiness rules above (`422` with `errors` otherwise).
   - The campaign resolves to at most 5,000 eligible recipients (`422` otherwise). The same cap applies to `recipientIds` on create and update (`400`).
   - An email transport is configured (`503` otherwise). Nothing is locked or queued in this case.
-- **Exactly one dispatch**: The `draft -> sending` transition is atomic and bound to the version that passed readiness. A concurrent send, or an edit made in between, returns `409` and sends nothing.
-- **Asynchronous**: Responds `202` once deliveries are queued. Messages are sent in the background with bounded concurrency (`CAMPAIGN_SEND_CONCURRENCY`, default 5, max 20).
-- **Lifecycle**: `draft -> sending -> sent | failed`. The campaign is `sent` when at least one recipient was accepted by the transport, otherwise `failed`. Non-draft campaigns can no longer be edited or deleted (`409`).
-- **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice. While the server runs, a watchdog recovers campaigns still `sending` after `CAMPAIGN_STALL_TIMEOUT_MS` (default 15 minutes) with no dispatch running; a campaign that was locked but never got deliveries returns to `draft`.
+- **Queued, never sent by the API**: the API atomically moves the draft to `scheduled` with `scheduledAt` set to the database's current time, bound to the version that passed readiness (a concurrent send, or an edit made in between, returns `409` and queues nothing). The API process never sends a campaign: the worker's scheduler picks the campaign up at its next poll (`CAMPAIGN_SCHEDULER_INTERVAL_MS`, default 15 s), re-evaluates readiness and locks it `scheduled -> sending` exactly once. Until then it can be canceled with `POST /campaigns/:id/cancel-schedule` like any scheduled campaign.
+- **Asynchronous**: Responds `202` once the campaign is queued. The worker sends messages in the background with bounded concurrency (`CAMPAIGN_SEND_CONCURRENCY`, default 5, max 20).
+- **Lifecycle**: `draft -> scheduled (queued, due now) -> sending -> sent | failed`. The campaign is `sent` when at least one recipient was accepted by the transport, otherwise `failed`. Non-draft campaigns can no longer be edited or deleted (`409`).
+- **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice. While the server runs, a watchdog recovers campaigns still `sending` after `CAMPAIGN_STALL_TIMEOUT_MS` (default 15 minutes) with no dispatch running; a campaign whose deliveries were not all created when its worker stopped has them completed from its stored dispatch manifest and is then sent (it never returns to `draft`).
 - **Guarantee**: at most once per recipient, not exactly once. `SEND_UNCERTAIN`, `INTERRUPTED` and `PERSIST_ERROR` deliveries were possibly (or, for `PERSIST_ERROR`, very likely) accepted by the transport, so `stats.sent` is a lower bound.
 - **Deployment**: several server instances may run against one MongoDB (4.2+) when `RATE_LIMIT_STORE=mongo` is set. Each sending campaign is owned by one instance through a lease with an increasing epoch (MongoDB server time), and a worker that loses or cannot confirm its lease stops claiming deliveries. See `docs/architecture.md` section 12 for the exact guarantees and their limits.
 - **Response Shape (HTTP 202)**:
 ```json
 {
   "success": true,
-  "message": "Campaign sending started",
+  "message": "Campaign queued for sending",
   "data": {
     "campaign": {
       "id": "671234567890abcdef123456",
-      "status": "sending",
-      "sendStartedAt": "2026-10-27T10:00:00.000Z",
+      "status": "scheduled",
+      "scheduledAt": "2026-10-27T10:00:00.000Z",
+      "sendStartedAt": null,
       "sendCompletedAt": null,
-      "stats": { "total": 120, "sent": 0, "failed": 0 }
+      "stats": { "total": 0, "sent": 0, "failed": 0 }
     },
     "queuedRecipients": 120
   }
@@ -353,7 +354,7 @@ The following endpoints will be introduced in subsequent phases:
 
 | Code | Meaning |
 | :--- | :--- |
-| 202 | Send accepted; deliveries queued |
+| 202 | Send accepted; campaign queued for the worker |
 | 400 | Invalid campaign ID, missing `confirm: true`, or unknown body key |
 | 401 | Missing or invalid token |
 | 403 | Account is not active |

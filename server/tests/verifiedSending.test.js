@@ -29,6 +29,7 @@ import { hashPassword } from '../src/services/password.service.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
 import { isVerifiedEmailRequired, assertAccountMaySend } from '../src/utils/sendingPolicy.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('Verified-email sending policy (no DB)', () => {
   it('defaults on only in production and honours an explicit flag', () => {
@@ -156,7 +157,7 @@ describe('Verified-email sending policy (API)', () => {
     });
     const res = await post(`/api/v1/campaigns/${c._id}/send`, verified, { confirm: true });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(c._id);
+    await runQueuedSend(c._id);
     assert.equal(transport.count, 1);
   });
 
@@ -166,6 +167,6 @@ describe('Verified-email sending policy (API)', () => {
     const c = await makeCampaign(unverified);
     const res = await post(`/api/v1/campaigns/${c._id}/send`, unverified, { confirm: true });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(c._id);
+    await runQueuedSend(c._id);
   });
 });

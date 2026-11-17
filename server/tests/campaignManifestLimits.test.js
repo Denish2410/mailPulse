@@ -29,6 +29,7 @@ import { hashPassword } from '../src/services/password.service.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
 import { buildDispatchManifest } from '../src/utils/dispatchManifest.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 /**
  * Send and schedule requests must be refused (422) when the eligible recipients could not be stored
@@ -201,7 +202,7 @@ describe('Dispatch manifest limits on send and schedule requests', () => {
       const data = await res.json();
       assert.equal(data.data.queuedRecipients, contacts.length);
 
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       assert.equal(transport.count, contacts.length);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id, status: 'sent' }), contacts.length);
       assert.equal((await Campaign.findById(campaign._id).lean()).status, 'sent');
@@ -230,7 +231,7 @@ describe('Dispatch manifest limits on send and schedule requests', () => {
       setLimits({ maxManifestBytes: bytes });
       const accepted = await createCampaign({ name: 'Exactly At The Limit' });
       assert.equal((await postSend(accepted._id)).status, 202);
-      await waitForCampaignDispatch(accepted._id);
+      await runQueuedSend(accepted._id);
       assert.equal(transport.count, contacts.length);
     });
 
@@ -269,7 +270,7 @@ describe('Dispatch manifest limits on send and schedule requests', () => {
       assert.ok(!text.includes(foreignContact.name));
       assert.ok(!/too many recipients/i.test(text), 'a foreign contact was counted toward the limit');
 
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id, contactId: foreignContact._id }), 0);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id, email: foreignContact.email }), 0);
       assert.ok(transport.sentEmails.every((mail) => mail.to !== foreignContact.email));

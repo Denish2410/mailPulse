@@ -40,6 +40,7 @@ import {
 } from '../src/services/email.service.js';
 import {
   waitForCampaignDispatch,
+  isDispatchActive,
   resumeInterruptedDispatches,
   reapStalledCampaigns,
   getWatchdogConfig,
@@ -62,6 +63,7 @@ import {
   createCampaignSchema,
   updateCampaignSchema,
 } from '../src/validators/campaign.validator.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 /**
  * Mock transport that fails for selected addresses and records everything else.
@@ -353,10 +355,13 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       const data = await res.json();
       assert.equal(data.success, true);
       assert.equal(data.data.queuedRecipients, 2);
-      assert.equal(data.data.campaign.status, 'sending');
-      assert.equal(data.data.campaign.stats.total, 2);
+      // Queued for the worker, not sent by the API
+      assert.equal(data.data.campaign.status, 'scheduled');
+      assert.ok(new Date(data.data.campaign.scheduledAt) <= new Date(Date.now() + 1000), 'due immediately');
+      assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 0, 'the API created no deliveries');
+      assert.equal(transport.count, 0, 'the API sent nothing');
 
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       assert.equal(transport.count, 2);
       const destinations = transport.sentEmails.map((m) => m.to).sort();
@@ -385,12 +390,43 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       }
     });
 
+    it('Send now only queues: nothing is locked or sent until the worker polls, and it can be canceled', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, { recipientIds: [contactA._id] });
+
+      assert.equal((await postSend(campaign._id, { token: tokenOne })).status, 202);
+      const queued = await Campaign.findById(campaign._id).lean();
+      assert.equal(queued.status, 'scheduled');
+      assert.equal(queued.dispatchManifestVersion, undefined, 'not locked by the API');
+      assert.equal(isDispatchActive(campaign._id), false, 'no dispatch started by the API');
+      assert.equal(transport.count, 0);
+
+      const cancel = await request('POST', `/api/v1/campaigns/${campaign._id}/cancel-schedule`, { token: tokenOne });
+      assert.equal(cancel.status, 200);
+      const result = await runQueuedSend(campaign._id);
+      assert.equal(result.dispatched, 0, 'a canceled send is not picked up');
+      assert.equal(transport.count, 0);
+      assert.equal((await Campaign.findById(campaign._id).lean()).status, 'draft');
+    });
+
+    it('A queued send is locked and sent exactly once, however many worker polls race for it', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+      const campaign = await createCampaignFor(userOne, { recipientIds: [contactA._id, contactB._id] });
+      assert.equal((await postSend(campaign._id, { token: tokenOne })).status, 202);
+
+      const results = await Promise.all([1, 2, 3].map(() => runQueuedSend(campaign._id)));
+      assert.equal(results.reduce((sum, r) => sum + r.dispatched, 0), 1);
+      assert.equal(transport.count, 2);
+      assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 2);
+      assert.equal((await Campaign.findById(campaign._id).lean()).status, 'sent');
+    });
+
     it('Returns 409 for a second send and never sends twice', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       const campaign = await createCampaignFor(userOne, { recipientIds: [contactA._id] });
 
       assert.equal((await postSend(campaign._id, { token: tokenOne })).status, 202);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const again = await postSend(campaign._id, { token: tokenOne });
       assert.equal(again.status, 409);
@@ -410,7 +446,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       assert.equal(statuses.filter((s) => s === 202).length, 1);
       assert.ok(statuses.filter((s) => s !== 202).every((s) => s === 409));
 
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       assert.equal(transport.count, 2);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 2);
     });
@@ -420,7 +456,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       const campaign = await createCampaignFor(userOne, { recipientIds: [contactA._id] });
 
       await postSend(campaign._id, { token: tokenOne });
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const patch = await request('PATCH', `/api/v1/campaigns/${campaign._id}`, {
         token: tokenOne,
@@ -453,7 +489,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       });
 
       assert.equal((await postSend(campaign._id, { token: tokenOne })).status, 202);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const stored = await Campaign.findById(campaign._id).lean();
       assert.equal(stored.status, 'sent');
@@ -478,7 +514,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       });
 
       await postSend(campaign._id, { token: tokenOne });
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const stored = await Campaign.findById(campaign._id).lean();
       assert.equal(stored.status, 'failed');
@@ -495,7 +531,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         recipientIds: [contactA._id, contactB._id],
       });
       await postSend(campaign._id, { token: tokenOne });
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const res = await request('GET', `/api/v1/campaigns/${campaign._id}/deliveries`, {
         token: tokenOne,
@@ -590,7 +626,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         logger: { log: () => {}, error: () => {} },
       });
       assert.ok(resumed >= 1);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       // Only the pending recipient is sent; the in-flight one is never re-sent
       assert.equal(transport.count, 1);
@@ -689,7 +725,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
 
       const res = await postSend(campaign._id, { token: tokenOne });
       assert.equal(res.status, 202);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       t.mock.restoreAll();
 
       assert.equal(transport.count, 2, 'each recipient handed to the transport exactly once');
@@ -721,7 +757,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
 
       const res = await postSend(campaign._id, { token: tokenOne });
       assert.equal(res.status, 202);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       t.mock.restoreAll();
 
       const deliveries = await Delivery.find({ campaignId: campaign._id }).lean();
@@ -767,7 +803,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         stallTimeoutMs: 15 * 60 * 1000,
       });
       assert.equal(recovered, 1);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       assert.equal(transport.count, 1);
       assert.equal(transport.sentEmails[0].to, contactB.email);
@@ -855,7 +891,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       assert.notEqual(inFlight.errorCode, 'INTERRUPTED', 'in-flight delivery must not be failed');
 
       release();
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
       t.mock.restoreAll();
 
       const done = await Delivery.findOne({ campaignId: campaign._id }).lean();
@@ -879,7 +915,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
         stallTimeoutMs: 15 * 60 * 1000,
       });
       assert.equal(recovered, 1);
-      await waitForCampaignDispatch(campaign._id);
+      await runQueuedSend(campaign._id);
 
       const stored = await Campaign.findById(campaign._id).lean();
       assert.equal(stored.status, 'sent');

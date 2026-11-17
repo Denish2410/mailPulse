@@ -29,6 +29,7 @@ import { signAccessToken } from '../src/utils/token.js';
 import { hashPassword } from '../src/services/password.service.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';
 import { waitForCampaignDispatch } from '../src/services/campaignDispatch.service.js';
+import { runQueuedSend } from './helpers/queuedSend.js';
 
 describe('Campaign personalization (dispatch and test email)', () => {
   let server;
@@ -114,7 +115,7 @@ describe('Campaign personalization (dispatch and test email)', () => {
 
     const res = await request('POST', `/api/v1/campaigns/${campaign._id}/send`, { confirm: true });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
 
     const byTo = Object.fromEntries(transport.sentEmails.map((m) => [m.to, m]));
     const ada = byTo[named.email];
@@ -143,7 +144,7 @@ describe('Campaign personalization (dispatch and test email)', () => {
       recipientIds: [named._id],
     });
     await request('POST', `/api/v1/campaigns/${campaign._id}/send`, { confirm: true });
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
 
     const mail = transport.sentEmails[0];
     assert.ok(!mail.html.includes('{{unsubscribeUrl}}'));
@@ -183,7 +184,7 @@ describe('Campaign personalization (dispatch and test email)', () => {
 
     const res = await request('POST', `/api/v1/campaigns/${campaign._id}/send`, { confirm: true });
     assert.equal(res.status, 202);
-    await waitForCampaignDispatch(campaign._id);
+    await runQueuedSend(campaign._id);
 
     const byTo = Object.fromEntries(transport.sentEmails.map((m) => [m.to, m]));
     assert.equal(byTo[named.email].subject, 'News for Acme & Sons');
