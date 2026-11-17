@@ -458,12 +458,20 @@ export const processNextDelivery = async (
   //    - SUPPRESSED       the contact has unsubscribed
   //    - CONTACT_CHANGED  the contact's address is no longer the one the campaign was locked to
   //    Any of these: the delivery is recorded failed under our claim and nothing is sent.
+  //    The contact is read ONCE, here (tenant-scoped: contact ID AND owner), and that same read
+  //    supplies the custom fields used for personalization below, so the message is built from
+  //    the very record that was checked and no further database round trip sits between this
+  //    check and the SMTP call.
+  //    RESIDUAL RISK (documented in docs/architecture.md): nothing locks the contact between this
+  //    read and the moment the mail server accepts the message. A contact deleted, edited or
+  //    unsubscribed in that window (message preparation plus the SMTP exchange, bounded by the
+  //    SMTP timeouts) can still receive this one message. It is never sent anything again.
   const lockedEmail = String(delivery.email || '').toLowerCase().trim();
   const isSuppressed = await Suppression.exists({ userId: delivery.userId, email: lockedEmail });
   const contact = isSuppressed
     ? null
     : await Contact.findOne({ _id: delivery.contactId, userId: delivery.userId })
-        .select('email isUnsubscribed')
+        .select('email isUnsubscribed customFields')
         .lean();
 
   let ineligibleCode = null;
@@ -528,13 +536,8 @@ export const processNextDelivery = async (
 
   // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
   //    recipient values can never alter tracking links)
-  let customFields;
-  if (delivery.contactId && delivery.userId && /\{\{\s*custom\./i.test(`${message.subject} ${message.text} ${message.html}`)) {
-    const contact = await Contact.findOne({ _id: delivery.contactId, userId: delivery.userId })
-      .select('customFields')
-      .lean();
-    customFields = contact?.customFields;
-  }
+  //    Custom fields come from the contact read by the eligibility check above (same snapshot).
+  const customFields = contact.customFields;
   // A/B test: recipients assigned to variant B get the alternative subject
   const variantSubject =
     delivery.variant === 'B' && message.subjectB ? message.subjectB : message.subject;

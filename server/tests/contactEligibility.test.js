@@ -38,6 +38,7 @@ import { createEmailService, createMockTransport } from '../src/services/email.s
 import {
   startCampaignDispatch,
   recoverCampaign,
+  reapStalledCampaigns,
   waitForCampaignDispatch,
 } from '../src/services/campaignDispatch.service.js';
 import { manifestFieldsFor } from './helpers/manifest.js';
@@ -266,5 +267,91 @@ describe('Pre-send contact eligibility', () => {
     assert.ok(!sentTo().includes(deleted.email));
     assert.equal((await outcomeOf(campaign, deleted)).errorCode, 'CONTACT_REMOVED');
     assert.equal((await Campaign.findById(campaign._id).lean()).status, 'sent');
+  });
+
+  it('the contact is read once per delivery, by contact ID AND owner, and that read personalizes the message', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const [first, second] = await makeContacts(['First', 'Second']);
+    await Contact.updateOne({ _id: first._id }, { $set: { 'customFields.plan': 'Gold' } });
+    await Contact.updateOne({ _id: second._id }, { $set: { 'customFields.plan': 'Silver' } });
+    const campaign = await orphanWithDeliveries([first, second]);
+    await Campaign.collection.updateOne({ _id: campaign._id }, { $set: { textContent: 'Your plan: {{custom.plan}}' } });
+
+    const reads = [];
+    const realFindOne = Contact.findOne;
+    Contact.findOne = function countedFindOne(filter, ...rest) {
+      reads.push(filter);
+      return realFindOne.call(this, filter, ...rest);
+    };
+    try {
+      await recoverAndWait(campaign);
+    } finally {
+      Contact.findOne = realFindOne;
+    }
+
+    assert.equal(reads.length, 2, 'exactly one contact read per delivery');
+    for (const filter of reads) {
+      assert.ok(filter._id, 'by contact ID');
+      assert.equal(String(filter.userId), String(owner._id), 'and by owner');
+    }
+    const byAddress = Object.fromEntries(transport.sentEmails.map((m) => [m.to, m.text]));
+    assert.match(byAddress[first.email], /Your plan: Gold/);
+    assert.match(byAddress[second.email], /Your plan: Silver/);
+  });
+
+  it('CONTACT_REMOVED and CONTACT_CHANGED are terminal: restoring the contact never gets them sent later', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const [removed, changed, kept] = await makeContacts(['Removed', 'Changed', 'Kept']);
+    const campaign = await orphanWithDeliveries([removed, changed, kept]);
+    const removedDoc = await Contact.collection.findOne({ _id: removed._id });
+    await Contact.deleteOne({ _id: removed._id });
+    await Contact.updateOne({ _id: changed._id }, { $set: { email: `other-${new mongoose.Types.ObjectId().toString()}@example.com` } });
+
+    await recoverAndWait(campaign);
+    assert.deepEqual(sentTo(), [kept.email]);
+
+    // Undo both changes, then force recovery and a watchdog sweep: nothing is sent again
+    await Contact.collection.insertOne(removedDoc);
+    await Contact.updateOne({ _id: changed._id }, { $set: { email: changed.email } });
+    for (const run of [
+      () => recoverCampaign(campaign._id, { emailService, logger: quiet }),
+      () => reapStalledCampaigns({ emailService, logger: quiet, stallTimeoutMs: 1 }),
+    ]) {
+      await Campaign.collection.updateOne(
+        { _id: campaign._id },
+        { $set: { status: 'sending', dispatchLeaseUntil: new Date(Date.now() - 1000) } }
+      );
+      await run();
+      await waitForCampaignDispatch(campaign._id);
+    }
+
+    assert.deepEqual(sentTo(), [kept.email], 'still only the one original send');
+    assert.equal((await outcomeOf(campaign, removed)).errorCode, 'CONTACT_REMOVED');
+    assert.equal((await outcomeOf(campaign, changed)).errorCode, 'CONTACT_CHANGED');
+    assert.equal((await outcomeOf(campaign, removed)).attempts, 1);
+  });
+
+  it('RESIDUAL RISK (documented): a contact deleted while its message is already with the mail server still receives that one message', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const [contact] = await makeContacts(['Deleted Mid-Send']);
+    const campaign = await orphanWithDeliveries([contact]);
+    const inner = transport;
+    const racing = createEmailService({
+      transport: {
+        async sendMail(message) {
+          // The check has passed and the SMTP exchange is under way when the contact is deleted
+          await Contact.deleteOne({ _id: contact._id });
+          return inner.sendMail(message);
+        },
+      },
+      from: 'MailPulse Test <no-reply@mailpulse.test>',
+    });
+
+    assert.equal(await recoverCampaign(campaign._id, { emailService: racing, logger: quiet }), 'resumed');
+    await waitForCampaignDispatch(campaign._id);
+
+    // Nothing can recall a message the server already has: it is recorded as sent, exactly once
+    assert.equal(transport.count, 1);
+    assert.equal((await outcomeOf(campaign, contact)).status, 'sent');
   });
 });
