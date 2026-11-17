@@ -159,14 +159,16 @@ Run these from the project root.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | 🚀 Start frontend + backend together |
-| `npm run dev:server` | ⚙️ Start only the backend (auto-reload) |
+| `npm run dev` | 🚀 Start frontend + API + campaign worker together |
+| `npm run dev:server` | ⚙️ Start only the API (auto-reload) |
+| `npm run dev:worker` | 📮 Start only the campaign worker (auto-reload); campaigns are only sent while it runs |
 | `npm run dev:client` | 🖥️ Start only the frontend |
 | `npm test` | 🧪 Run all tests |
 | `npm run test:server` | 🧪 Backend tests only |
 | `npm run test:client` | 🧪 Frontend tests only |
 | `npm run build` | 📦 Build the frontend for production (`client/dist/`) |
-| `npm run start:server` | 🏁 Run the backend in production mode |
+| `npm run start:server` | 🏁 Run the API in production mode |
+| `npm run start:worker` | 🏁 Run the campaign worker in production mode |
 
 ---
 
@@ -180,7 +182,7 @@ export MONGO_ROOT_PASSWORD="$(openssl rand -hex 24)"
 docker compose up --build
 ```
 
-Open http://localhost:8080. MongoDB requires a password and is not exposed outside the Docker network. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Run one `server` container unless you set `RATE_LIMIT_STORE=mongo` (shared rate limits); with it, several instances can run behind a load balancer and campaigns in progress are protected by leases (see `server/.env.example`).
+Open http://localhost:8080. The stack runs two application containers from one image: `server` (the API, which never sends campaigns) and `worker` (the only process that sends them; "Send now" queues a campaign and the worker starts it within the scheduler interval, 15 s by default). MongoDB requires a password and is not exposed outside the Docker network. Optional SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) are passed through from your shell. Run one `server` container unless you set `RATE_LIMIT_STORE=mongo` (shared rate limits); with it, several instances can run behind a load balancer and campaigns in progress are protected by leases (see `server/.env.example`).
 
 ### HTTPS for a real domain
 
@@ -191,7 +193,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 
 Caddy gets and renews the certificate automatically (DNS must point at the host; ports 80 and 443 open). Links in sent emails use `TRACKING_BASE_URL`, which defaults to `CLIENT_URL`. In production an account must verify its email before it can send campaigns (`REQUIRE_VERIFIED_EMAIL=false` turns that off). Back up the `mongo-data` volume, for example with `docker compose exec mongo mongodump --archive -u mailpulse -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin > backup.archive`.
 
-**Container operations.** Health: `/api/v1/health` is *liveness* (the process is up; it answers even while MongoDB is down) and `/api/v1/health/ready` is *readiness* (MongoDB answers a ping). The server container's Docker health check uses readiness, so it shows `unhealthy` during a database outage; Docker does not restart a container for that, only for a crash, so an outage does not cause a restart loop. Through the web container the liveness route is blocked (it reports Node and memory details); point external monitors at `/api/v1/health/ready`. nginx resolves the `server` container through Docker DNS at request time, so restarting `server` needs no nginx restart. Access logs (nginx, Caddy and the API's own request log) omit query strings and tracking/unsubscribe tokens. `docker compose stop` gives the server `STOP_GRACE_SECONDS` (default 40 s) to finish in-flight sends; the server refuses to start unless its `SHUTDOWN_TIMEOUT_MS` (20 s in compose) is at least 5 s shorter; after a hard kill, leases expire and campaigns are recovered without re-sending (unsent claims become `INTERRUPTED`). Log rotation (10 MB x 3) and memory limits are set in the compose files; adjust them to your host. Validate the configuration without starting anything:
+**Container operations.** Health: `/api/v1/health` is *liveness* (the process is up; it answers even while MongoDB is down) and `/api/v1/health/ready` is *readiness* (MongoDB answers a ping). The server container's Docker health check uses readiness, so it shows `unhealthy` during a database outage; Docker does not restart a container for that, only for a crash, so an outage does not cause a restart loop. Through the web container the liveness route is blocked (it reports Node and memory details); point external monitors at `/api/v1/health/ready`. nginx resolves the `server` container through Docker DNS at request time, so restarting `server` needs no nginx restart. Access logs (nginx, Caddy and the API's own request log) omit query strings and tracking/unsubscribe tokens. The `worker` container has its own health check (`GET /health` on 127.0.0.1:5001 inside the container: MongoDB connected and the dispatch runtime running). `docker compose stop` gives the worker `STOP_GRACE_SECONDS` (default 40 s) to finish in-flight sends; both containers refuse to start unless `SHUTDOWN_TIMEOUT_MS` (20 s in compose) is at least 5 s shorter; after a hard kill, leases expire and campaigns are recovered without re-sending (unsent claims become `INTERRUPTED`). Log rotation (10 MB x 3) and memory limits are set in the compose files; adjust them to your host. Validate the configuration without starting anything:
 
 ```bash
 MONGO_ROOT_PASSWORD=x JWT_SECRET=$(printf 'x%.0s' {1..32}) docker compose config -q

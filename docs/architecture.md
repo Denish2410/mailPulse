@@ -191,7 +191,7 @@ Shutdown Sequence (SIGTERM / SIGINT):
 
 ### 3. Limitations & Considerations
 - **Single-Process Scope**: Graceful shutdown handles in-flight HTTP requests and MongoDB connections for the local Node.js process. In clustered deployments (e.g. PM2 or Kubernetes with multiple replicas), each container instance manages its own shutdown lifecycle independently.
-- **Background Jobs**: Background campaign workers (implemented in future phases) will require registering custom draining hooks into the shutdown pipeline to allow in-flight email batches to complete or release queue locks.
+- **Background Jobs**: campaign sending runs only in the worker process (section 13). The API and the worker share one bounded shutdown routine (`server/src/utils/gracefulShutdown.js`): close the HTTP listener (API requests, or the worker's health endpoint), stop the scheduler, stop dispatching (in-flight watchdog sweeps, recoveries and sends are awaited, leases released), close MongoDB.
 
 ---
 
@@ -229,7 +229,8 @@ graph TD
     Test["npm test (sequential)"]
     Build["npm run build"]
 
-    Dev -->|Spawns with prefix cyan| ServerDev["npm run dev:server (nodemon)"]
+    Dev -->|Spawns with prefix cyan| ServerDev["npm run dev:server (nodemon, API)"]
+    Dev -->|Spawns with prefix yellow| WorkerDev["npm run dev:worker (nodemon, campaign worker)"]
     Dev -->|Spawns with prefix magenta| ClientDev["npm run dev:client (vite)"]
 
     Test -->|Phase 1| ServerTest["npm run test:server (node:test - 36 tests)"]
@@ -238,7 +239,7 @@ graph TD
     Build --> ClientBuild["npm run build:client (vite build)"]
 ```
 
-- **Process Lifecycle Safety**: `npm run dev` employs `concurrently -k` so that terminating the parent process (via Ctrl+C or SIGINT/SIGTERM) forwards termination signals to both child processes, preventing orphaned port bindings.
+- **Process Lifecycle Safety**: `npm run dev` employs `concurrently -k` so that terminating the parent process (via Ctrl+C or SIGINT/SIGTERM) forwards termination signals to every child process (API, worker, client), preventing orphaned port bindings. Without the worker, campaigns are queued but not sent.
 - **Zero-Dependency Native Testing**: Both workspaces run Node.js native test runner (`node:test`), delivering 51 fast, zero-overhead automated tests across 9 test suites without third-party test framework overhead.
 
 ---
@@ -339,27 +340,29 @@ MailPulse provides automated, background-scheduled campaign dispatches with stri
 ```mermaid
 flowchart TD
     Draft["Campaign (draft)"] -->|POST /:id/schedule| Scheduled["Campaign (scheduled)\nscheduledAt: Future Date"]
+    Draft -->|POST /:id/send (send now)| Queued["Campaign (scheduled)\nscheduledAt: database now"]
     Scheduled -->|POST /:id/cancel-schedule| Draft
+    Queued -->|POST /:id/cancel-schedule| Draft
     Scheduled -->|POST /:id/schedule| Scheduled
 
-    subgraph Background Scheduler Worker
-        Timer["Interval Poller (15s)"] -->|Find due campaigns| Query["status: 'scheduled' AND scheduledAt <= now"]
-        Query --> AtomicLock["Atomic findOneAndUpdate\n(status: 'scheduled' -> 'sending')"]
-        AtomicLock --> Readiness{"Re-evaluate Readiness\n& Owner Status"}
-        Readiness -->|Valid| Dispatcher["startCampaignDispatch()"]
+    subgraph Worker process only
+        Timer["Interval Poller (CAMPAIGN_SCHEDULER_INTERVAL_MS, 15s)"] -->|Find due campaigns| Query["status: 'scheduled' AND scheduledAt <= worker now"]
+        Query --> Readiness{"Re-evaluate Readiness\n& Owner Status"}
         Readiness -->|Unready or Suspended| Fail["status: 'failed'"]
+        Readiness -->|Valid| AtomicLock["startCampaignDispatch(): atomic lock\nstatus 'scheduled' AND scheduledAt <= MongoDB $$NOW\nAND same version AND no manifest -> 'sending'"]
     end
 ```
 
 ### Key Guarantees & Design:
 1. **Double-Dispatch Prevention & Atomic Claims**:
-   - The background scheduler queries for due campaigns where `status: 'scheduled'` and `scheduledAt: { $lte: new Date() }`.
-   - Transitions into `'sending'` atomically, ensuring overlapping polling sweeps cannot claim the same campaign twice.
+   - "Send now" (`POST /:id/send`) does not send: it atomically moves the evaluated draft to `scheduled` with `scheduledAt` set to MongoDB's current time. Sending is always done by the worker's scheduler, so there is one path into `sending`.
+   - The scheduler queries for due campaigns where `status: 'scheduled'` and `scheduledAt <= now` (the worker's clock), re-evaluates readiness, then locks.
+   - The lock (`startCampaignDispatch`) is one atomic update that matches only a campaign still `scheduled`, still the evaluated version, never locked before (no manifest), and due by **MongoDB's** clock (`$expr: { $lte: ['$scheduledAt', '$$NOW'] }`). Overlapping polls, several workers, a worker whose clock runs ahead, a reschedule or a cancel racing the poll: at most one lock succeeds and the others change nothing. A draft can never be locked.
 2. **Editing & Deletion Locks**:
    - Scheduled campaigns are locked from mutations (`PATCH` and `DELETE` return HTTP `409 Conflict`), requiring an explicit schedule cancellation first.
 3. **Graceful Lifecycle Management**:
-   - In production, the scheduler runs alongside the dispatch watchdog and terminates safely on `SIGTERM` / `SIGINT`, awaiting any in-flight polls before closing database connections.
-   - The scheduler is disabled in `NODE_ENV=test` to ensure test isolation.
+   - The scheduler runs only in the worker process, alongside the dispatch watchdog, and terminates safely on `SIGTERM` / `SIGINT`, awaiting any in-flight poll before dispatches are stopped and the database connection closes.
+   - Tests drive it explicitly (`pollScheduledCampaigns`, or `tests/helpers/queuedSend.js` for "send now").
 
 ---
 
@@ -413,3 +416,50 @@ A worker that cannot confirm its lease within 3/4 of the lease length (renewal f
 ### Tests
 - `tests/dispatchLease.test.js`: single-process tests of acquisition, epochs, strict renewal, release, fencing, the takeover hook and its ordering, the compare-and-swap (concurrent takers, an epoch change after the read, missing/null/0 epochs, a lost swap starting no recovery), the delivery fence (including claim-versus-fence interleavings), the SMTP boundary (a claimed delivery never returns to `pending`), conditional updates, finalization and the watchdog candidates.
 - `tests/dispatchLeaseMultiProcess.test.js` and `tests/dispatchFencing.test.js`: **real separate Node.js processes** sharing an isolated database, with a mock transport only: simultaneous acquisition and takeover, skewed clocks, renewal, takeover after SIGSTOP/SIGCONT, a worker frozen exactly between lease verification and claim, both claim/fence orderings, the stale-taker compare-and-swap regression, a stale taker finishing late, a fencing failure, a fence that trips after a claim (left `processing`, then `INTERRUPTED`), graceful-shutdown recovery, and a database outage with self-fencing. These tests do not prove behaviour across separate machines (network partitions, genuine clock drift), whole-machine freezes (a frozen local clock is emulated), or real SMTP.
+
+---
+
+## 13. Process Model: API and Worker
+
+MailPulse runs as two Node.js processes built from the same code and image:
+
+| Process | Entry point | Does | Never does |
+| :--- | :--- | :--- | :--- |
+| API | `server/src/server.js` (`npm run start:server`, Compose `server`) | HTTP API, authentication, campaign editing, readiness, queueing sends ("send now" and schedules), test emails and account emails (verification, password reset) | Lock or dispatch a campaign; it does not start the scheduler, startup resume or the watchdog |
+| Worker | `server/src/worker.js` (`npm run start:worker`, Compose `worker`) | Scheduler (locks due campaigns, including queued "send now"), startup resume of interrupted campaigns, stalled-campaign watchdog, all campaign SMTP traffic | Serve the API |
+
+```mermaid
+flowchart LR
+    Browser -->|POST /campaigns/:id/send| API["API process"]
+    API -->|"draft -> scheduled (due now)"| DB[(MongoDB)]
+    Worker["Worker process"] -->|"poll due, lock scheduled -> sending, manifest, deliveries"| DB
+    Worker -->|SMTP| Mail["Mail server"]
+```
+
+- **Coordination is only through MongoDB.** There is no queue service, no Redis and no IPC. The queue is the campaign document (`status: 'scheduled'`, `scheduledAt`); ownership of a sending campaign is the lease and epoch described in section 12.
+- **Worker health.** `GET /health` on `WORKER_HEALTH_HOST:WORKER_HEALTH_PORT` (default `127.0.0.1:5001`, loopback so only the container's own check reaches it) answers `200` while MongoDB is connected and the dispatch runtime runs, otherwise `503` (including from the start of shutdown). Every other path answers `404`. It reports only booleans.
+- **Shutdown.** Both processes use the same ordered, bounded handler (section 6). For the worker: health endpoint closed, scheduler stopped (awaiting an in-flight poll), dispatching stopped (stop flag first, then the in-flight watchdog sweep, recoveries and sends are awaited, then leases released), MongoDB closed. `stop_grace_period` in Compose must stay longer than `SHUTDOWN_TIMEOUT_MS`.
+- **Without a worker** nothing is lost: queued and scheduled campaigns wait, and campaigns left `sending` are recovered by the next worker without re-sending anything whose outcome is uncertain.
+- **More than one worker** is safe (atomic due-time lock, leases with epochs, per-delivery fencing), but the first-client deployment runs one.
+- **Latency.** A "send now" starts within one scheduler interval (`CAMPAIGN_SCHEDULER_INTERVAL_MS`, default 15 s, minimum 1 s).
+
+### Delivery outcomes recorded by the worker
+
+| Code | Meaning | Recipient emailed? | Ever re-sent? |
+| :--- | :--- | :--- | :--- |
+| `sent` (status) | The mail server accepted the message | Yes | No |
+| `TRANSPORT_ERROR` | Refused by the server (4xx/5xx reply), or failed before any message data was sent (connect, greeting or STARTTLS timeout, DNS, authentication, connection refused) | No | No |
+| `SEND_UNCERTAIN` | The send call failed in a way where the server may already have accepted it (socket inactivity timeout, connection dropped or reset without a reply, any unrecognised error) | Possibly | No |
+| `INTERRUPTED` | The worker stopped while the delivery was in flight; recorded by the next owner's recovery | Possibly | No |
+| `PERSIST_ERROR` | Accepted by the server, but recording `sent` failed | Very likely | No |
+| `INVALID_MESSAGE` / `CONFIGURATION_ERROR` | Rejected before the transport was called | No | No |
+| `SUPPRESSED` / `CONTACT_REMOVED` / `CONTACT_CHANGED` | Skipped by the pre-send contact check (section 12) | No | No |
+
+Nothing retries a failed delivery automatically. The guarantee is **at most once** per recipient per campaign; `stats.sent` is a lower bound.
+
+### Residual risks (stated, not solved)
+
+- **Contact changes during an SMTP exchange.** The pre-send check reads the contact immediately before sending, but nothing locks it until the mail server accepts the message: a contact deleted, edited or unsubscribed in that window can still receive that one message.
+- **Timeout classification depends on the SMTP library.** A connect, greeting or STARTTLS timeout is treated as "not sent" only when Nodemailer reports which timeout fired (`timeoutType`); otherwise the failure is recorded `SEND_UNCERTAIN`. That errs toward reporting a possible delivery, never toward re-sending.
+- **Queued sends wait for a worker.** If no worker runs, "send now" campaigns stay queued (shown as *Queued* in the UI) until one starts; they are never sent by the API.
+- **Single MongoDB.** The design relies on one MongoDB deployment (4.2+) and its server time; see section 12 for what the lease tests do and do not prove (no network partitions or real clock drift across machines).

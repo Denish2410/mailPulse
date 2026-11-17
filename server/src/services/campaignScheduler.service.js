@@ -7,12 +7,15 @@ import { DispatchManifestError } from '../utils/dispatchManifest.js';
 /**
  * MailPulse Campaign Scheduler (Phase 9)
  *
- * Polls for campaigns in status 'scheduled' whose `scheduledAt` has passed and hands each to
+ * Polls for campaigns in status 'scheduled' whose `scheduledAt` has passed (including "send now"
+ * campaigns, which the API queues as scheduled for the database's current time) and hands each to
  * `startCampaignDispatch`, which performs the atomic 'scheduled' -> 'sending' transition. That
- * conditional update is the lock: a campaign can never be dispatched twice, and a cancel or
- * reschedule racing a poll simply makes the dispatch a no-op.
+ * conditional update is the lock (due by MongoDB's clock, same version, never locked before): a
+ * campaign can never be dispatched twice, and a cancel or reschedule racing a poll simply makes
+ * the dispatch a no-op.
  *
- * DEPLOYMENT: SINGLE APPLICATION INSTANCE ONLY (in-process timer).
+ * DEPLOYMENT: runs only in the worker process (src/worker.js), never in the API. Several workers
+ * polling at once are safe because of that lock; one is the supported first-client setup.
  */
 
 export const DEFAULT_SCHEDULER_INTERVAL_MS = 15000;
