@@ -70,7 +70,8 @@ describe('Interrupted delivery generation across real processes', () => {
       subject: 'Hello',
       textContent: 'Body',
       htmlContent: '<p>Body</p>',
-      status: 'draft',
+      status: 'scheduled',
+      scheduledAt: new Date(Date.now() - 1000), // due: only due scheduled campaigns can be locked
       recipientIds: contacts.map((c) => c._id),
     });
     return { id: String(campaign._id), contacts, contactIds: contacts.map((c) => String(c._id)) };

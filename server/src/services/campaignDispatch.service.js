@@ -680,7 +680,7 @@ export const processCampaignDeliveries = async (
     }
 
     // INTERNAL / TEST-ONLY PATH: in production a lease session is always handed in (by the
-    // draft -> sending transition or by recovery), so this branch is not reachable there. It exists
+    // scheduled -> sending transition or by recovery), so this branch is not reachable there. It exists
     // for direct callers (tests). It uses the same fence-then-compare-and-swap takeover as
     // recovery, but it has no recovery sweep, so it does not mark older processing deliveries
     // INTERRUPTED. Another live owner means: leave the campaign alone.
@@ -800,9 +800,15 @@ export const scheduleCampaignProcessing = (campaignId, options = {}) => {
 };
 
 /**
- * Locks a ready draft into 'sending', creates its Delivery records, and starts background
- * processing. The caller is responsible for authentication, readiness evaluation, and
- * verifying that the email service is configured.
+ * Locks a DUE scheduled campaign into 'sending', creates its Delivery records, and starts
+ * background processing. Only the worker's scheduler calls this (a "send now" from the API is a
+ * campaign scheduled for the database's current time). The caller is responsible for readiness
+ * evaluation and for verifying that the email service is configured.
+ *
+ * The lock matches only a campaign that is still 'scheduled', still the exact version that was
+ * evaluated, never locked before, and due by MongoDB's clock (`scheduledAt <= $$NOW`). A draft,
+ * a campaign rescheduled into the future, canceled, edited, or due only by this worker's clock
+ * is never locked.
  *
  * @param {object} params
  * @param {object} params.campaign - The draft exactly as it was evaluated for readiness
@@ -813,8 +819,8 @@ export const scheduleCampaignProcessing = (campaignId, options = {}) => {
  * @param {object} [params.logger]
  * @param {{ maxRecipients?: number, maxManifestBytes?: number, maxDocumentBytes?: number }} [params.manifestLimits]
  *   May only LOWER the dispatch manifest limits (tests); see utils/dispatchManifest.js
- * @returns {Promise<object|null>} The campaign in 'sending' state, or null when the draft
- *   changed or was already sent since it was evaluated (caller should respond 409).
+ * @returns {Promise<object|null>} The campaign in 'sending' state, or null when it is not a due
+ *   scheduled campaign at the evaluated version (changed, canceled, rescheduled, already locked).
  * @throws {import('../utils/dispatchManifest.js').DispatchManifestError} When the eligible
  *   recipients cannot be stored as a manifest. Thrown BEFORE the lock: nothing has changed.
  */
@@ -842,7 +848,7 @@ export const startCampaignDispatch = async ({
     campaignDocumentBytes: measureBsonBytes(campaignDocument),
   });
 
-  // 1. Atomic draft -> sending transition on the exact evaluated version. The lease is taken in
+  // 1. Atomic scheduled -> sending transition on the exact evaluated version. The lease is taken in
   //    the SAME update (an update pipeline using MongoDB server time), so there is never a moment
   //    when the campaign is 'sending' without an owner that a peer's watchdog could grab. The
   //    manifest is written by that same update too: a campaign is never 'sending' under this lock
@@ -854,7 +860,9 @@ export const startCampaignDispatch = async ({
     {
       _id: campaign._id,
       userId,
-      status: { $in: ['draft', 'scheduled'] },
+      // Only a due scheduled campaign, by the database's own clock
+      status: 'scheduled',
+      $expr: { $lte: ['$scheduledAt', '$$NOW'] },
       updatedAt: campaign.updatedAt,
       // A manifest is written exactly once. A campaign that already carries one was locked before
       // and can never be locked (and so never have its recipient list replaced) again.

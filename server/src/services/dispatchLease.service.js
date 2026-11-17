@@ -364,7 +364,7 @@ export const acquireLeaseSession = async (campaignId, options = {}) => {
 };
 
 /**
- * Wraps a lease that was granted as part of another atomic update (the draft -> sending
+ * Wraps a lease that was granted as part of another atomic update (the scheduled -> sending
  * transition), so the worker starts with the right epoch and a running heartbeat.
  */
 export const adoptLease = (campaignId, epoch, options = {}) =>

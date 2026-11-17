@@ -436,7 +436,8 @@ describe('Fenced dispatch work', () => {
       name: 'Lock lease',
       subject: 'Hello',
       textContent: 'Body',
-      status: 'draft',
+      status: 'scheduled',
+      scheduledAt: new Date(Date.now() - 1000), // due: only due scheduled campaigns can be locked
       recipientIds: contacts.map((c) => c._id),
     });
     const locked = await startCampaignDispatch({ campaign: draft, userId: user._id, eligibleContacts: contacts, emailService, logger: quietLogger });

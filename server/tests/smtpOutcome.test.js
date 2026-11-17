@@ -370,7 +370,8 @@ describe('Every failure category through dispatch, recovery and the watchdog', (
         subject: 'Hello',
         textContent: 'Body',
         htmlContent: '<p>Body</p>',
-        status: 'draft',
+        status: 'scheduled',
+        scheduledAt: new Date(Date.now() - 1000), // due: only due scheduled campaigns can be locked
         recipientIds: contacts.map((c) => c._id),
       });
 

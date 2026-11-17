@@ -84,7 +84,8 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       subject: 'Hello',
       textContent: 'Body',
       htmlContent: '<p>Body</p>',
-      status: 'draft',
+      status: 'scheduled',
+      scheduledAt: new Date(Date.now() - 1000), // due: only due scheduled campaigns can be locked
       recipientIds: contacts.map((c) => c._id),
       ...overrides,
     });
@@ -224,7 +225,7 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       );
       assert.equal(await lock(staleCopy, contacts, { emailService }), null);
       const afterStale = await rawCampaign(edited._id);
-      assert.equal(afterStale.status, 'draft');
+      assert.equal(afterStale.status, 'scheduled');
       assertNoManifest(afterStale);
 
       // 2. The campaign is not a draft or scheduled campaign
@@ -246,7 +247,7 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
         (error) => error instanceof DispatchManifestError && error.code === 'TOO_MANY_RECIPIENTS'
       );
       const raw = await rawCampaign(campaign._id);
-      assert.equal(raw.status, 'draft');
+      assert.equal(raw.status, 'scheduled');
       assert.ok(!('dispatchLeaseOwner' in raw));
       assertNoManifest(raw);
       assert.equal(await Delivery.countDocuments({ campaignId: campaign._id }), 0);
@@ -502,7 +503,7 @@ describe('Dispatch lock records a versioned recipient manifest', () => {
       });
       assert.equal(locked, null);
       const raw = await rawCampaign(campaign._id);
-      assert.equal(raw.status, 'draft');
+      assert.equal(raw.status, 'scheduled');
       assertNoManifest(raw);
       assert.equal(await Delivery.countDocuments({}), 0);
     });

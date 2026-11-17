@@ -233,7 +233,8 @@ describe('Pre-send contact eligibility', () => {
       subject: 'Hello',
       textContent: 'Body',
       htmlContent: '<p>Body</p>',
-      status: 'draft',
+      status: 'scheduled',
+      scheduledAt: new Date(Date.now() - 1000), // due: only due scheduled campaigns can be locked
       recipientIds: [first._id, second._id],
     });
     // Whichever recipient is sent first deletes the other contact before it is reached
