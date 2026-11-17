@@ -1,7 +1,8 @@
 /**
- * SMTP timeouts: bounded, validated, passed to the real transport, and a timed-out send is a
- * failed delivery that is NEVER retried (the outcome is uncertain). No network I/O: the real
- * transport is only constructed (Nodemailer connects lazily), and sends use a mock transport.
+ * SMTP timeouts: bounded, validated, passed to the real transport, and a send that timed out
+ * after the message was handed over is recorded SEND_UNCERTAIN and NEVER retried. No network I/O:
+ * the real transport is only constructed (Nodemailer connects lazily), and sends use a mock
+ * transport. Each timeout category is covered in smtpOutcome.test.js.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,8 +52,9 @@ import { DEFAULT_SHUTDOWN_TIMEOUT_MS, getShutdownTimeoutMs } from '../src/config
 const quiet = { log() {}, warn() {}, error() {} };
 const baseEnv = { SMTP_HOST: 'smtp.example.test', SMTP_PORT: '587', EMAIL_FROM: 'MailPulse <no-reply@example.test>' };
 
-/** A Node-style SMTP timeout error, as Nodemailer reports one. */
-const smtpTimeoutError = () => Object.assign(new Error('Timeout'), { code: 'ETIMEDOUT', command: 'DATA' });
+/** Nodemailer's socket inactivity timeout, which can fire after the server accepted the message. */
+const smtpTimeoutError = () =>
+  Object.assign(new Error('Timeout'), { code: 'ETIMEDOUT', command: 'CONN', timeoutType: 'SOCKET_TIMEOUT' });
 
 describe('SMTP timeout configuration (no DB)', () => {
   it('uses bounded defaults, each phase shorter than the default shutdown timeout', () => {
@@ -131,7 +133,7 @@ describe('SMTP timeout configuration (no DB)', () => {
   });
 });
 
-describe('A timed-out send is a failed delivery and is never retried', () => {
+describe('A timed-out send is recorded uncertain and is never retried', () => {
   let isDbConnected = false;
   let owner;
 
@@ -163,7 +165,7 @@ describe('A timed-out send is a failed delivery and is never retried', () => {
     }
   });
 
-  it('records TRANSPORT_ERROR once and never re-sends, even across recovery and watchdog sweeps', async (t) => {
+  it('records SEND_UNCERTAIN once and never re-sends, even across recovery and watchdog sweeps', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const contacts = await Contact.insertMany(
       ['Times Out', 'Delivered One', 'Delivered Two'].map((name, i) => ({
@@ -200,7 +202,7 @@ describe('A timed-out send is a failed delivery and is never retried', () => {
 
     const failed = await Delivery.findOne({ campaignId: campaign._id, email: timedOut }).lean();
     assert.equal(failed.status, 'failed');
-    assert.equal(failed.errorCode, 'TRANSPORT_ERROR');
+    assert.equal(failed.errorCode, 'SEND_UNCERTAIN');
     assert.equal(failed.attempts, 1);
     const done = await Campaign.findById(campaign._id).lean();
     assert.equal(done.status, 'sent');

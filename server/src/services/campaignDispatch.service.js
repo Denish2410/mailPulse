@@ -18,7 +18,6 @@ import {
   EmailServiceError,
   InvalidMessageError,
   EmailConfigurationError,
-  EmailTransportError,
 } from './email.service.js';
 import {
   prepareTrackedEmailHtml,
@@ -99,19 +98,25 @@ export const getSendConcurrency = (env = process.env) => {
 /**
  * Maps an error thrown by the email service to a stored, sanitized delivery error code.
  *
+ * Only errors that prove the message was NOT accepted map to a "not emailed" code:
+ * INVALID_MESSAGE and CONFIGURATION_ERROR are raised before the transport is called, and
+ * TRANSPORT_ERROR only when the transport failure was classified 'rejected'. Every other failure
+ * of the send call (a socket timeout, a dropped connection, anything unrecognised) is
+ * SEND_UNCERTAIN: the server may have accepted the message. Like INTERRUPTED and PERSIST_ERROR,
+ * it is terminal and never re-sent.
+ *
  * @param {unknown} error
- * @returns {'INVALID_MESSAGE'|'CONFIGURATION_ERROR'|'TRANSPORT_ERROR'|'UNKNOWN_ERROR'}
+ * @returns {'INVALID_MESSAGE'|'CONFIGURATION_ERROR'|'TRANSPORT_ERROR'|'SEND_UNCERTAIN'}
  */
 export const toDeliveryErrorCode = (error) => {
   if (error instanceof InvalidMessageError) return 'INVALID_MESSAGE';
   if (error instanceof EmailConfigurationError) return 'CONFIGURATION_ERROR';
-  if (error instanceof EmailTransportError) return 'TRANSPORT_ERROR';
-  if (error instanceof EmailServiceError && typeof error.code === 'string') {
-    return ['INVALID_MESSAGE', 'CONFIGURATION_ERROR', 'TRANSPORT_ERROR'].includes(error.code)
-      ? error.code
-      : 'UNKNOWN_ERROR';
+  if (error instanceof EmailServiceError && error.code === 'INVALID_MESSAGE') return 'INVALID_MESSAGE';
+  if (error instanceof EmailServiceError && error.code === 'CONFIGURATION_ERROR') return 'CONFIGURATION_ERROR';
+  if (error instanceof EmailServiceError && error.code === 'TRANSPORT_ERROR' && error.outcome === 'rejected') {
+    return 'TRANSPORT_ERROR';
   }
-  return 'UNKNOWN_ERROR';
+  return 'SEND_UNCERTAIN';
 };
 
 /**

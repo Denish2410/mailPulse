@@ -196,6 +196,7 @@ describe('Campaign Sending (Phase 5)', () => {
       assert.match(describeDeliveryError('SUPPRESSED'), /unsubscribed or suppressed/);
       assert.match(describeDeliveryError('CONTACT_REMOVED'), /deleted/);
       assert.match(describeDeliveryError('CONTACT_CHANGED'), /email changed/);
+      assert.match(describeDeliveryError('SEND_UNCERTAIN'), /may have been delivered/);
       assert.equal(describeDeliveryError(null), '');
       assert.equal(describeDeliveryError('SOMETHING'), 'Unknown error');
     });

@@ -78,7 +78,12 @@ const createSelectiveTransport = (failingAddresses = []) => {
     },
     async sendMail(mailOptions) {
       if (failing.has(String(mailOptions.to).toLowerCase())) {
-        throw new Error('Simulated SMTP 550 mailbox unavailable');
+        // Shaped like Nodemailer's error for a 550 reply to RCPT TO: a definite rejection
+        throw Object.assign(new Error('Simulated SMTP 550 mailbox unavailable'), {
+          code: 'EENVELOPE',
+          responseCode: 550,
+          command: 'RCPT TO',
+        });
       }
       return inner.sendMail(mailOptions);
     },
@@ -970,8 +975,10 @@ describe('Campaign dispatch helpers (no database)', () => {
   it('toDeliveryErrorCode maps email errors to sanitized codes', () => {
     assert.equal(toDeliveryErrorCode(new InvalidMessageError('x')), 'INVALID_MESSAGE');
     assert.equal(toDeliveryErrorCode(new EmailConfigurationError('x')), 'CONFIGURATION_ERROR');
-    assert.equal(toDeliveryErrorCode(new EmailTransportError()), 'TRANSPORT_ERROR');
-    assert.equal(toDeliveryErrorCode(new Error('socket hang up')), 'UNKNOWN_ERROR');
+    assert.equal(toDeliveryErrorCode(new EmailTransportError('x', { outcome: 'rejected' })), 'TRANSPORT_ERROR');
+    // A transport failure nobody classified, or any other error, may have been accepted
+    assert.equal(toDeliveryErrorCode(new EmailTransportError()), 'SEND_UNCERTAIN');
+    assert.equal(toDeliveryErrorCode(new Error('socket hang up')), 'SEND_UNCERTAIN');
   });
 
   it('Campaign send rate limit config falls back to defaults on invalid values', () => {

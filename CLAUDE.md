@@ -35,7 +35,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 5. **Delivery Guarantee (At-Most-Once)**:
    - Maximum recipient cap: **5,000 recipients per campaign**.
    - Each recipient receives **at most one email** per campaign.
-   - If a crash occurs after transport acceptance, record as `failed` (`INTERRUPTED` or `PERSIST_ERROR`) to prevent duplicate sends.
+   - If a crash occurs after transport acceptance, record as `failed` (`INTERRUPTED` or `PERSIST_ERROR`) to prevent duplicate sends. A transport failure that may have happened after acceptance (socket timeout, dropped connection, unclassified error) is `SEND_UNCERTAIN`, never `TRANSPORT_ERROR`, and is never retried.
 6. **Zero Real Email Safety in Tests**:
    - Automated tests MUST always use the mock transport (`createMockTransport()`).
    - Never configure real SMTP credentials during test executions.
@@ -157,7 +157,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Fields: `userId`, `name`, `subject`, `subjectB`, `textContent`, `htmlContent`, `recipientIds`, `status` (`'draft'`, `'scheduled'`, `'sending'`, `'sent'`, `'failed'`), `scheduledAt`, `sendStartedAt`, `sendCompletedAt`, `stats` (`total`, `sent`, `failed`), lease fields `dispatchLeaseOwner`/`dispatchLeaseUntil`/`dispatchLeaseEpoch` (internal, never exposed).
   - Indexes: `{ userId: 1, createdAt: -1 }`, `{ status: 1, scheduledAt: 1 }`.
 - **Delivery** (`server/src/models/Delivery.js`):
-  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `variant` (`'A'`, `'B'`), `claimEpoch` (lease epoch of the claiming worker), `fence` (minimum epoch allowed to claim while pending), `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'`, `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'UNKNOWN_ERROR'`), `attempts`, `sentAt`, `failedAt`.
+  - Fields: `campaignId`, `userId`, `contactId`, `name`, `email`, `variant` (`'A'`, `'B'`), `claimEpoch` (lease epoch of the claiming worker), `fence` (minimum epoch allowed to claim while pending), `status` (`'pending'`, `'processing'`, `'sent'`, `'failed'`), `errorCode` (`'INVALID_MESSAGE'`, `'CONFIGURATION_ERROR'`, `'TRANSPORT_ERROR'` (definitely not accepted), `'SEND_UNCERTAIN'` (may have been accepted), `'INTERRUPTED'`, `'PERSIST_ERROR'`, `'SUPPRESSED'`, `'CONTACT_REMOVED'`, `'CONTACT_CHANGED'`, `'UNKNOWN_ERROR'` (legacy)), `attempts`, `sentAt`, `failedAt`.
 - **SignupForm** (`server/src/models/SignupForm.js`): `userId`, `name`, `description`, `tags`, `slug` (unique, immutable), `enabled`.
 - **PendingSubscription** (`server/src/models/PendingSubscription.js`): `formId`, `userId`, `email`, `name`, `tokenHash` (unique), `expiresAt` (TTL), unique `{ formId, email }`.
 - **Template** (`server/src/models/Template.js`):

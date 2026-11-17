@@ -331,7 +331,7 @@ The following endpoints will be introduced in subsequent phases:
 - **Asynchronous**: Responds `202` once deliveries are queued. Messages are sent in the background with bounded concurrency (`CAMPAIGN_SEND_CONCURRENCY`, default 5, max 20).
 - **Lifecycle**: `draft -> sending -> sent | failed`. The campaign is `sent` when at least one recipient was accepted by the transport, otherwise `failed`. Non-draft campaigns can no longer be edited or deleted (`409`).
 - **Reliability**: On graceful shutdown, workers stop claiming new deliveries and in-flight sends finish. On the next start, pending deliveries resume; deliveries that were mid-send are recorded as failed (`INTERRUPTED`) rather than re-sent, so a recipient never receives a campaign twice. While the server runs, a watchdog recovers campaigns still `sending` after `CAMPAIGN_STALL_TIMEOUT_MS` (default 15 minutes) with no dispatch running; a campaign that was locked but never got deliveries returns to `draft`.
-- **Guarantee**: at most once per recipient, not exactly once. `INTERRUPTED` and `PERSIST_ERROR` deliveries were possibly (or, for `PERSIST_ERROR`, very likely) accepted by the transport, so `stats.sent` is a lower bound.
+- **Guarantee**: at most once per recipient, not exactly once. `SEND_UNCERTAIN`, `INTERRUPTED` and `PERSIST_ERROR` deliveries were possibly (or, for `PERSIST_ERROR`, very likely) accepted by the transport, so `stats.sent` is a lower bound.
 - **Deployment**: several server instances may run against one MongoDB (4.2+) when `RATE_LIMIT_STORE=mongo` is set. Each sending campaign is owned by one instance through a lease with an increasing epoch (MongoDB server time), and a worker that loses or cannot confirm its lease stops claiming deliveries. See `docs/architecture.md` section 12 for the exact guarantees and their limits.
 - **Response Shape (HTTP 202)**:
 ```json
@@ -393,7 +393,7 @@ The following endpoints will be introduced in subsequent phases:
   }
 }
 ```
-- **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `INTERRUPTED`, `PERSIST_ERROR`, `UNKNOWN_ERROR`. `INTERRUPTED` (process stopped mid-send) and `PERSIST_ERROR` (transport accepted the message but recording it failed) mean the recipient may already have been emailed; these are never re-sent.
+- **Error codes** are stored instead of raw provider messages: `INVALID_MESSAGE`, `CONFIGURATION_ERROR`, `TRANSPORT_ERROR`, `SEND_UNCERTAIN`, `INTERRUPTED`, `PERSIST_ERROR`, `SUPPRESSED`, `CONTACT_REMOVED`, `CONTACT_CHANGED` (and `UNKNOWN_ERROR` on older records). `TRANSPORT_ERROR` means the message was definitely not accepted (the mail server refused it, or the failure happened before any message was handed over, such as a connect or greeting timeout). `SEND_UNCERTAIN` (the connection timed out or dropped after the message may have been accepted), `INTERRUPTED` (process stopped mid-send) and `PERSIST_ERROR` (transport accepted the message but recording it failed) mean the recipient may already have been emailed. No failed delivery is ever re-sent.
 - **Sent vs. delivered**: `sent` means the email provider accepted the message. Bounces, opens and clicks are not tracked yet.
 
 #### Campaign Scheduling Contract (`POST /api/v1/campaigns/:id/schedule` & `POST /api/v1/campaigns/:id/cancel-schedule`)

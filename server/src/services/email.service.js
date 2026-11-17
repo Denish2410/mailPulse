@@ -63,14 +63,75 @@ export class EmailConfigurationError extends EmailServiceError {
 }
 
 /**
- * Thrown when an underlying transport fails to deliver an email.
+ * What a failed transport call tells us about the message.
+ * - 'rejected':  the message was definitely NOT accepted (the server said no, or the failure
+ *                happened before any message could be handed over).
+ * - 'uncertain': the server may already have accepted the message; the recipient may receive it.
+ */
+export const SEND_OUTCOMES = Object.freeze({ REJECTED: 'rejected', UNCERTAIN: 'uncertain' });
+
+/**
+ * Thrown when an underlying transport fails to deliver an email. `outcome` says whether the
+ * message may still have been accepted; it defaults to 'uncertain' so that an error nobody
+ * classified is never treated as a definite non-delivery.
  */
 export class EmailTransportError extends EmailServiceError {
   constructor(message = 'Failed to deliver email through transport.', options = {}) {
     super(message, 'TRANSPORT_ERROR', options);
     this.name = 'EmailTransportError';
+    this.outcome = options.outcome === SEND_OUTCOMES.REJECTED ? SEND_OUTCOMES.REJECTED : SEND_OUTCOMES.UNCERTAIN;
   }
 }
+
+/** Nodemailer timeouts that can only fire before any message data is sent. */
+const PRE_SEND_TIMEOUTS = new Set(['CONNECT_TIMEOUT', 'GREETING_TIMEOUT', 'UPGRADE_TIMEOUT']);
+/** Nodemailer error codes raised only before the SMTP transaction (MAIL FROM) starts. */
+const PRE_SEND_CODES = new Set(['EDNS', 'EAUTH', 'ENOAUTH', 'EOAUTH2', 'ECONFIG', 'EREQUIRETLS']);
+/** Socket errors that mean a connection was never established. */
+const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH']);
+
+/**
+ * Classifies a raw transport error (as raised by Nodemailer's SMTP transport).
+ *
+ * CONSERVATIVE: only failures that provably happened before the server could have accepted the
+ * message are 'rejected'. Everything else, including any error this function does not recognise,
+ * is 'uncertain'.
+ *
+ * Definitely not accepted:
+ * - the server answered with an SMTP 4xx/5xx reply (to MAIL FROM, RCPT TO, DATA or the final ".");
+ *   a single-message transaction whose reply is a refusal was not accepted;
+ * - a connect, greeting or STARTTLS timeout (Nodemailer `timeoutType` CONNECT_TIMEOUT,
+ *   GREETING_TIMEOUT, UPGRADE_TIMEOUT): these phases end before MAIL FROM;
+ * - DNS, authentication or configuration errors, and a connection that was never established
+ *   (connection refused, host or network unreachable).
+ *
+ * Possibly accepted ('uncertain'):
+ * - a socket inactivity timeout (SOCKET_TIMEOUT): it can fire while the server is processing the
+ *   final "." and is about to (or already did) accept the message;
+ * - a connection closed or reset without an SMTP reply, any other socket/protocol/stream error;
+ * - any ETIMEDOUT without a known `timeoutType`, and any unrecognised error.
+ *
+ * @param {unknown} error
+ * @returns {'rejected'|'uncertain'}
+ */
+export const classifyTransportFailure = (error) => {
+  if (!error || typeof error !== 'object') return SEND_OUTCOMES.UNCERTAIN;
+  const responseCode = Number(error.responseCode);
+  if (Number.isInteger(responseCode) && responseCode >= 400 && responseCode <= 599) {
+    return SEND_OUTCOMES.REJECTED;
+  }
+  if (typeof error.timeoutType === 'string' && PRE_SEND_TIMEOUTS.has(error.timeoutType)) {
+    return SEND_OUTCOMES.REJECTED;
+  }
+  if (typeof error.code === 'string' && PRE_SEND_CODES.has(error.code)) {
+    return SEND_OUTCOMES.REJECTED;
+  }
+  const socketCode = typeof error.originalCode === 'string' ? error.originalCode : error.code;
+  if (typeof socketCode === 'string' && NEVER_CONNECTED.has(socketCode)) {
+    return SEND_OUTCOMES.REJECTED;
+  }
+  return SEND_OUTCOMES.UNCERTAIN;
+};
 
 /**
  * Validates and normalizes outbound message parameters.
@@ -202,10 +263,10 @@ export const isSmtpConfigured = (env = process.env) => {
  * sequential, so one send can still take longer in total; if the shutdown timeout fires first the
  * process exits and that delivery is recorded INTERRUPTED by the next owner (never re-sent).
  *
- * A timeout is a FAILED send, never a retried one: the delivery is recorded failed with
- * TRANSPORT_ERROR and is not sent again. If the timeout happens after the server accepted the
- * message, the recipient may still receive it while the delivery says failed; that is the same
- * uncertain-outcome rule the dispatcher already applies.
+ * A timeout is never retried. A connect, greeting or STARTTLS timeout happens before any message
+ * data is sent and is recorded TRANSPORT_ERROR (not emailed). A socket timeout can happen after
+ * the server accepted the message, so it is recorded SEND_UNCERTAIN (may have been emailed); see
+ * classifyTransportFailure. Neither is ever sent again.
  */
 export const SMTP_TIMEOUT_DEFAULTS_MS = Object.freeze({
   connectionTimeout: 5_000,
@@ -520,6 +581,7 @@ export const createEmailService = ({ transport, from, env = process.env } = {}) 
         // Never expose raw socket errors, passwords, or credentials
         throw new EmailTransportError('Failed to deliver email through transport.', {
           cause: error,
+          outcome: classifyTransportFailure(error),
         });
       }
     },
@@ -570,4 +632,6 @@ export default {
   InvalidMessageError,
   EmailConfigurationError,
   EmailTransportError,
+  SEND_OUTCOMES,
+  classifyTransportFailure,
 };

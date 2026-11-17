@@ -742,6 +742,8 @@ export const describeDeliveryError = (code) => {
       return 'Invalid address or message';
     case 'CONFIGURATION_ERROR':
       return 'Email sending not configured';
+    case 'SEND_UNCERTAIN':
+      return 'Outcome unknown: the mail server stopped responding (may have been delivered)';
     case 'INTERRUPTED':
       return 'Interrupted by a server restart (may have been delivered)';
     case 'PERSIST_ERROR':

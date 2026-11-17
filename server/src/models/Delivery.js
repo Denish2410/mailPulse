@@ -18,8 +18,12 @@ import mongoose from 'mongoose';
  * - Tenant scoping: `userId` is denormalized so every query can be owner-scoped.
  *
  * Error codes:
- * - INVALID_MESSAGE / CONFIGURATION_ERROR / TRANSPORT_ERROR / UNKNOWN_ERROR: the transport did
- *   not accept the message; the recipient was not emailed.
+ * - INVALID_MESSAGE / CONFIGURATION_ERROR / TRANSPORT_ERROR: the message was definitely not
+ *   accepted (rejected by the server, or the failure happened before any message was handed
+ *   over); the recipient was not emailed.
+ * - SEND_UNCERTAIN: the send call failed in a way where the server may already have accepted the
+ *   message (for example a socket timeout after the message body). Never re-sent.
+ * - UNKNOWN_ERROR: legacy; no longer written (unclassified failures are SEND_UNCERTAIN).
  * - INTERRUPTED: the process stopped while the delivery was 'processing'; the outcome is unknown
  *   and the recipient may have been emailed. Never re-sent.
  * - PERSIST_ERROR: the transport ACCEPTED the message but recording 'sent' failed; the recipient
@@ -31,6 +35,8 @@ export const DELIVERY_ERROR_CODES = [
   'INVALID_MESSAGE',
   'CONFIGURATION_ERROR',
   'TRANSPORT_ERROR',
+  // The send call failed after the server may already have accepted the message
+  'SEND_UNCERTAIN',
   'INTERRUPTED',
   'PERSIST_ERROR',
   'SUPPRESSED',
