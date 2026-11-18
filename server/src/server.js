@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { getErrorReporter } from './services/errorReporter.service.js';
 import { getSecurityWarnings } from './config/securityWarnings.js';
 import { validateShutdownConfig } from './config/shutdown.js';
+import { validateTokenEncryptionConfig } from './utils/tokenCrypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,6 +75,9 @@ export const startServer = async (options = {}) => {
     if (shouldValidateConfig) {
       validateAuthConfig();
       validateShutdownConfig();
+      // Invalid token encryption keys always stop startup; missing keys only when Google OAuth is
+      // configured (OAuth tokens are never stored unencrypted)
+      validateTokenEncryptionConfig();
       for (const warning of getSecurityWarnings()) {
         console.warn(`[Security] ${warning}`);
       }

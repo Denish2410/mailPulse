@@ -96,6 +96,10 @@ services:
       SMTP_CONNECTION_TIMEOUT_MS: ${SMTP_CONNECTION_TIMEOUT_MS:-}
       SMTP_GREETING_TIMEOUT_MS: ${SMTP_GREETING_TIMEOUT_MS:-}
       SMTP_SOCKET_TIMEOUT_MS: ${SMTP_SOCKET_TIMEOUT_MS:-}
+      # OAuth token encryption at rest (keyId:base64Key[,keyId:base64Key]). Empty = not configured,
+      # which is allowed only while Google OAuth is not configured. See server/.env.example.
+      TOKEN_ENCRYPTION_KEYS: ${TOKEN_ENCRYPTION_KEYS:-}
+      TOKEN_ENCRYPTION_ACTIVE_KEY_ID: ${TOKEN_ENCRYPTION_ACTIVE_KEY_ID:-}
       # Bounce & complaint webhooks. A provider is enabled only when its value is non-empty;
       # an empty value (the default) keeps that provider's endpoint answering 404.
       SENDGRID_WEBHOOK_PUBLIC_KEY: ${SENDGRID_WEBHOOK_PUBLIC_KEY:-}

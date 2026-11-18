@@ -11,6 +11,7 @@ dotenv.config();
 
 import { connectDB } from './config/db.js';
 import { validateShutdownConfig } from './config/shutdown.js';
+import { validateTokenEncryptionConfig } from './utils/tokenCrypto.js';
 import { getErrorReporter } from './services/errorReporter.service.js';
 import { getDefaultEmailService } from './services/email.service.js';
 import {
@@ -113,6 +114,8 @@ export const startWorker = async (options = {}) => {
   try {
     if (options.validateConfig ?? true) {
       validateShutdownConfig();
+      // The worker will decrypt OAuth tokens to send: same fail-closed rule as the API
+      validateTokenEncryptionConfig();
     }
     const port = options.port ?? getWorkerHealthPort();
     const host = options.host ?? (process.env.WORKER_HEALTH_HOST || DEFAULT_WORKER_HEALTH_HOST);

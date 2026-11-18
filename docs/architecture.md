@@ -463,3 +463,22 @@ Nothing retries a failed delivery automatically. The guarantee is **at most once
 - **Timeout classification depends on the SMTP library.** A connect, greeting or STARTTLS timeout is treated as "not sent" only when Nodemailer reports which timeout fired (`timeoutType`); otherwise the failure is recorded `SEND_UNCERTAIN`. That errs toward reporting a possible delivery, never toward re-sending.
 - **Queued sends wait for a worker.** If no worker runs, "send now" campaigns stay queued (shown as *Queued* in the UI) until one starts; they are never sent by the API.
 - **Single MongoDB.** The design relies on one MongoDB deployment (4.2+) and its server time; see section 12 for what the lease tests do and do not prove (no network partitions or real clock drift across machines).
+
+## 14. OAuth Token Encryption at Rest
+
+Campaign email will be sent through the Gmail API with each customer's own Google account. The OAuth tokens those accounts grant are encrypted by `server/src/utils/tokenCrypto.js` before they are stored. This section describes that utility only; the sender-account model, OAuth flow and Gmail transport come in later milestones and are not implemented yet.
+
+### Design
+
+- **Algorithm.** AES-256-GCM (Node `crypto`, no extra dependency) with a 32-byte key, a fresh 96-bit IV from the CSPRNG for every encryption, and the full 128-bit authentication tag, which is checked on every decryption.
+- **Envelope.** `mpt1.<keyId>.<iv>.<ciphertext>.<tag>`, each binary part base64url-encoded. The version prefix and the key ID make rotation and future format changes possible without guessing.
+- **Context binding.** Every call names a context (for example the sender account and token kind). The context, the version and the key ID are authenticated as additional data, so an envelope copied to another record, relabelled with another key ID or edited in any byte fails to decrypt.
+- **Strict parsing, generic errors.** Malformed envelopes (wrong part count, unknown version, non-canonical base64url, wrong IV or tag length, empty or oversized ciphertext) are rejected before any decryption. Errors carry a code (`TOKEN_INVALID_CIPHERTEXT`, `TOKEN_UNKNOWN_KEY`, `TOKEN_DECRYPT_FAILED`, ...) and a fixed message; they never include a token, a key, an envelope or the underlying crypto error.
+- **No plaintext fallback.** There is no "unencrypted" mode: without a configured key, encrypting and decrypting throw. A value that is not a valid envelope is never returned as-is.
+
+### Configuration and startup
+
+- `TOKEN_ENCRYPTION_KEYS` lists `keyId:base64Key` pairs; `TOKEN_ENCRYPTION_ACTIVE_KEY_ID` selects the key for new encryptions (required when several keys are listed). Keys must decode to exactly 32 bytes; placeholder keys whose bytes are all equal are refused. There is no built-in or default key.
+- The API and the worker validate this configuration at startup, before connecting to MongoDB. A key that is set but invalid always stops startup. A missing key stops startup only when Google OAuth is configured (any `GOOGLE_OAUTH_*` variable), so deployments that do not use Gmail keep working unchanged, while OAuth can never run without encryption.
+- Rotation: list the new key next to the old one, make it active, restart the API and the worker together, and remove the old key only when no stored token uses it (`needsReencryption` reports envelopes made with a non-active key). Removing a key that still protects tokens, or losing all keys, makes those tokens unreadable; the affected sender accounts must then be reconnected.
+- Tests (`server/tests/tokenCrypto.test.js`) generate disposable random keys at run time; no key is committed.
