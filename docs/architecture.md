@@ -513,3 +513,9 @@ Configuration is all-or-nothing (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_
 - `GET /api/v1/sender-accounts` and `GET /api/v1/sender-accounts/:id` return only the caller's accounts through the allow-list formatter (`canSend` is true only for `active`). Another user's account answers 404, like a missing one.
 - `POST /api/v1/sender-accounts/:id/disconnect` wipes the tokens and sets `disconnected` in one atomic update (generation bumped), then revokes the grant at Google under the revocation rule above. A failed revocation does not undo the disconnect; the response reports `revoked`. Repeating it is a no-op. What happens to campaigns using a disconnected account is decided at dispatch (later milestone): they pause and wait for the customer; they never switch to another account.
 - Deleting a MailPulse account first revokes its unshared grants (best effort, in parallel, each request time-limited), then deletes the records.
+
+### Access tokens (`server/src/services/senderToken.service.js`)
+
+- `getSenderAccessToken({ userId, senderAccountId })` is always scoped by owner and never chooses another account. It returns the cached access token while it is valid for at least 2 more minutes, otherwise refreshes it; concurrent callers in one process share one refresh.
+- Writes are conditional on the account still being `active` at the generation it was read with: a refresh racing a disconnect or reconnect never restores wiped or outdated tokens; it re-reads instead.
+- Google refusing the grant (`invalid_grant`, or `gmail.send` no longer granted) marks the account `reauth_required`. Network errors, timeouts, rate limits and 5xx answers change nothing and are reported as retryable. An unreadable stored token (for example a removed encryption key) is reported but does not mark the account, so a key mistake does not force every customer to reconnect.
