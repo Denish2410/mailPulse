@@ -175,7 +175,9 @@ describe('API and worker run as separate processes', () => {
     });
     await sleep(1500);
     const locked = await Campaign.findById(campaign._id).lean();
-    assert.equal(locked.status, 'sending');
+    // No credentials: the worker pauses the campaign (reconnect required) instead of sending
+    assert.equal(locked.status, 'paused');
+    assert.equal(locked.pauseReason, 'SENDER_REAUTH_REQUIRED');
     assert.equal(String(locked.dispatchSender.accountId), String(sender._id));
     const deliveries = await Delivery.find({ campaignId: campaign._id }).lean();
     assert.equal(deliveries.length, 2, 'the worker locked it and generated its deliveries');

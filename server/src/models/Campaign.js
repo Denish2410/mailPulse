@@ -39,7 +39,7 @@ import mongoose from 'mongoose';
 /**
  * Supported campaign lifecycle states.
  */
-export const CAMPAIGN_STATUSES = ['draft', 'scheduled', 'sending', 'sent', 'failed'];
+export const CAMPAIGN_STATUSES = ['draft', 'scheduled', 'sending', 'paused', 'sent', 'failed'];
 
 /**
  * Maximum recipients a single campaign may target.
@@ -119,7 +119,7 @@ const campaignSchema = new mongoose.Schema(
       type: String,
       enum: {
         values: CAMPAIGN_STATUSES,
-        message: 'Status must be one of draft, scheduled, sending, sent, or failed',
+        message: 'Status must be one of draft, scheduled, sending, paused, sent, or failed',
       },
       default: 'draft',
     },
@@ -190,6 +190,11 @@ const campaignSchema = new mongoose.Schema(
       select: false,
       immutable: true,
     },
+    // 'paused': a locked campaign whose dispatch stopped because of its SENDER (disconnected,
+    // revoked, identity changed, daily cap, Gmail refusing, an uncertain send). Sent and uncertain
+    // deliveries are kept, unsent ones stay pending, and nothing resumes until the owner asks.
+    pauseReason: { type: String, default: null, maxlength: 64, match: /^[A-Z][A-Z0-9_]*$/ },
+    pausedAt: { type: Date, default: null },
     // Sender snapshot (see dispatchSenderSchema): written ONLY by the lock update, immutable after.
     dispatchSender: {
       type: dispatchSenderSchema,

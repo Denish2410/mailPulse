@@ -8,6 +8,7 @@ import {
   getCampaignReadiness,
   sendCampaignTestEmail,
   sendCampaign,
+  resumeCampaign,
   scheduleCampaign,
   cancelScheduledCampaign,
   applyCampaignAudience,
@@ -96,6 +97,13 @@ router.post('/:id/schedule', validate(scheduleCampaignSchema), scheduleCampaign)
  * @desc    Cancel a scheduled campaign and revert it to draft.
  * @access  Protected
  */
+/**
+ * @route   POST /api/v1/campaigns/:id/resume
+ * @desc    Explicitly resume a paused campaign (same locked sender, same Google account)
+ * @access  Protected
+ */
+router.post('/:id/resume', campaignSendRateLimiter, validate(sendCampaignSchema), resumeCampaign);
+
 router.post('/:id/cancel-schedule', validate(campaignIdParamSchema), cancelScheduledCampaign);
 
 /**

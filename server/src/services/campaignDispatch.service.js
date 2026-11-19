@@ -362,6 +362,38 @@ export const getDeliveryCounts = async (campaignId) => {
 };
 
 /**
+ * Pauses a campaign because of its sender. One atomic update, conditional on this worker still
+ * being the lease owner (same owner and epoch) of a campaign that is still 'sending', so a stale
+ * worker can never pause (or un-pause) anything. Sent and uncertain deliveries are untouched,
+ * unsent ones stay 'pending', the stats are recomputed, the epoch is kept, and the lease ends now.
+ * Nothing resumes by itself: only the owner's explicit resume moves it back to 'sending'.
+ *
+ * @returns {Promise<object|null>} the paused campaign, or null when this worker no longer owns it
+ */
+export const pauseCampaign = async (campaignId, fence, reason) => {
+  const counts = await getDeliveryCounts(campaignId);
+  return Campaign.findOneAndUpdate(
+    { _id: campaignId, status: 'sending', ...ownerFilter(fence) },
+    [
+      {
+        $set: {
+          status: 'paused',
+          pauseReason: reason,
+          pausedAt: '$$NOW',
+          updatedAt: '$$NOW',
+          'stats.total': counts.total,
+          'stats.sent': counts.sent,
+          'stats.failed': counts.failed,
+          dispatchLeaseUntil: '$$NOW',
+        },
+      },
+      { $unset: 'dispatchLeaseOwner' },
+    ],
+    { new: true }
+  );
+};
+
+/**
  * Finalizes a campaign whose deliveries have all been processed.
  * Does nothing while pending/processing deliveries remain (e.g. after a shutdown request).
  *
@@ -861,6 +893,11 @@ export const processCampaignDeliveries = async (
       logger.error(
         `[Dispatcher] Campaign ${String(campaignId)} stopped sending: ${senderGuard.stopReason}. Unsent deliveries stay pending.`
       );
+      // Every worker has settled, so every claimed delivery has its final record. A graceful
+      // shutdown or a lost lease leaves the campaign 'sending' for the next owner instead.
+      if (!stopRequested && !session.isFenced()) {
+        await pauseCampaign(campaignId, session, senderGuard.stopReason);
+      }
       return;
     }
 
@@ -1421,6 +1458,7 @@ export default {
   getWatchdogConfig,
   processNextDelivery,
   finalizeCampaign,
+  pauseCampaign,
   getDeliveryCounts,
   waitForCampaignDispatch,
   stopAllDispatches,

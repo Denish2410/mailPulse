@@ -31,6 +31,7 @@ export const PAUSE_REASON_MESSAGES = Object.freeze({
   SENDER_SCOPE_MISSING: 'The sender Gmail account is no longer allowed to send email. Reconnect it and allow sending, then resume the campaign.',
   SENDER_TOKEN_REFRESH_FAILED: 'Gmail access could not be renewed. Check the connection, then resume the campaign.',
   SENDER_AUTH_FAILED: 'Gmail did not accept the sender credentials. Resume the campaign to try again with fresh credentials.',
+  SEND_UNCERTAIN: "Gmail did not confirm the last message, so it may or may not have been sent. Check the sender's Sent folder, then resume the campaign.",
   GMAIL_RATE_LIMITED: 'Gmail is limiting sending for this account. Wait a while, then resume the campaign.',
   DAILY_QUOTA_REACHED: "This sender account reached MailPulse's conservative daily sending limit. Resume the campaign tomorrow.",
 });
@@ -125,9 +126,13 @@ export const createSenderGuard = ({ userId, sender, emailService = null, env = p
       return ticket;
     },
 
-    /** Re-check right before the message is handed to Gmail (after the claim). */
+    /**
+     * Re-check right before the message is handed to Gmail (after the claim). It looks only at the
+     * ACCOUNT, not at `stopReason`: a stop requested by another worker (daily cap reached, a rate
+     * limit) must not turn a delivery that was already claimed and legitimately reserved into a
+     * failure. The account check is what makes a vanished sender stop an in-flight claim.
+     */
     async verifyBeforeSend() {
-      if (stopReason) return false;
       return verifyAccount();
     },
   };

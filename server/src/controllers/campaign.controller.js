@@ -25,6 +25,7 @@ import Segment from '../models/Segment.js';
 import BounceEvent from '../models/BounceEvent.js';
 import { getGoogleOAuthConfig } from '../config/googleOAuth.js';
 import { createGmailCampaignEmailService } from '../services/gmailCampaignMailer.service.js';
+import { CampaignResumeError, resumePausedCampaign, describePause } from '../services/campaignResume.service.js';
 import {
   CampaignSenderError,
   requireUsableSender,
@@ -59,6 +60,8 @@ export const formatSafeCampaign = (campaign, senders = null) => {
     // Safe summary of the selected sender (id, address, status); null when none is selected or
     // the account no longer exists for this owner. Never contains tokens.
     sender: (doc.senderAccountId && senders?.get(String(doc.senderAccountId))) || null,
+    // Why a paused campaign stopped, in words for the owner (null unless paused)
+    pause: describePause(doc),
     scheduledAt: doc.scheduledAt ?? null,
     sendStartedAt: doc.sendStartedAt ?? null,
     sendCompletedAt: doc.sendCompletedAt ?? null,
@@ -905,6 +908,42 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Explicitly resume a paused campaign.
+ *
+ * Only the owner can do it, only while the campaign is 'paused', and only when its LOCKED sender
+ * is usable again as the same Google account. Reconnecting a sender never resumes anything by
+ * itself. Responds 202: the worker's recovery picks the campaign up at its next sweep and sends
+ * only the deliveries that are still pending.
+ *
+ * Route: POST /api/v1/campaigns/:id/resume
+ * Access: Protected (Bearer JWT)
+ */
+export const resumeCampaign = asyncHandler(async (req, res) => {
+  const userId = req.auth?.userId;
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+  const user = await User.findById(userId).select('status emailVerifiedAt mailingAddress').lean();
+  if (!user) {
+    throw new AppError('Authentication required. Invalid user identity.', 401);
+  }
+  assertAccountMaySend(user, 'send');
+
+  let resumed;
+  try {
+    resumed = await resumePausedCampaign({ campaignId: req.params.id, userId });
+  } catch (error) {
+    if (error instanceof CampaignResumeError) throw new AppError(error.message, error.statusCode);
+    throw error;
+  }
+  res.status(202).json({
+    success: true,
+    message: 'Campaign resumed. Sending continues shortly from the same Gmail account.',
+    data: { campaign: await formatCampaignWithSender(resumed, userId) },
+  });
+});
+
+/**
  * Cancel a scheduled campaign and revert it to draft status.
  *
  * Route: POST /api/v1/campaigns/:id/cancel-schedule
@@ -1225,6 +1264,7 @@ export default {
   getCampaignDeliveries,
   getCampaignAnalytics,
   formatSafeCampaign,
+  resumeCampaign,
   formatSafeDelivery,
   validateAndDeduplicateRecipients,
 };

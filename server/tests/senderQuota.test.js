@@ -168,6 +168,7 @@ describe('Sender quota and dispatch', () => {
     const deliveries = await Delivery.find({ campaignId: campaign._id }).lean();
     assert.equal(deliveries.filter((d) => d.status === 'sent').length, 2);
     assert.equal(deliveries.filter((d) => d.status === 'pending').length, 3);
+    assert.equal(deliveries.filter((d) => d.status === 'failed').length, 0, 'no claimed delivery was lost to the stop');
     assert.equal((await SenderUsage.findOne({ senderAccountId: sender._id })).count, 2);
     assert.equal(await SenderUsage.countDocuments({ senderAccountId: spare._id }), 0);
   });
