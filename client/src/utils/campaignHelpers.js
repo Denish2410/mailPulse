@@ -79,6 +79,11 @@ export const getCampaignStatusBadge = (status, { scheduledAt = null, now = Date.
         label: 'Sending',
         pillClass: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
       };
+    case 'paused':
+      return {
+        label: 'Paused',
+        pillClass: 'bg-orange-500/10 text-orange-300 border border-orange-500/20',
+      };
     case 'sent':
       return {
         label: 'Sent',
@@ -774,6 +779,8 @@ export const describeDeliveryError = (code) => {
       return 'Interrupted by a server restart (may have been delivered)';
     case 'PERSIST_ERROR':
       return 'Accepted by the provider, but not recorded (likely delivered)';
+    case 'SENDER_UNAVAILABLE':
+      return 'Not sent: the sending Gmail account was not available';
     case 'SUPPRESSED':
       return 'Not sent: unsubscribed or suppressed';
     case 'CONTACT_REMOVED':

@@ -286,6 +286,19 @@ export const cancelScheduledCampaign = async (id, config = {}) => {
 };
 
 /**
+ * Explicitly resume a paused campaign. Only valid while its locked Gmail account is usable again as
+ * the same Google account; the server answers 409 with the reason otherwise.
+ *
+ * @param {string} id - Campaign ID
+ * @param {import('axios').AxiosRequestConfig} [config={}]
+ * @returns {Promise<{ campaign: object }>}
+ */
+export const resumeCampaign = async (id, config = {}) => {
+  const response = await apiClient.post(`/campaigns/${id}/resume`, { confirm: true }, config);
+  return response.data?.data;
+};
+
+/**
  * Fill a draft campaign's recipients from tags or a saved segment (Phase 11).
  *
  * @param {string} id - Campaign ID
@@ -351,6 +364,7 @@ export default {
   sendCampaign,
   scheduleCampaign,
   cancelScheduledCampaign,
+  resumeCampaign,
   applyCampaignAudience,
   duplicateCampaign,
   getCampaignBounces,

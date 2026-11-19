@@ -5,6 +5,7 @@ import {
   sendCampaign,
   scheduleCampaign,
   cancelScheduledCampaign,
+  resumeCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
@@ -184,6 +185,8 @@ export const CampaignPreviewDialog = ({
     }
   };
   const [scheduleState, setScheduleState] = useState({ status: 'idle', message: '' });
+  const [resumeState, setResumeState] = useState({ status: 'idle', message: '' });
+  const [resumed, setResumed] = useState(false);
   const [scheduleOverride, setScheduleOverride] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [prevScheduleKey, setPrevScheduleKey] = useState(`${isOpen}:${campaign?.id}`);
@@ -194,6 +197,8 @@ export const CampaignPreviewDialog = ({
     setScheduleState({ status: 'idle', message: '' });
     setScheduleOverride(null);
     setIsRescheduling(false);
+    setResumed(false);
+    setResumeState({ status: 'idle', message: '' });
   }
 
   const getScheduleErrorMessage = (err) => {
@@ -227,6 +232,18 @@ export const CampaignPreviewDialog = ({
       setScheduleState({ status: 'idle', message: '' });
     } catch (err) {
       setScheduleState({ status: 'error', message: getScheduleErrorMessage(err) });
+    }
+  };
+
+  const handleResume = async () => {
+    if (resumeState.status === 'saving') return;
+    setResumeState({ status: 'saving', message: '' });
+    try {
+      await resumeCampaign(campaign.id);
+      setResumed(true);
+      setResumeState({ status: 'idle', message: '' });
+    } catch (err) {
+      setResumeState({ status: 'error', message: getErrorMessage(err, 'Could not resume the campaign. Please try again.') });
     }
   };
 
@@ -338,7 +355,7 @@ export const CampaignPreviewDialog = ({
   const unsubscribedCount = summary.unsubscribedRecipientsCount;
 
   // Effective lifecycle status (the list copy may be stale right after sending)
-  const effectiveStatus = sentStatus || scheduleOverride?.status || campaign.status;
+  const effectiveStatus = sentStatus || scheduleOverride?.status || (resumed ? 'sending' : campaign.status);
   const effectiveScheduledAt = scheduleOverride ? scheduleOverride.scheduledAt : campaign.scheduledAt;
   const isScheduled = effectiveStatus === 'scheduled';
   const isQueued = isCampaignQueued({ status: effectiveStatus, scheduledAt: effectiveScheduledAt });
@@ -429,6 +446,34 @@ export const CampaignPreviewDialog = ({
               </div>
             </div>
           </div>
+
+          {/* Paused: the sending Gmail account stopped working; sending continues only on request */}
+          {effectiveStatus === 'paused' && (
+            <div role="alert" className="p-4 sm:p-5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-200 text-sm flex flex-col gap-3">
+              <div>
+                <p className="font-semibold">Sending is paused</p>
+                <p className="text-xs text-orange-300/90 mt-1">
+                  {campaign.pause?.message || 'This campaign was paused. Check its sender account, then resume it.'}
+                </p>
+                <p className="text-xs text-orange-300/80 mt-1">
+                  Messages already sent are kept; the rest wait. Reconnecting the account does not resume the campaign by itself.
+                </p>
+              </div>
+              {resumeState.status === 'error' && (
+                <p className="text-xs text-rose-300 font-medium" role="alert">{resumeState.message}</p>
+              )}
+              <div>
+                <button
+                  type="button"
+                  onClick={handleResume}
+                  disabled={resumeState.status === 'saving'}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-400"
+                >
+                  {resumeState.status === 'saving' ? 'Resuming…' : 'Resume sending'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Section 2: Delivery progress (sent campaigns) or live readiness evaluation (drafts) */}
           {isScheduled ? (
