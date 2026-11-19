@@ -507,3 +507,9 @@ Campaigns will be sent from mailboxes the customer owns, through the Gmail API w
 Revocation rule: a Google grant belongs to the pair (Google account, OAuth client), not to a MailPulse record, so revoking a token also cuts off every other connection of the same mailbox, including another user's. Tokens MailPulse refuses (missing scope, missing refresh token, account limit) are revoked only when no other connected record uses that Google account. Reconnecting never revokes the previous token, which belongs to the same grant.
 
 Configuration is all-or-nothing (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`) and validated at startup by the API and the worker; with none set, the endpoints answer 503 and nothing else changes. Requests to Google use Node's fetch with a timeout and are refused in tests unless a fake client is injected, so no test can reach Google.
+
+### Listing and disconnecting
+
+- `GET /api/v1/sender-accounts` and `GET /api/v1/sender-accounts/:id` return only the caller's accounts through the allow-list formatter (`canSend` is true only for `active`). Another user's account answers 404, like a missing one.
+- `POST /api/v1/sender-accounts/:id/disconnect` wipes the tokens and sets `disconnected` in one atomic update (generation bumped), then revokes the grant at Google under the revocation rule above. A failed revocation does not undo the disconnect; the response reports `revoked`. Repeating it is a no-op. What happens to campaigns using a disconnected account is decided at dispatch (later milestone): they pause and wait for the customer; they never switch to another account.
+- Deleting a MailPulse account first revokes its unshared grants (best effort, in parallel, each request time-limited), then deletes the records.

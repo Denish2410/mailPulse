@@ -11,6 +11,7 @@ import BounceEvent from '../models/BounceEvent.js';
 import TrackingEvent from '../models/TrackingEvent.js';
 import SenderAccount, { SENDER_TOKEN_FIELDS } from '../models/SenderAccount.js';
 import OAuthState from '../models/OAuthState.js';
+import { revokeAllSenderGrants } from './senderConnection.service.js';
 
 /**
  * Account data rights (GDPR access/portability and erasure).
@@ -110,6 +111,8 @@ export const buildAccountExport = async (userId) => {
  */
 export const deleteAccountData = async (userId) => {
   const counts = {};
+  // Give connected mailboxes back first (best effort): Google stops honouring MailPulse's grants
+  counts.revokedSenderGrants = await revokeAllSenderGrants(userId);
   // Tracking events first: they are found through the campaigns that are deleted below
   counts.trackingEvents = (
     await TrackingEvent.deleteMany({ campaignId: { $in: await campaignIdsOf(userId) } })

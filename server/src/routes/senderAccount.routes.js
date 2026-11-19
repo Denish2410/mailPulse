@@ -1,9 +1,15 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { createRateLimitStore } from '../middleware/rateLimitStore.js';
-import { connectGoogle, googleCallback } from '../controllers/senderAccount.controller.js';
+import {
+  connectGoogle,
+  googleCallback,
+  listSenderAccounts,
+  getSenderAccount,
+  disconnectSender,
+} from '../controllers/senderAccount.controller.js';
 import { validate } from '../validators/validate.js';
-import { googleCallbackSchema } from '../validators/senderAccount.validator.js';
+import { googleCallbackSchema, senderAccountIdParamSchema } from '../validators/senderAccount.validator.js';
 import { authenticateSession as authenticate } from '../middleware/authenticate.js';
 
 const router = Router();
@@ -20,6 +26,9 @@ const connectLimiter = rateLimit({
   message: { success: false, message: 'Too many connection attempts, please try again later.' },
 });
 
+router.get('/', listSenderAccounts);
+router.get('/:id', validate(senderAccountIdParamSchema), getSenderAccount);
+router.post('/:id/disconnect', validate(senderAccountIdParamSchema), disconnectSender);
 router.post('/google/connect', connectLimiter, connectGoogle);
 router.post('/google/callback', connectLimiter, validate(googleCallbackSchema), googleCallback);
 

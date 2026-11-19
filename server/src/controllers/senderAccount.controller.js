@@ -5,8 +5,13 @@ import {
   SenderConnectionError,
   startGoogleConnection,
   completeGoogleConnection,
+  disconnectSenderAccount,
 } from '../services/senderConnection.service.js';
-import { formatSafeSenderAccount } from '../services/senderAccount.service.js';
+import {
+  formatSafeSenderAccount,
+  findOwnedSenderAccount,
+  listOwnedSenderAccounts,
+} from '../services/senderAccount.service.js';
 
 /**
  * Sender accounts API (customer Gmail mailboxes). Every handler is scoped to the authenticated
@@ -64,5 +69,43 @@ export const googleCallback = run(async (req, res) => {
     success: true,
     message: created ? 'Gmail account connected.' : 'Gmail account reconnected.',
     data: { senderAccount: formatSafeSenderAccount(account) },
+  });
+});
+
+/** GET /api/v1/sender-accounts */
+export const listSenderAccounts = run(async (req, res) => {
+  const userId = requireUserId(req);
+  const accounts = await listOwnedSenderAccounts(userId);
+  res.status(200).json({
+    success: true,
+    message: 'Sender accounts retrieved successfully',
+    data: { senderAccounts: accounts.map(formatSafeSenderAccount), count: accounts.length },
+  });
+});
+
+/** GET /api/v1/sender-accounts/:id */
+export const getSenderAccount = run(async (req, res) => {
+  const userId = requireUserId(req);
+  const account = await findOwnedSenderAccount(userId, req.params.id);
+  if (!account) throw new AppError('Sender account not found.', 404);
+  res.status(200).json({
+    success: true,
+    message: 'Sender account retrieved successfully',
+    data: { senderAccount: formatSafeSenderAccount(account) },
+  });
+});
+
+/**
+ * POST /api/v1/sender-accounts/:id/disconnect
+ * Wipes the tokens and marks the account disconnected; idempotent.
+ */
+export const disconnectSender = run(async (req, res) => {
+  const userId = requireUserId(req);
+  const result = await disconnectSenderAccount({ userId, accountId: req.params.id });
+  if (!result) throw new AppError('Sender account not found.', 404);
+  res.status(200).json({
+    success: true,
+    message: result.alreadyDisconnected ? 'Sender account was already disconnected.' : 'Sender account disconnected.',
+    data: { senderAccount: formatSafeSenderAccount(result.account), revoked: result.revoked },
   });
 });

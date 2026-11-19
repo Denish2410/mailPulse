@@ -14,7 +14,13 @@ import {
   readIdTokenClaims,
   revokeToken,
 } from './googleOAuth.service.js';
-import { MAX_SENDER_ACCOUNTS_PER_USER, sealRefreshToken, sealAccessToken } from './senderAccount.service.js';
+import {
+  MAX_SENDER_ACCOUNTS_PER_USER,
+  sealRefreshToken,
+  sealAccessToken,
+  openRefreshToken,
+  findOwnedSenderAccount,
+} from './senderAccount.service.js';
 
 /**
  * Connecting a customer's Gmail mailbox (Google OAuth authorization code flow with PKCE).
@@ -261,9 +267,80 @@ export const completeGoogleConnection = async ({ userId, state, code, now = new 
   }
 };
 
+const openQuietly = (account) => {
+  if (!account?.encryptedRefreshToken) return null;
+  try {
+    return openRefreshToken(account._id, account.encryptedRefreshToken);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Disconnects a sender account: tokens are wiped and the status set to `disconnected` in one
+ * atomic update (generation bumped, so no in-flight refresh can restore them), THEN the grant is
+ * revoked at Google when no other connected record uses it. A failed revocation does not undo the
+ * disconnect; the response says whether Google confirmed it.
+ *
+ * @returns {Promise<null | { account: import('mongoose').Document, revoked: boolean, alreadyDisconnected: boolean }>}
+ *          null when the account does not exist for this user
+ */
+export const disconnectSenderAccount = async ({ userId, accountId, now = new Date(), fetchImpl }) => {
+  const current = await findOwnedSenderAccount(userId, accountId);
+  if (!current) return null;
+  const before = await SenderAccount.findOneAndUpdate(
+    { _id: current._id, userId, status: { $ne: 'disconnected' } },
+    {
+      $set: {
+        status: 'disconnected',
+        statusReason: 'USER_DISCONNECTED',
+        statusChangedAt: now,
+        disconnectedAt: now,
+        encryptedRefreshToken: null,
+        encryptedAccessToken: null,
+        accessTokenExpiresAt: null,
+      },
+      $inc: { tokenGeneration: 1 },
+    },
+    { new: false }
+  ).select('+encryptedRefreshToken');
+  if (!before) return { account: current, revoked: false, alreadyDisconnected: true };
+
+  const revoked = await revokeGrantIfUnshared({
+    providerAccountId: before.providerAccountId,
+    token: openQuietly(before),
+    excludeAccountId: before._id,
+    fetchImpl,
+  });
+  return { account: await SenderAccount.findById(before._id), revoked, alreadyDisconnected: false };
+};
+
+/**
+ * Account deletion: revokes the user's Google grants that no other connected record uses.
+ * Best effort and in parallel (each request has its own timeout); never throws.
+ *
+ * @returns {Promise<number>} how many grants Google confirmed as revoked
+ */
+export const revokeAllSenderGrants = async (userId, { fetchImpl } = {}) => {
+  const accounts = await SenderAccount.find({ userId, status: { $ne: 'disconnected' } }).select('+encryptedRefreshToken');
+  const results = await Promise.allSettled(
+    accounts.map((account) =>
+      revokeGrantIfUnshared({
+        providerAccountId: account.providerAccountId,
+        token: openQuietly(account),
+        excludeAccountId: account._id,
+        fetchImpl,
+      })
+    )
+  );
+  return results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
+};
+
 export default {
   startGoogleConnection,
   completeGoogleConnection,
+  disconnectSenderAccount,
+  revokeAllSenderGrants,
   revokeGrantIfUnshared,
   requireGoogleOAuthConfig,
   OAUTH_STATE_TTL_MS,
