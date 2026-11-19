@@ -499,6 +499,11 @@ Campaigns will be sent from mailboxes the customer owns, through the Gmail API w
 ### Connecting a mailbox (Google OAuth, authorization code flow with PKCE)
 
 1. `POST /api/v1/sender-accounts/google/connect` (authenticated) stores a pending connection for 10 minutes: the SHA-256 hash of a random 256-bit `state` and an encrypted PKCE verifier, bound to the user. It returns Google's consent URL (scopes `openid email gmail.send`, offline access, consent prompt). At most 5 pending connections and 10 connected accounts per user.
-2. Google redirects the browser to `GOOGLE_OAUTH_REDIRECT_URI`, a page of the MailPulse client, which posts `code` and `state` back to the API with the user's own session (step 2 is described with the callback below).
+2. Google redirects the browser to `GOOGLE_OAUTH_REDIRECT_URI`, a page of the MailPulse client, which posts `code` and `state` to `POST /api/v1/sender-accounts/google/callback` with the user's own session. There is no unauthenticated callback endpoint.
+3. The callback atomically consumes the pending connection (it must exist, belong to the same user, be unused and unexpired), so a replayed or foreign state is refused before Google is contacted. The code is exchanged together with the PKCE verifier.
+4. The grant must include `gmail.send` and a refresh token, and the ID token (received directly from Google's token endpoint over TLS) must name this OAuth client, Google as issuer, an unexpired time and a verified email. Otherwise nothing is stored.
+5. The account is created, or this user's existing record for the same Google account (`sub`) is updated with the new tokens and set back to `active` (reconnect).
+
+Revocation rule: a Google grant belongs to the pair (Google account, OAuth client), not to a MailPulse record, so revoking a token also cuts off every other connection of the same mailbox, including another user's. Tokens MailPulse refuses (missing scope, missing refresh token, account limit) are revoked only when no other connected record uses that Google account. Reconnecting never revokes the previous token, which belongs to the same grant.
 
 Configuration is all-or-nothing (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`) and validated at startup by the API and the worker; with none set, the endpoints answer 503 and nothing else changes. Requests to Google use Node's fetch with a timeout and are refused in tests unless a fake client is injected, so no test can reach Google.

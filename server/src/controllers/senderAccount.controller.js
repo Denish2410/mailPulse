@@ -1,7 +1,12 @@
 import mongoose from 'mongoose';
 import { AppError } from '../middleware/errorHandler.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { SenderConnectionError, startGoogleConnection } from '../services/senderConnection.service.js';
+import {
+  SenderConnectionError,
+  startGoogleConnection,
+  completeGoogleConnection,
+} from '../services/senderConnection.service.js';
+import { formatSafeSenderAccount } from '../services/senderAccount.service.js';
 
 /**
  * Sender accounts API (customer Gmail mailboxes). Every handler is scoped to the authenticated
@@ -44,5 +49,20 @@ export const connectGoogle = run(async (req, res) => {
     success: true,
     message: 'Open the authorization URL to connect your Gmail account.',
     data: { authorizationUrl, expiresAt },
+  });
+});
+
+/**
+ * POST /api/v1/sender-accounts/google/callback  { state, code }
+ * Called by the client's redirect page with the user's own session. Completes the connection.
+ */
+export const googleCallback = run(async (req, res) => {
+  const userId = requireUserId(req);
+  const { state, code } = req.body;
+  const { account, created } = await completeGoogleConnection({ userId, state, code });
+  res.status(created ? 201 : 200).json({
+    success: true,
+    message: created ? 'Gmail account connected.' : 'Gmail account reconnected.',
+    data: { senderAccount: formatSafeSenderAccount(account) },
   });
 });

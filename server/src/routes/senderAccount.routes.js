@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { createRateLimitStore } from '../middleware/rateLimitStore.js';
-import { connectGoogle } from '../controllers/senderAccount.controller.js';
+import { connectGoogle, googleCallback } from '../controllers/senderAccount.controller.js';
+import { validate } from '../validators/validate.js';
+import { googleCallbackSchema } from '../validators/senderAccount.validator.js';
 import { authenticateSession as authenticate } from '../middleware/authenticate.js';
 
 const router = Router();
@@ -19,5 +21,6 @@ const connectLimiter = rateLimit({
 });
 
 router.post('/google/connect', connectLimiter, connectGoogle);
+router.post('/google/callback', connectLimiter, validate(googleCallbackSchema), googleCallback);
 
 export default router;

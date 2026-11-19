@@ -2,9 +2,19 @@ import mongoose from 'mongoose';
 import OAuthState from '../models/OAuthState.js';
 import SenderAccount from '../models/SenderAccount.js';
 import { getGoogleOAuthConfig } from '../config/googleOAuth.js';
-import { encryptToken } from '../utils/tokenCrypto.js';
-import { createOAuthState, hashOAuthState, createPkcePair, buildAuthorizationUrl } from './googleOAuth.service.js';
-import { MAX_SENDER_ACCOUNTS_PER_USER } from './senderAccount.service.js';
+import { encryptToken, decryptToken } from '../utils/tokenCrypto.js';
+import {
+  GoogleOAuthError,
+  createOAuthState,
+  hashOAuthState,
+  createPkcePair,
+  buildAuthorizationUrl,
+  exchangeAuthorizationCode,
+  hasGmailSendScope,
+  readIdTokenClaims,
+  revokeToken,
+} from './googleOAuth.service.js';
+import { MAX_SENDER_ACCOUNTS_PER_USER, sealRefreshToken, sealAccessToken } from './senderAccount.service.js';
 
 /**
  * Connecting a customer's Gmail mailbox (Google OAuth authorization code flow with PKCE).
@@ -84,4 +94,178 @@ export const startGoogleConnection = async ({ userId, now = new Date(), env = pr
   return { authorizationUrl: buildAuthorizationUrl(config, { state, codeChallenge }), expiresAt };
 };
 
-export default { startGoogleConnection, requireGoogleOAuthConfig, OAUTH_STATE_TTL_MS, MAX_PENDING_CONNECTIONS };
+
+/**
+ * Revokes a Google grant, but only when no other connected record uses the same Google account.
+ *
+ * A grant belongs to the pair (Google account, OAuth client), not to a MailPulse record: revoking
+ * it would also cut off the same mailbox connected by this user earlier or by another MailPulse
+ * user. In that case the token is only dropped here. Never throws; returns whether Google
+ * confirmed the revocation.
+ */
+export const revokeGrantIfUnshared = async ({ providerAccountId, token, excludeAccountId = null, fetchImpl }) => {
+  if (!token || !providerAccountId) return false;
+  try {
+    const filter = { provider: 'google', providerAccountId, status: { $ne: 'disconnected' } };
+    if (excludeAccountId) filter._id = { $ne: excludeAccountId };
+    if (await SenderAccount.exists(filter)) return false;
+    return await revokeToken(token, { fetchImpl });
+  } catch {
+    return false;
+  }
+};
+
+const stateError = () =>
+  new SenderConnectionError(
+    'INVALID_OAUTH_STATE',
+    400,
+    'This connection request is invalid or has expired. Please start connecting your Gmail account again.'
+  );
+
+/** Atomically consumes the pending connection: it must exist, belong to this user, be unused and unexpired. */
+const consumePendingConnection = async ({ userId, state, now }) => {
+  if (typeof state !== 'string' || !state) throw stateError();
+  const pending = await OAuthState.findOneAndUpdate(
+    { stateHash: hashOAuthState(state), userId, provider: 'google', consumedAt: null, expiresAt: { $gt: now } },
+    { $set: { consumedAt: now } },
+    { new: true }
+  ).select('+encryptedCodeVerifier');
+  if (!pending) throw stateError();
+  try {
+    return decryptToken(pending.encryptedCodeVerifier, { context: codeVerifierContext(pending._id) });
+  } catch {
+    throw stateError();
+  } finally {
+    await OAuthState.deleteOne({ _id: pending._id });
+  }
+};
+
+const mapExchangeError = (error) => {
+  if (!(error instanceof GoogleOAuthError)) return error;
+  if (error.code === 'GOOGLE_INVALID_GRANT' || error.code === 'GOOGLE_REQUEST_REJECTED') {
+    return new SenderConnectionError(
+      'GOOGLE_AUTHORIZATION_REJECTED',
+      400,
+      'Google did not accept this authorization. Please start connecting your Gmail account again.'
+    );
+  }
+  if (error.code === 'GOOGLE_INVALID_CLIENT' || error.code === 'GOOGLE_HTTP_DISABLED') {
+    return new SenderConnectionError('GOOGLE_CLIENT_MISCONFIGURED', 502, 'Gmail connection is misconfigured on this server.');
+  }
+  return new SenderConnectionError('GOOGLE_UNAVAILABLE', 502, 'Could not complete the connection with Google. Please try again.');
+};
+
+/**
+ * Creates the account, or updates this user's existing record for the same Google account
+ * (reconnect). The previous refresh token is NOT revoked: it belongs to the same grant, and
+ * revoking it would revoke the new one too.
+ */
+const saveGoogleSenderAccount = async ({ userId, identity, tokens, now }) => {
+  const accessTokenExpiresAt = new Date(now.getTime() + tokens.expiresIn * 1000);
+  const fieldsFor = (accountId) => ({
+    email: identity.email,
+    displayName: identity.name,
+    status: 'active',
+    statusReason: null,
+    statusChangedAt: now,
+    scopes: tokens.scopes,
+    encryptedRefreshToken: sealRefreshToken(accountId, tokens.refreshToken),
+    encryptedAccessToken: sealAccessToken(accountId, tokens.accessToken),
+    accessTokenExpiresAt,
+    connectedAt: now,
+    lastRefreshedAt: now,
+    disconnectedAt: null,
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const existing = await SenderAccount.findOne({ userId, provider: 'google', providerAccountId: identity.sub });
+    if (existing) {
+      const updated = await SenderAccount.findOneAndUpdate(
+        { _id: existing._id, userId },
+        { $set: fieldsFor(existing._id), $inc: { tokenGeneration: 1 } },
+        { new: true, runValidators: true }
+      );
+      if (updated) return { account: updated, created: false };
+      continue;
+    }
+    await assertSenderLimit(userId);
+    const _id = new mongoose.Types.ObjectId();
+    try {
+      const account = await SenderAccount.create({
+        _id,
+        userId,
+        provider: 'google',
+        providerAccountId: identity.sub,
+        ...fieldsFor(_id),
+      });
+      return { account, created: true };
+    } catch (error) {
+      // A concurrent callback created the same record first: update it instead
+      if (error?.code !== 11000) throw error;
+    }
+  }
+  throw new SenderConnectionError('CONNECTION_CONFLICT', 409, 'The account changed while connecting. Please try again.');
+};
+
+/**
+ * Completes a connection: consumes the state, exchanges the code (with the PKCE verifier),
+ * checks the grant and the identity, and stores the encrypted tokens.
+ *
+ * @returns {Promise<{ account: import('mongoose').Document, created: boolean }>}
+ */
+export const completeGoogleConnection = async ({ userId, state, code, now = new Date(), env = process.env, fetchImpl }) => {
+  const config = requireGoogleOAuthConfig(env);
+  const codeVerifier = await consumePendingConnection({ userId, state, now });
+
+  let tokens;
+  try {
+    tokens = await exchangeAuthorizationCode(config, { code, codeVerifier }, { fetchImpl });
+  } catch (error) {
+    throw mapExchangeError(error);
+  }
+
+  let identity;
+  try {
+    identity = readIdTokenClaims(tokens.idToken, config, { now: now.getTime() });
+  } catch {
+    // Without a trustworthy identity there is no safe way to tell whether revoking would cut off
+    // another connection of the same mailbox, so the grant is left for the user to remove.
+    throw new SenderConnectionError('GOOGLE_IDENTITY_INVALID', 502, 'Google returned an invalid account identity. Please try again.');
+  }
+
+  const discard = () =>
+    revokeGrantIfUnshared({ providerAccountId: identity.sub, token: tokens.refreshToken || tokens.accessToken, fetchImpl });
+
+  if (!hasGmailSendScope(tokens.scopes)) {
+    await discard();
+    throw new SenderConnectionError(
+      'GMAIL_SCOPE_MISSING',
+      400,
+      'Permission to send email was not granted. Please connect again and allow MailPulse to send email on your behalf.'
+    );
+  }
+  if (!tokens.refreshToken) {
+    await discard();
+    throw new SenderConnectionError(
+      'GOOGLE_OFFLINE_ACCESS_MISSING',
+      400,
+      'Google did not grant offline access. Please connect your Gmail account again.'
+    );
+  }
+
+  try {
+    return await saveGoogleSenderAccount({ userId, identity, tokens, now });
+  } catch (error) {
+    if (error instanceof SenderConnectionError) await discard();
+    throw error;
+  }
+};
+
+export default {
+  startGoogleConnection,
+  completeGoogleConnection,
+  revokeGrantIfUnshared,
+  requireGoogleOAuthConfig,
+  OAUTH_STATE_TTL_MS,
+  MAX_PENDING_CONNECTIONS,
+};
