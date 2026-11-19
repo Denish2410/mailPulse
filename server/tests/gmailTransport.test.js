@@ -247,10 +247,17 @@ describe('Gmail transport: send outcomes', () => {
           init.signal.addEventListener('abort', () => reject(init.signal.reason));
         })
     );
-    await rejectsWith(transportWith(gmail, { timeoutMs: 50 }).transport.sendMail(MESSAGE), {
-      code: 'GMAIL_TIMEOUT',
-      outcome: SEND_OUTCOMES.UNCERTAIN,
-    });
+    // AbortSignal.timeout uses an unref'd timer: keep the event loop alive while waiting for it,
+    // as the API and the worker do in production
+    const keepAlive = setTimeout(() => {}, 5000);
+    try {
+      await rejectsWith(transportWith(gmail, { timeoutMs: 50 }).transport.sendMail(MESSAGE), {
+        code: 'GMAIL_TIMEOUT',
+        outcome: SEND_OUTCOMES.UNCERTAIN,
+      });
+    } finally {
+      clearTimeout(keepAlive);
+    }
   });
 
   it('classifiers default to uncertain for anything unknown', () => {
