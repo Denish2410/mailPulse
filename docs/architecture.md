@@ -482,3 +482,16 @@ Campaign email will be sent through the Gmail API with each customer's own Googl
 - The API and the worker validate this configuration at startup, before connecting to MongoDB. A key that is set but invalid always stops startup. A missing key stops startup only when Google OAuth is configured (any `GOOGLE_OAUTH_*` variable), so deployments that do not use Gmail keep working unchanged, while OAuth can never run without encryption.
 - Rotation: list the new key next to the old one, make it active, restart the API and the worker together, and remove the old key only when no stored token uses it (`needsReencryption` reports envelopes made with a non-active key). Removing a key that still protects tokens, or losing all keys, makes those tokens unreadable; the affected sender accounts must then be reconnected.
 - Tests (`server/tests/tokenCrypto.test.js`) generate disposable random keys at run time; no key is committed.
+
+## 15. Sender Accounts (Customer Gmail Mailboxes)
+
+Campaigns will be sent from mailboxes the customer owns, through the Gmail API with the customer's own Google OAuth grant. There is no shared sending account and no fallback: a campaign that cannot use its sender account waits for the customer.
+
+### Model (`server/src/models/SenderAccount.js`)
+
+- Owned by one user (`userId`); every lookup is scoped by it (`findOwnedSenderAccount`), so another tenant's account ID answers exactly like a missing one.
+- `provider` is `google`; `providerAccountId` is Google's stable account ID (`sub`). One record per user and Google account, so reconnecting updates it. Two different users may each connect the same Google account with their own grant.
+- `status`: `active` (may send), `reauth_required` (Google refused the grant; the customer must reconnect), `disconnected` (tokens wiped; the record stays so past campaigns still show their sender).
+- Tokens are stored only as encrypted envelopes (section 14), sealed to the account ID and the token kind, so an envelope copied to another account or field does not decrypt. A plaintext value is rejected by the schema. Token fields are `select: false`, stripped from `toJSON`/`toObject`, and left out of account exports; the API returns accounts only through an allow-list formatter.
+- `tokenGeneration` increases whenever the refresh token is replaced or wiped, so a slower writer that started from an older generation cannot restore stale tokens.
+- Deleting a MailPulse account deletes its sender accounts.

@@ -9,6 +9,7 @@ import SignupForm from '../models/SignupForm.js';
 import PendingSubscription from '../models/PendingSubscription.js';
 import BounceEvent from '../models/BounceEvent.js';
 import TrackingEvent from '../models/TrackingEvent.js';
+import SenderAccount, { SENDER_TOKEN_FIELDS } from '../models/SenderAccount.js';
 
 /**
  * Account data rights (GDPR access/portability and erasure).
@@ -40,6 +41,8 @@ const OWNED_COLLECTIONS = [
   { key: 'suppressions', model: Suppression },
   { key: 'signupForms', model: SignupForm },
   { key: 'bounceEvents', model: BounceEvent },
+  // Connected mailboxes: the export lists them, never their (encrypted) OAuth tokens
+  { key: 'senderAccounts', model: SenderAccount, omit: [...SENDER_TOKEN_FIELDS] },
 ];
 
 /** Tracking events carry no userId: they belong to the owner through their campaigns. */
