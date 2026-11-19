@@ -25,6 +25,23 @@ import { SEND_OUTCOMES } from './email.service.js';
  */
 
 export const GMAIL_SEND_TIMEOUT_MS = 30000;
+
+let injectedFetch = null;
+
+/** Injects the HTTP client used for Gmail requests (tests, or a composition root). null restores the default. */
+export const setGmailHttpClient = (fetchImpl) => {
+  if (fetchImpl !== null && typeof fetchImpl !== 'function') {
+    throw new TypeError('Gmail HTTP client must be a fetch-compatible function or null.');
+  }
+  injectedFetch = fetchImpl;
+};
+
+/** The fetch for Gmail requests. Fails closed in tests: an automated test can never reach the real Gmail API. */
+const resolveGmailFetch = (env = process.env) => {
+  if (injectedFetch) return injectedFetch;
+  if (env.NODE_ENV === 'test') return null;
+  return globalThis.fetch;
+};
 /** Raw (base64url) message size accepted on the simple JSON endpoint; kept well under Gmail's limits. */
 export const GMAIL_MAX_RAW_BYTES = 5 * 1024 * 1024;
 
@@ -205,7 +222,7 @@ export const composeGmailMessage = async (account, mailOptions) => {
  * @param {Function} [options.fetchImpl=globalThis.fetch]
  * @param {number} [options.timeoutMs=GMAIL_SEND_TIMEOUT_MS]
  */
-export const createGmailTransport = ({ account, getAccessToken, fetchImpl = globalThis.fetch, timeoutMs = GMAIL_SEND_TIMEOUT_MS }) => {
+export const createGmailTransport = ({ account, getAccessToken, fetchImpl, timeoutMs = GMAIL_SEND_TIMEOUT_MS }) => {
   if (!account?.email || typeof getAccessToken !== 'function') {
     throw new TypeError('createGmailTransport requires an account and getAccessToken.');
   }
@@ -240,10 +257,15 @@ export const createGmailTransport = ({ account, getAccessToken, fetchImpl = glob
         throw rejected('GMAIL_SENDER_UNAVAILABLE', 'The sender account is not available; the message was not sent.');
       }
 
+      const doFetch = fetchImpl ?? resolveGmailFetch();
+      if (!doFetch) {
+        throw rejected('GMAIL_HTTP_DISABLED', 'Outbound Gmail requests are disabled in tests; the message was not sent.');
+      }
+
       // 2. The request: from here on, failures may mean it was sent
       let response;
       try {
-        response = await fetchImpl(GOOGLE_ENDPOINTS.gmailSend, {
+        response = await doFetch(GOOGLE_ENDPOINTS.gmailSend, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ raw: composed.raw }),
