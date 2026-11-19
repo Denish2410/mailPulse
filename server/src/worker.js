@@ -12,6 +12,7 @@ dotenv.config();
 import { connectDB } from './config/db.js';
 import { validateShutdownConfig } from './config/shutdown.js';
 import { validateTokenEncryptionConfig } from './utils/tokenCrypto.js';
+import { validateGoogleOAuthConfig } from './config/googleOAuth.js';
 import { getErrorReporter } from './services/errorReporter.service.js';
 import { getDefaultEmailService } from './services/email.service.js';
 import {
@@ -116,6 +117,7 @@ export const startWorker = async (options = {}) => {
       validateShutdownConfig();
       // The worker will decrypt OAuth tokens to send: same fail-closed rule as the API
       validateTokenEncryptionConfig();
+      validateGoogleOAuthConfig();
     }
     const port = options.port ?? getWorkerHealthPort();
     const host = options.host ?? (process.env.WORKER_HEALTH_HOST || DEFAULT_WORKER_HEALTH_HOST);

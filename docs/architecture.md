@@ -495,3 +495,10 @@ Campaigns will be sent from mailboxes the customer owns, through the Gmail API w
 - Tokens are stored only as encrypted envelopes (section 14), sealed to the account ID and the token kind, so an envelope copied to another account or field does not decrypt. A plaintext value is rejected by the schema. Token fields are `select: false`, stripped from `toJSON`/`toObject`, and left out of account exports; the API returns accounts only through an allow-list formatter.
 - `tokenGeneration` increases whenever the refresh token is replaced or wiped, so a slower writer that started from an older generation cannot restore stale tokens.
 - Deleting a MailPulse account deletes its sender accounts.
+
+### Connecting a mailbox (Google OAuth, authorization code flow with PKCE)
+
+1. `POST /api/v1/sender-accounts/google/connect` (authenticated) stores a pending connection for 10 minutes: the SHA-256 hash of a random 256-bit `state` and an encrypted PKCE verifier, bound to the user. It returns Google's consent URL (scopes `openid email gmail.send`, offline access, consent prompt). At most 5 pending connections and 10 connected accounts per user.
+2. Google redirects the browser to `GOOGLE_OAUTH_REDIRECT_URI`, a page of the MailPulse client, which posts `code` and `state` back to the API with the user's own session (step 2 is described with the callback below).
+
+Configuration is all-or-nothing (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`) and validated at startup by the API and the worker; with none set, the endpoints answer 503 and nothing else changes. Requests to Google use Node's fetch with a timeout and are refused in tests unless a fake client is injected, so no test can reach Google.

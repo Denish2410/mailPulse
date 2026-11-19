@@ -100,6 +100,10 @@ services:
       # which is allowed only while Google OAuth is not configured. See server/.env.example.
       TOKEN_ENCRYPTION_KEYS: ${TOKEN_ENCRYPTION_KEYS:-}
       TOKEN_ENCRYPTION_ACTIVE_KEY_ID: ${TOKEN_ENCRYPTION_ACTIVE_KEY_ID:-}
+      # Gmail sending with customers' own Google accounts: all three or none (see server/.env.example)
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
       # Bounce & complaint webhooks. A provider is enabled only when its value is non-empty;
       # an empty value (the default) keeps that provider's endpoint answering 404.
       SENDGRID_WEBHOOK_PUBLIC_KEY: ${SENDGRID_WEBHOOK_PUBLIC_KEY:-}

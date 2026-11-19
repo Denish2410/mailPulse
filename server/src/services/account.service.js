@@ -10,6 +10,7 @@ import PendingSubscription from '../models/PendingSubscription.js';
 import BounceEvent from '../models/BounceEvent.js';
 import TrackingEvent from '../models/TrackingEvent.js';
 import SenderAccount, { SENDER_TOKEN_FIELDS } from '../models/SenderAccount.js';
+import OAuthState from '../models/OAuthState.js';
 
 /**
  * Account data rights (GDPR access/portability and erasure).
@@ -117,6 +118,7 @@ export const deleteAccountData = async (userId) => {
     counts[key] = (await model.deleteMany({ userId })).deletedCount;
   }
   counts.pendingSubscriptions = (await PendingSubscription.deleteMany({ userId })).deletedCount;
+  counts.oauthStates = (await OAuthState.deleteMany({ userId })).deletedCount;
   // The user goes last: if anything above fails the account still exists and can retry
   counts.users = (await User.deleteOne({ _id: userId })).deletedCount;
   return counts;

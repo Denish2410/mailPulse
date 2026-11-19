@@ -5,6 +5,7 @@ import { getErrorReporter } from './services/errorReporter.service.js';
 import { getSecurityWarnings } from './config/securityWarnings.js';
 import { validateShutdownConfig } from './config/shutdown.js';
 import { validateTokenEncryptionConfig } from './utils/tokenCrypto.js';
+import { validateGoogleOAuthConfig } from './config/googleOAuth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,6 +79,8 @@ export const startServer = async (options = {}) => {
       // Invalid token encryption keys always stop startup; missing keys only when Google OAuth is
       // configured (OAuth tokens are never stored unencrypted)
       validateTokenEncryptionConfig();
+      // Google OAuth (Gmail sending) is optional, but all-or-nothing and validated when set
+      validateGoogleOAuthConfig();
       for (const warning of getSecurityWarnings()) {
         console.warn(`[Security] ${warning}`);
       }
