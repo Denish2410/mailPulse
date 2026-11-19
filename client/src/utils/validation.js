@@ -419,6 +419,11 @@ export const validateCampaignForm = (data = {}, { isUpdate = false } = {}) => {
     if (subjectError) errors.subject = subjectError;
   }
 
+  // 3a. The sender account is optional on a draft (it is required to send) but must be an ID when given
+  if (data.senderAccountId !== undefined && data.senderAccountId !== null && typeof data.senderAccountId !== 'string') {
+    errors.senderAccountId = 'Select one of your connected Gmail accounts.';
+  }
+
   // 3b. Validate the optional A/B variant subject
   if (typeof data.subjectB === 'string' && data.subjectB.trim().length > 200) {
     errors.subjectB = 'Variant B subject cannot exceed 200 characters.';

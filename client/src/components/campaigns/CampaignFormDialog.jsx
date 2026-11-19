@@ -5,6 +5,7 @@ import { RecipientSelector } from './RecipientSelector.jsx';
 import TemplatePicker from '../templates/TemplatePicker.jsx';
 import MergeTagToolbar from '../templates/MergeTagToolbar.jsx';
 import AudiencePicker from '../segments/AudiencePicker.jsx';
+import { getSenderAccounts } from '../../api/senderAccounts.js';
 import { insertAtSelection, templateToCampaignFields } from '../../utils/templateHelpers.js';
 
 /**
@@ -43,6 +44,10 @@ export const CampaignFormDialog = ({
   const [textContent, setTextContent] = useState('');
   const [htmlContent, setHtmlContent] = useState('');
   const [recipientIds, setRecipientIds] = useState([]);
+  // The Gmail account this campaign is sent from: always an explicit choice, never preselected
+  const [senderAccountId, setSenderAccountId] = useState('');
+  const [senderAccounts, setSenderAccounts] = useState([]);
+  const [sendersLoaded, setSendersLoaded] = useState(false);
 
   // Active body editor tab ('text' | 'html')
   const [activeTab, setActiveTab] = useState('text');
@@ -73,6 +78,7 @@ export const CampaignFormDialog = ({
       setTextContent(campaign.textContent ?? '');
       setHtmlContent(campaign.htmlContent ?? '');
       setRecipientIds(Array.isArray(campaign.recipientIds) ? [...campaign.recipientIds] : []);
+      setSenderAccountId(campaign.senderAccountId || '');
       // If HTML has content but text does not, default to HTML tab
       if (campaign.htmlContent && !campaign.textContent) {
         setActiveTab('html');
@@ -87,6 +93,7 @@ export const CampaignFormDialog = ({
       setTextContent('');
       setHtmlContent('');
       setRecipientIds([]);
+      setSenderAccountId('');
       setActiveTab('text');
     }
 
@@ -94,6 +101,26 @@ export const CampaignFormDialog = ({
     setServerError(null);
     setIsSubmitting(false);
   }, [isOpen, campaign]);
+
+  // Load the user's connected sender accounts when the dialog opens
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    setSendersLoaded(false);
+    getSenderAccounts()
+      .then((accounts) => {
+        if (!cancelled) setSenderAccounts(Array.isArray(accounts) ? accounts : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSenderAccounts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSendersLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Handle escape key
   useEffect(() => {
@@ -196,6 +223,7 @@ export const CampaignFormDialog = ({
       textContent,
       htmlContent,
       recipientIds,
+      senderAccountId: senderAccountId || null,
     };
 
     // Client-side validation
@@ -333,6 +361,42 @@ export const CampaignFormDialog = ({
                   {errors.name && (
                     <p className="mt-1 text-xs text-rose-400 font-medium" role="alert">
                       {errors.name}
+                    </p>
+                  )}
+                </div>
+
+                {/* Sender: exactly one connected Gmail account, chosen explicitly */}
+                <div>
+                  <label htmlFor="campaign-form-sender" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Send from (Gmail account) <span className="text-rose-400">*</span>
+                  </label>
+                  <select
+                    id="campaign-form-sender"
+                    name="senderAccountId"
+                    value={senderAccountId}
+                    onChange={(e) => {
+                      setSenderAccountId(e.target.value);
+                      if (errors.senderAccountId) setErrors((prev) => ({ ...prev, senderAccountId: null }));
+                    }}
+                    disabled={isSubmitting}
+                    className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors disabled:opacity-60"
+                  >
+                    <option value="">Select a Gmail account…</option>
+                    {senderAccounts.map((account) => (
+                      <option key={account.id} value={account.id} disabled={!account.canSend && account.id !== senderAccountId}>
+                        {account.email}
+                        {account.canSend ? '' : ' (reconnect required)'}
+                      </option>
+                    ))}
+                  </select>
+                  {sendersLoaded && senderAccounts.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-400 font-medium">
+                      No Gmail account is connected yet. A campaign can only be sent from a connected Gmail account.
+                    </p>
+                  )}
+                  {errors.senderAccountId && (
+                    <p className="mt-1 text-xs text-rose-400 font-medium" role="alert">
+                      {errors.senderAccountId}
                     </p>
                   )}
                 </div>
