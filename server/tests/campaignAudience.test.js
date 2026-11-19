@@ -23,6 +23,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Segment from '../src/models/Segment.js';
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
@@ -110,7 +112,7 @@ describe('Campaign audience API', () => {
 
   beforeEach(async () => {
     transport = createMockTransport();
-    app.locals.emailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
+    app.locals.campaignEmailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
     if (isDbConnected) {
       await Campaign.deleteMany({ userId: { $in: ids() } });
       await Segment.deleteMany({ userId: { $in: ids() } });
@@ -119,7 +121,7 @@ describe('Campaign audience API', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await Delivery.deleteMany({ userId: { $in: ids() } });

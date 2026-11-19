@@ -13,10 +13,10 @@ const quiet = { log() {}, warn() {}, error() {} };
 /**
  * @param {import('mongoose').Types.ObjectId|string} campaignId
  * @param {object} [options]
- * @param {{ sendEmail: Function }} [options.emailService] - Defaults to app.locals.emailService
+ * @param {{ sendEmail: Function }} [options.emailService] - Defaults to app.locals.campaignEmailService
  * @returns {Promise<{ due: number, dispatched: number, failed: number, skipped: number }>}
  */
-export const runQueuedSend = async (campaignId, { emailService = app.locals.emailService } = {}) => {
+export const runQueuedSend = async (campaignId, { emailService = app.locals.campaignEmailService } = {}) => {
   const result = await pollScheduledCampaigns({
     emailService,
     logger: quiet,

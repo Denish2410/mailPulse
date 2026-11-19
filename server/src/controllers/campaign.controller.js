@@ -7,7 +7,6 @@ import { AppError } from '../middleware/errorHandler.js';
 import { assertAccountMaySend } from '../utils/sendingPolicy.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
-  getDefaultEmailService,
   InvalidMessageError,
   EmailConfigurationError,
   EmailTransportError,
@@ -24,6 +23,13 @@ import { personalizeMessage } from '../services/personalization.service.js';
 import { resolveSegment } from '../services/segment.service.js';
 import Segment from '../models/Segment.js';
 import BounceEvent from '../models/BounceEvent.js';
+import { getGoogleOAuthConfig } from '../config/googleOAuth.js';
+import { createGmailCampaignEmailService } from '../services/gmailCampaignMailer.service.js';
+import {
+  CampaignSenderError,
+  requireUsableSender,
+  loadSenderSummaries,
+} from '../services/campaignSender.service.js';
 
 /**
  * Format a Mongoose Campaign document into a safe, client-facing representation.
@@ -31,7 +37,7 @@ import BounceEvent from '../models/BounceEvent.js';
  * @param {import('../models/Campaign.js').default|object} campaign
  * @returns {object} Safe campaign payload
  */
-export const formatSafeCampaign = (campaign) => {
+export const formatSafeCampaign = (campaign, senders = null) => {
   const doc = campaign.toObject ? campaign.toObject() : { ...campaign };
   const idStr = (doc._id || doc.id).toString();
 
@@ -49,6 +55,10 @@ export const formatSafeCampaign = (campaign) => {
     status: doc.status,
     recipientIds,
     recipientsCount: recipientIds.length,
+    senderAccountId: doc.senderAccountId ? String(doc.senderAccountId) : null,
+    // Safe summary of the selected sender (id, address, status); null when none is selected or
+    // the account no longer exists for this owner. Never contains tokens.
+    sender: (doc.senderAccountId && senders?.get(String(doc.senderAccountId))) || null,
     scheduledAt: doc.scheduledAt ?? null,
     sendStartedAt: doc.sendStartedAt ?? null,
     sendCompletedAt: doc.sendCompletedAt ?? null,
@@ -60,6 +70,29 @@ export const formatSafeCampaign = (campaign) => {
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
+};
+
+/**
+ * Formats one campaign with its sender summary (owner-scoped lookup).
+ */
+export const formatCampaignWithSender = async (campaign, userId) =>
+  formatSafeCampaign(campaign, await loadSenderSummaries(userId, [campaign]));
+
+/**
+ * Verifies that the owner may use this sender for a campaign: it is theirs, connected and allowed
+ * to send. Anything else is a 422 with a specific message; another tenant's ID looks like a
+ * missing account.
+ *
+ * @returns {Promise<import('mongoose').Types.ObjectId>} the verified sender account ID
+ */
+export const verifySelectedSender = async (userId, senderAccountId) => {
+  try {
+    const account = await requireUsableSender(userId, senderAccountId);
+    return account._id;
+  } catch (error) {
+    if (error instanceof CampaignSenderError) throw new AppError(error.message, 422);
+    throw error;
+  }
 };
 
 /**
@@ -114,10 +147,12 @@ export const createCampaign = asyncHandler(async (req, res) => {
     throw new AppError('Authentication required. Invalid user identity.', 401);
   }
 
-  const { name, subject, subjectB = '', textContent = '', htmlContent = '', recipientIds = [] } = req.body;
+  const { name, subject, subjectB = '', textContent = '', htmlContent = '', recipientIds = [], senderAccountId = null } = req.body;
 
   // Validate recipient ownership and deduplicate
   const verifiedRecipientIds = await validateAndDeduplicateRecipients(recipientIds, userId);
+  // A sender is optional on a draft, but when given it must be the owner's own usable account
+  const verifiedSenderId = senderAccountId ? await verifySelectedSender(userId, senderAccountId) : null;
 
   const campaign = await Campaign.create({
     userId,
@@ -128,13 +163,14 @@ export const createCampaign = asyncHandler(async (req, res) => {
     htmlContent,
     status: 'draft',
     recipientIds: verifiedRecipientIds,
+    senderAccountId: verifiedSenderId,
   });
 
   res.status(201).json({
     success: true,
     message: 'Campaign draft created successfully',
     data: {
-      campaign: formatSafeCampaign(campaign),
+      campaign: await formatCampaignWithSender(campaign, userId),
     },
   });
 });
@@ -187,6 +223,7 @@ export const getCampaigns = asyncHandler(async (req, res) => {
     Campaign.countDocuments(filter),
   ]);
 
+  const senders = await loadSenderSummaries(userId, campaigns);
   const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
   const hasNextPage = page < totalPages;
   const hasPrevPage = page > 1 && total > 0;
@@ -195,7 +232,7 @@ export const getCampaigns = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaigns retrieved successfully',
     data: {
-      campaigns: campaigns.map(formatSafeCampaign),
+      campaigns: campaigns.map((campaign) => formatSafeCampaign(campaign, senders)),
       count: campaigns.length,
       pagination: {
         page,
@@ -233,7 +270,7 @@ export const getCampaignById = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaign retrieved successfully',
     data: {
-      campaign: formatSafeCampaign(campaign),
+      campaign: await formatCampaignWithSender(campaign, userId),
     },
   });
 });
@@ -251,7 +288,7 @@ export const updateCampaign = asyncHandler(async (req, res) => {
   }
 
   const { id } = req.params;
-  const { name, subject, subjectB, textContent, htmlContent, recipientIds } = req.body;
+  const { name, subject, subjectB, textContent, htmlContent, recipientIds, senderAccountId } = req.body;
 
   // Query scoped strictly to owner
   const campaign = await Campaign.findOne({ _id: id, userId });
@@ -296,13 +333,18 @@ export const updateCampaign = asyncHandler(async (req, res) => {
     campaign.recipientIds = verifiedRecipientIds;
   }
 
+  // Sender: an explicit choice of one of the owner's usable accounts; null clears it
+  if (senderAccountId !== undefined) {
+    campaign.senderAccountId = senderAccountId ? await verifySelectedSender(userId, senderAccountId) : null;
+  }
+
   await campaign.save();
 
   res.status(200).json({
     success: true,
     message: 'Campaign updated successfully',
     data: {
-      campaign: formatSafeCampaign(campaign),
+      campaign: await formatCampaignWithSender(campaign, userId),
     },
   });
 });
@@ -499,19 +541,51 @@ export const assertDispatchManifestWithinLimits = (req, campaign, eligibleContac
 };
 
 /**
- * Resolves the email service for a request.
- * Tests (and future composition roots) inject a service via `app.locals.emailService`;
- * otherwise a fail-closed default service configured from environment variables is used.
+ * Resolves the CAMPAIGN email service for a request: the Gmail API as the campaign's selected
+ * sender account. Tests inject a stand-in via `app.locals.campaignEmailService` (or simulated Google/Gmail
+ * HTTP via `app.locals.gmailFetch` / `app.locals.googleOAuthFetch`).
+ *
+ * The platform SMTP service is NOT a fallback: it is for transactional mail only and is never
+ * reached from here.
  *
  * @param {import('express').Request} req
- * @returns {{ sendEmail: (message: object) => Promise<object> }}
+ * @param {{ userId: any, account: object }} sender the verified sender account of the campaign
+ * @returns {{ sendEmail: (message: object) => Promise<object>, assertConfigured?: Function }}
  */
-export const resolveEmailService = (req) => {
-  const injected = req.app?.locals?.emailService;
+export const resolveCampaignEmailService = (req, { userId, account }) => {
+  const injected = req.app?.locals?.campaignEmailService;
   if (injected && typeof injected.sendEmail === 'function') {
     return injected;
   }
-  return getDefaultEmailService();
+  return createGmailCampaignEmailService({
+    userId,
+    account,
+    fetchImpl: req.app?.locals?.gmailFetch,
+    oauthFetchImpl: req.app?.locals?.googleOAuthFetch,
+  });
+};
+
+/**
+ * Fail closed before a campaign is queued: campaign mail goes through Gmail, so Gmail sending must
+ * be configured on this server (or a test stand-in injected and configured). Transactional mail
+ * (`app.locals.emailService`, platform SMTP) is a separate seam and is never used here.
+ */
+const assertCampaignMailConfigured = (req) => {
+  const injected = req.app?.locals?.campaignEmailService;
+  try {
+    if (injected && typeof injected.sendEmail === 'function') {
+      if (typeof injected.assertConfigured === 'function') injected.assertConfigured();
+      return;
+    }
+    if (!getGoogleOAuthConfig(process.env)) {
+      throw new EmailConfigurationError('Gmail sending is not configured on this server.');
+    }
+  } catch (error) {
+    if (error instanceof EmailConfigurationError) {
+      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
+    }
+    throw error;
+  }
 };
 
 /**
@@ -541,10 +615,19 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
 
   // 1. Load campaign strictly scoped to the authenticated owner (read-only)
   const campaign = await Campaign.findOne({ _id: id, userId })
-    .select('name subject textContent htmlContent status')
+    .select('name subject textContent htmlContent status senderAccountId')
     .lean();
   if (!campaign) {
     throw new AppError('Campaign not found.', 404);
+  }
+
+  // 1b. The test goes out from the campaign's explicitly selected Gmail account (never another)
+  let senderAccount;
+  try {
+    senderAccount = await requireUsableSender(userId, campaign.senderAccountId);
+  } catch (error) {
+    if (error instanceof CampaignSenderError) throw new AppError(error.message, 422);
+    throw error;
   }
 
   // 2. Resolve the destination from the authenticated account, never from the request
@@ -574,7 +657,7 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
   }
 
   // 4. Dispatch exactly one message to the account email
-  const emailService = resolveEmailService(req);
+  const emailService = resolveCampaignEmailService(req, { userId, account: senderAccount });
   // Merge tags render with the account holder's own details so the test shows the real output
   const preview = personalizeMessage(
     { subject: campaign.subject, text: campaign.textContent ?? '', html: campaign.htmlContent ?? '' },
@@ -599,6 +682,13 @@ export const sendCampaignTestEmail = asyncHandler(async (req, res) => {
       throw new AppError('Email sending is not configured.', 503, null, { expose: true });
     }
     if (error instanceof EmailTransportError) {
+      const unavailable = error.cause?.code === 'GMAIL_SENDER_UNAVAILABLE' ? error.cause.reason : null;
+      if (unavailable === 'GMAIL_NOT_CONFIGURED') {
+        throw new AppError('Email sending is not configured.', 503, null, { expose: true });
+      }
+      if (unavailable === 'SENDER_DISCONNECTED' || unavailable === 'SENDER_REAUTH_REQUIRED' || unavailable === 'SENDER_NOT_FOUND') {
+        throw new AppError('The sender Gmail account is not available. Reconnect it and try again.', 422);
+      }
       throw new AppError('Failed to send test email. Please try again later.', 502, null, {
         expose: true,
       });
@@ -689,17 +779,7 @@ export const sendCampaign = asyncHandler(async (req, res) => {
   assertDispatchManifestWithinLimits(req, campaign, eligibleContacts, 'sending');
 
   // 4. Verify a transport exists before locking the campaign
-  const emailService = resolveEmailService(req);
-  try {
-    if (typeof emailService.assertConfigured === 'function') {
-      emailService.assertConfigured();
-    }
-  } catch (error) {
-    if (error instanceof EmailConfigurationError) {
-      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
-    }
-    throw error;
-  }
+  assertCampaignMailConfigured(req);
 
   // 5. Queue it for the worker: one atomic draft -> scheduled transition on the exact evaluated
   //    version, due immediately by MongoDB's clock (the same clock the worker's lock uses). It
@@ -727,7 +807,7 @@ export const sendCampaign = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaign queued for sending',
     data: {
-      campaign: formatSafeCampaign(queued),
+      campaign: await formatCampaignWithSender(queued, userId),
       queuedRecipients: eligibleContacts.length,
     },
   });
@@ -793,17 +873,7 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
   assertDispatchManifestWithinLimits(req, campaign, eligibleContacts, 'scheduling');
 
   // 5. Verify email transport configured
-  const emailService = resolveEmailService(req);
-  try {
-    if (typeof emailService.assertConfigured === 'function') {
-      emailService.assertConfigured();
-    }
-  } catch (error) {
-    if (error instanceof EmailConfigurationError) {
-      throw new AppError('Email sending is not configured.', 503, null, { expose: true });
-    }
-    throw error;
-  }
+  assertCampaignMailConfigured(req);
 
   // 6. Atomically update status and scheduledAt
   const updatedCampaign = await Campaign.findOneAndUpdate(
@@ -829,7 +899,7 @@ export const scheduleCampaign = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaign scheduled successfully',
     data: {
-      campaign: formatSafeCampaign(updatedCampaign),
+      campaign: await formatCampaignWithSender(updatedCampaign, userId),
     },
   });
 });
@@ -880,7 +950,7 @@ export const cancelScheduledCampaign = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaign schedule canceled successfully',
     data: {
-      campaign: formatSafeCampaign(updatedCampaign),
+      campaign: await formatCampaignWithSender(updatedCampaign, userId),
     },
   });
 });
@@ -947,7 +1017,7 @@ export const applyCampaignAudience = asyncHandler(async (req, res) => {
     success: true,
     message: 'Campaign audience applied',
     data: {
-      campaign: formatSafeCampaign(campaign),
+      campaign: await formatCampaignWithSender(campaign, userId),
       matched: total,
       recipientsCount: merged.length,
     },
@@ -991,7 +1061,7 @@ export const duplicateCampaign = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     message: 'Campaign duplicated successfully',
-    data: { campaign: formatSafeCampaign(copy) },
+    data: { campaign: await formatCampaignWithSender(copy, userId) },
   });
 });
 

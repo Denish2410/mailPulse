@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
 import Suppression from '../models/Suppression.js';
+import { getSenderReadinessIssue } from './campaignSender.service.js';
 
 /**
  * Campaign Readiness Evaluation (shared by the readiness endpoint and the send endpoint)
@@ -64,6 +65,12 @@ export const evaluateCampaignReadiness = async (campaign, userId) => {
   // 4. Status (must be draft or scheduled)
   if (campaign.status !== 'draft' && campaign.status !== 'scheduled') {
     issues.push('Only draft or scheduled campaigns can be evaluated for readiness.');
+  }
+
+  // 4b. Sender: exactly one explicitly selected, connected Gmail account of this owner
+  const senderIssue = await getSenderReadinessIssue(campaign, userId);
+  if (senderIssue) {
+    issues.push(senderIssue);
   }
 
   // 5. Recipients: deduplicate stored IDs and resolve only contacts owned by the user

@@ -126,6 +126,14 @@ const campaignSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // The customer-owned Gmail account this campaign is sent from: chosen explicitly by the owner
+    // (never defaulted, never replaced automatically). Null = no sender yet, so the campaign can
+    // not be sent. Ownership and usability are verified by campaignSender.service.js.
+    senderAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SenderAccount',
+      default: null,
+    },
     // Multi-instance dispatch lease (see dispatchLease.service.js): which instance is sending this
     // campaign, until when (MongoDB server time) and under which epoch. Absent/expired means any
     // instance may recover it. The epoch only ever increases (it survives releases) and is what

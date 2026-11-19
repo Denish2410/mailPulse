@@ -22,6 +22,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import Template from '../src/models/Template.js';
 import Segment from '../src/models/Segment.js';
@@ -176,7 +178,7 @@ describe('Account settings, export and deletion', () => {
     owner = await makeUser('owner');
     other = await makeUser('other');
     transport = createMockTransport();
-    app.locals.emailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
+    app.locals.campaignEmailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
   });
 
   afterEach(() => {
@@ -184,7 +186,7 @@ describe('Account settings, export and deletion', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await wipe();

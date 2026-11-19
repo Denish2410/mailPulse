@@ -22,6 +22,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import { connectDB } from '../src/config/db.js';
@@ -63,7 +65,7 @@ describe('A/B subject testing', () => {
 
   const useTransport = () => {
     transport = createMockTransport();
-    app.locals.emailService = createEmailService({
+    app.locals.campaignEmailService = createEmailService({
       transport,
       from: 'MailPulse Test <no-reply@mailpulse.test>',
     });
@@ -124,7 +126,7 @@ describe('A/B subject testing', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await cleanup();

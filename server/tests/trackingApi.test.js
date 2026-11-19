@@ -18,6 +18,8 @@ import mongoose from 'mongoose';
 import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender, createTestSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import Contact from '../src/models/Contact.js';
 import Suppression from '../src/models/Suppression.js';
@@ -480,6 +482,7 @@ describe('Tracking API Endpoints (/api/v1/tracking & /api/v1/campaigns/:id/analy
         subject: 'Subject Line',
         textContent: 'Content',
         status: 'draft',
+        senderAccountId: (await createTestSender(ownerUser._id))._id,
         recipientIds: [activeContact._id, unsubContact._id],
       };
 

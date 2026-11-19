@@ -26,6 +26,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender, createTestSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
 import { manifestFieldsFor } from './helpers/manifest.js';
@@ -112,7 +114,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
 
   const useTransport = (t) => {
     transport = t;
-    app.locals.emailService = createEmailService({
+    app.locals.campaignEmailService = createEmailService({
       transport: t,
       from: 'MailPulse Test <no-reply@mailpulse.test>',
     });
@@ -214,7 +216,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -328,7 +330,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
     it('Returns 503 and leaves the draft untouched when email is not configured', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       // No injected transport + NODE_ENV=test => assertConfigured() throws
-      app.locals.emailService = createEmailService();
+      app.locals.campaignEmailService = createEmailService();
       const campaign = await createCampaignFor(userOne, { recipientIds: [contactA._id] });
 
       const res = await postSend(campaign._id, { token: tokenOne });
@@ -622,7 +624,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       ]);
 
       const resumed = await resumeInterruptedDispatches({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: { log: () => {}, error: () => {} },
       });
       assert.ok(resumed >= 1);
@@ -682,6 +684,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
           textContent: 'Hello everyone',
           htmlContent: '',
           status: 'draft',
+          senderAccountId: (await createTestSender(userOne._id))._id,
           recipientIds: contacts.map((c) => c._id),
           stats: { total: 0, sent: 0, failed: 0 },
           createdAt: now,
@@ -798,7 +801,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       ]);
 
       const recovered = await reapStalledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: silentLogger,
         stallTimeoutMs: 15 * 60 * 1000,
       });
@@ -825,7 +828,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       await Delivery.create([seedDelivery(campaign, contactA, 'processing')]);
 
       const recovered = await reapStalledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: silentLogger,
         stallTimeoutMs: 15 * 60 * 1000,
       });
@@ -878,9 +881,9 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       });
 
       await Promise.all([
-        resumeInterruptedDispatches({ emailService: app.locals.emailService, logger: silentLogger }),
+        resumeInterruptedDispatches({ emailService: app.locals.campaignEmailService, logger: silentLogger }),
         reapStalledCampaigns({
-          emailService: app.locals.emailService,
+          emailService: app.locals.campaignEmailService,
           logger: silentLogger,
           stallTimeoutMs: 15 * 60 * 1000,
         }),
@@ -910,7 +913,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       });
 
       const recovered = await reapStalledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: silentLogger,
         stallTimeoutMs: 15 * 60 * 1000,
       });
@@ -935,7 +938,7 @@ describe('Campaign Send API (POST /api/v1/campaigns/:id/send)', () => {
       await Delivery.create([seedDelivery(campaign, contactA, 'processing')]);
 
       const recovered = await reapStalledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: { ...silentLogger, error: (m) => errors.push(m) },
         stallTimeoutMs: 15 * 60 * 1000,
       });

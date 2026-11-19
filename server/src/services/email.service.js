@@ -116,6 +116,10 @@ const NEVER_CONNECTED = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOS
  */
 export const classifyTransportFailure = (error) => {
   if (!error || typeof error !== 'object') return SEND_OUTCOMES.UNCERTAIN;
+  // A transport that classified its own failure (the Gmail API transport) is trusted as it said
+  if (error.sendOutcome === SEND_OUTCOMES.REJECTED || error.sendOutcome === SEND_OUTCOMES.UNCERTAIN) {
+    return error.sendOutcome;
+  }
   const responseCode = Number(error.responseCode);
   if (Number.isInteger(responseCode) && responseCode >= 400 && responseCode <= 599) {
     return SEND_OUTCOMES.REJECTED;

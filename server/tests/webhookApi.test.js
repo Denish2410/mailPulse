@@ -27,6 +27,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import Suppression from '../src/models/Suppression.js';
 import BounceEvent from '../src/models/BounceEvent.js';
@@ -146,7 +148,7 @@ describe('ESP webhook endpoints', () => {
       delete process.env[key];
     }
     delete app.locals.webhookDeps;
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await BounceEvent.deleteMany({ userId: owner._id });
@@ -282,7 +284,7 @@ describe('ESP webhook endpoints', () => {
   it('tags outgoing mail with the delivery id for configured providers', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const transport = createMockTransport();
-    app.locals.emailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
+    app.locals.campaignEmailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
     const campaign = await Campaign.create({
       userId: owner._id,
       name: 'Tagged',

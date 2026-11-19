@@ -22,6 +22,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -103,7 +105,7 @@ describe('Verified-email sending policy (API)', () => {
 
   beforeEach(() => {
     transport = createMockTransport();
-    app.locals.emailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
+    app.locals.campaignEmailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
   });
 
   afterEach(() => {
@@ -111,7 +113,7 @@ describe('Verified-email sending policy (API)', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       const ids = [unverified._id, verified._id];

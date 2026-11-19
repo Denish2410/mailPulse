@@ -28,6 +28,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
 import { hashPassword } from '../src/services/password.service.js';
@@ -132,7 +134,7 @@ describe('Campaign Test Email API (POST /api/v1/campaigns/:id/test-email)', () =
   beforeEach(async () => {
     // Fresh, isolated in-memory transport for every test: no network, no shared state
     mockTransport = createMockTransport();
-    app.locals.emailService = createEmailService({
+    app.locals.campaignEmailService = createEmailService({
       transport: mockTransport,
       from: 'MailPulse Test <no-reply@mailpulse.test>',
     });
@@ -145,7 +147,7 @@ describe('Campaign Test Email API (POST /api/v1/campaigns/:id/test-email)', () =
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -404,20 +406,20 @@ describe('Campaign Test Email API (POST /api/v1/campaigns/:id/test-email)', () =
   });
 
   describe('5. Fail-closed configuration and sanitized transport errors', () => {
-    it('Returns 503 when no email transport is configured, without leaking config details', async (t) => {
+    it('Returns 422 when the selected Gmail sender has no usable credentials, without leaking details', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       const campaign = await createCampaignFor(userOne);
 
-      // Remove the injected service: the default service fails closed in NODE_ENV=test
-      delete app.locals.emailService;
+      // Remove the injected stand-in: the real Gmail service is used, and the (token-less) sender cannot send
+      delete app.locals.campaignEmailService;
 
       const res = await postTestEmail(campaign._id, { token: tokenOne });
-      assert.equal(res.status, 503);
+      assert.equal(res.status, 422);
       const data = await res.json();
-      assert.deepEqual(data, { success: false, message: 'Email sending is not configured.' });
+      assert.deepEqual(data, { success: false, message: 'The sender Gmail account is not available. Reconnect it and try again.' });
       const serialized = JSON.stringify(data);
       assert.equal(serialized.includes('SMTP'), false);
-      assert.equal(serialized.includes('mock transport'), false);
+      assert.equal(serialized.includes('mpt1'), false);
       assert.equal(mockTransport.count, 0);
     });
 

@@ -28,6 +28,8 @@ import { createShutdownHandler } from '../src/server.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
 import { createEmailService, createMockTransport } from '../src/services/email.service.js';

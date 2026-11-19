@@ -64,6 +64,11 @@ export const createCampaignSchema = z.object({
         .max(500000, 'HTML content cannot exceed 500,000 characters')
         .optional()
         .default(''),
+      senderAccountId: z
+        .string({ error: 'Sender account ID must be a string' })
+        .refine(isValidObjectId, { message: 'Invalid sender account ID format' })
+        .nullable()
+        .optional(),
       recipientIds: z
         .array(
           z
@@ -118,6 +123,11 @@ export const updateCampaignSchema = z.object({
         .string()
         .max(500000, 'HTML content cannot exceed 500,000 characters')
         .optional(),
+      senderAccountId: z
+        .string({ error: 'Sender account ID must be a string' })
+        .refine(isValidObjectId, { message: 'Invalid sender account ID format' })
+        .nullable()
+        .optional(),
       recipientIds: z
         .array(
           z
@@ -138,7 +148,8 @@ export const updateCampaignSchema = z.object({
         data.subjectB !== undefined ||
         data.textContent !== undefined ||
         data.htmlContent !== undefined ||
-        data.recipientIds !== undefined,
+        data.recipientIds !== undefined ||
+        data.senderAccountId !== undefined,
       {
         message: 'At least one field must be provided for update',
       }

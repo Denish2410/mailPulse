@@ -22,6 +22,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -120,7 +122,7 @@ describe('Throttled dispatch', () => {
   after(async () => {
     delete process.env.CAMPAIGN_SEND_RATE_PER_MINUTE;
     getSharedSendThrottle({});
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await Delivery.deleteMany({ userId: user._id });
@@ -134,7 +136,7 @@ describe('Throttled dispatch', () => {
   it('delivers everything but no faster than the configured rate', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const transport = createMockTransport();
-    app.locals.emailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
+    app.locals.campaignEmailService = createEmailService({ transport, from: 'MailPulse Test <no-reply@mailpulse.test>' });
     // 6000/min => 10ms between sends. Kept tiny on purpose: test files share one database and run
     // in parallel, and other suites recover campaigns left in 'sending', so a long-running
     // dispatch here would be raced by them.

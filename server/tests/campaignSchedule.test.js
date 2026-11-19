@@ -22,6 +22,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
 import { signAccessToken } from '../src/utils/token.js';
@@ -83,11 +85,11 @@ describe('Scheduled campaigns API and worker', () => {
 
   const useTransport = () => {
     transport = createMockTransport();
-    app.locals.emailService = createEmailService({
+    app.locals.campaignEmailService = createEmailService({
       transport,
       from: 'MailPulse Test <no-reply@mailpulse.test>',
     });
-    return app.locals.emailService;
+    return app.locals.campaignEmailService;
   };
 
   const request = (method, urlPath, { tok = token, body } = {}) =>
@@ -152,7 +154,7 @@ describe('Scheduled campaigns API and worker', () => {
   });
 
   after(async () => {
-    delete app.locals.emailService;
+    delete app.locals.campaignEmailService;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await cleanup();
@@ -211,7 +213,7 @@ describe('Scheduled campaigns API and worker', () => {
       assert.equal(res.status, 422);
 
       const ready = await makeCampaign();
-      app.locals.emailService = createEmailService({ transport: null });
+      app.locals.campaignEmailService = createEmailService({ transport: null });
       res = await request('POST', `/api/v1/campaigns/${ready._id}/schedule`, {
         body: { scheduledAt: inFuture() },
       });
@@ -259,7 +261,7 @@ describe('Scheduled campaigns API and worker', () => {
       const future = await makeCampaign({ status: 'scheduled', scheduledAt: new Date(Date.now() + 3600_000) });
 
       const result = await pollScheduledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: quietLogger,
       });
       assert.equal(result.dispatched, 1);
@@ -277,7 +279,7 @@ describe('Scheduled campaigns API and worker', () => {
     it('does not double-dispatch on concurrent polls', async (t) => {
       if (!isDbConnected) return t.skip('MongoDB required');
       const due = await makeCampaign({ status: 'scheduled', scheduledAt: new Date(Date.now() - 1000) });
-      const opts = { emailService: app.locals.emailService, logger: quietLogger };
+      const opts = { emailService: app.locals.campaignEmailService, logger: quietLogger };
       const results = await Promise.all([pollScheduledCampaigns(opts), pollScheduledCampaigns(opts)]);
       await waitForCampaignDispatch(due._id);
 
@@ -310,7 +312,7 @@ describe('Scheduled campaigns API and worker', () => {
       await User.updateOne({ _id: suspended._id }, { $set: { status: 'suspended' } });
 
       const result = await pollScheduledCampaigns({
-        emailService: app.locals.emailService,
+        emailService: app.locals.campaignEmailService,
         logger: quietLogger,
       });
       assert.equal(result.failed, 2);
