@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import OAuthState from '../models/OAuthState.js';
 import SenderAccount from '../models/SenderAccount.js';
+import { GrantLockBusyError, grantLockKey, withGrantLock } from './grantLock.service.js';
 import { getGoogleOAuthConfig } from '../config/googleOAuth.js';
 import { encryptToken, decryptToken } from '../utils/tokenCrypto.js';
 import {
@@ -112,10 +113,16 @@ export const startGoogleConnection = async ({ userId, now = new Date(), env = pr
 export const revokeGrantIfUnshared = async ({ providerAccountId, token, excludeAccountId = null, fetchImpl }) => {
   if (!token || !providerAccountId) return false;
   try {
-    const filter = { provider: 'google', providerAccountId, status: { $ne: 'disconnected' } };
-    if (excludeAccountId) filter._id = { $ne: excludeAccountId };
-    if (await SenderAccount.exists(filter)) return false;
-    return await revokeToken(token, { fetchImpl });
+    // The check and the revocation run under the grant's lock, and saving a connection for the
+    // same Google account takes the same lock. So a connection saved before the check is seen by
+    // it (no revoke), and one saved after the revocation starts from a finished revocation, never
+    // from the middle of one. A busy lock means "skip": leaving a grant in place is the safe side.
+    return await withGrantLock(grantLockKey(providerAccountId), async () => {
+      const filter = { provider: 'google', providerAccountId, status: { $ne: 'disconnected' } };
+      if (excludeAccountId) filter._id = { $ne: excludeAccountId };
+      if (await SenderAccount.exists(filter)) return false;
+      return await revokeToken(token, { fetchImpl });
+    });
   } catch {
     return false;
   }
@@ -260,8 +267,13 @@ export const completeGoogleConnection = async ({ userId, state, code, now = new 
   }
 
   try {
-    return await saveGoogleSenderAccount({ userId, identity, tokens, now });
+    // Under the Google account's lock, so a revocation of the same grant by another connection
+    // is either finished before this saves, or sees this connection and does not revoke
+    return await withGrantLock(grantLockKey(identity.sub), () => saveGoogleSenderAccount({ userId, identity, tokens, now }));
   } catch (error) {
+    if (error instanceof GrantLockBusyError) {
+      throw new SenderConnectionError('CONNECTION_CONFLICT', 409, 'The account is being updated. Please try again.');
+    }
     if (error instanceof SenderConnectionError) await discard();
     throw error;
   }
