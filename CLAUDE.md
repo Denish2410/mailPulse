@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **1029 automated tests** (696 server, 333 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **1367 automated tests** (1032 server, 335 client), 0 failures, 0 skipped.
 
 ---
 
@@ -39,6 +39,9 @@ MailPulse is a full-stack email campaign management and analytics platform built
 6. **Zero Real Email Safety in Tests**:
    - Automated tests MUST always use the mock transport (`createMockTransport()`).
    - Never configure real SMTP credentials during test executions.
+7. **Campaign Mail = Gmail API only**:
+   - A campaign names exactly one customer-owned `SenderAccount` (`senderAccountId`, chosen explicitly; no default, fallback or rotation). The lock snapshots `dispatchSender` `{ accountId, googleSub, email }`; dispatch and recovery use only that snapshot. Platform SMTP is transactional-only (`app.locals.emailService`); campaign tests inject `app.locals.campaignEmailService` or simulated Gmail via `setGmailHttpClient`/`setGoogleHttpClient`.
+   - Outcomes: Gmail acceptance = `sent`; definite refusal = `TRANSPORT_ERROR`; unusable sender = `SENDER_UNAVAILABLE`; timeout/reset/5xx/unknown = `SEND_UNCERTAIN` (never retried). Per-sender daily cap and pacing (`GMAIL_SENDER_*`). A sender problem pauses the campaign (`paused`); only `POST /campaigns/:id/resume` (same Google account) continues it. Details: `docs/architecture.md` section 16.
 
 ---
 
