@@ -27,6 +27,11 @@ import {
 } from './tracking.service.js';
 import { personalizeMessage } from './personalization.service.js';
 import { getDeliveryTagHeaders } from './webhookProviders.service.js';
+import SenderAccount from '../models/SenderAccount.js';
+import { requireUsableSender } from './campaignSender.service.js';
+import { createGmailCampaignEmailService } from './gmailCampaignMailer.service.js';
+import { createSenderGuard, pauseReasonForTokenError } from './campaignSenderGuard.service.js';
+import { invalidateSenderAccessToken, markSenderReauthRequired } from './senderToken.service.js';
 import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
 import { buildDispatchManifest, measureBsonBytes } from '../utils/dispatchManifest.js';
 import {
@@ -114,9 +119,53 @@ export const toDeliveryErrorCode = (error) => {
   if (error instanceof EmailServiceError && error.code === 'INVALID_MESSAGE') return 'INVALID_MESSAGE';
   if (error instanceof EmailServiceError && error.code === 'CONFIGURATION_ERROR') return 'CONFIGURATION_ERROR';
   if (error instanceof EmailServiceError && error.code === 'TRANSPORT_ERROR' && error.outcome === 'rejected') {
-    return 'TRANSPORT_ERROR';
+    // The Gmail transport refused to even try because the sender account was unusable (no token,
+    // disconnected, revoked): nothing was submitted
+    return error.cause?.code === 'GMAIL_SENDER_UNAVAILABLE' ? 'SENDER_UNAVAILABLE' : 'TRANSPORT_ERROR';
   }
   return 'SEND_UNCERTAIN';
+};
+
+/**
+ * What a failed Gmail send says about the SENDER (as opposed to the message): a reason to stop
+ * dispatching from this account, or null. Only provably-not-sent failures and the uncertain one
+ * lead to a stop; the message itself is always recorded by `toDeliveryErrorCode`.
+ *
+ * @returns {{ reason: string, invalidateToken?: boolean, markReauth?: boolean } | null}
+ */
+const senderStopForSendError = (error) => {
+  const cause = error?.cause;
+  if (!cause || cause.name !== 'GmailSendError') return null;
+  switch (cause.code) {
+    case 'GMAIL_SENDER_UNAVAILABLE':
+      return { reason: pauseReasonForTokenError({ code: cause.reason }) };
+    case 'GMAIL_UNAUTHORIZED':
+      return { reason: 'SENDER_AUTH_FAILED', invalidateToken: true };
+    case 'GMAIL_FORBIDDEN':
+      return cause.reauthRequired ? { reason: 'SENDER_REAUTH_REQUIRED', markReauth: true } : null;
+    case 'GMAIL_RATE_LIMITED':
+      return { reason: 'GMAIL_RATE_LIMITED' };
+    default:
+      return cause.outcome === 'uncertain' ? { reason: 'SEND_UNCERTAIN' } : null;
+  }
+};
+
+/**
+ * The email service a campaign sends through. A service passed in by the caller wins (tests, and
+ * a composition root that supplies a Gmail service factory: a function receives the campaign).
+ * Otherwise it is the Gmail API as the campaign's LOCKED sender snapshot, never anything else:
+ * there is no SMTP service to fall back to for campaign mail.
+ */
+const resolveCampaignEmailService = async (option, campaign) => {
+  if (option && typeof option.sendEmail === 'function') return option;
+  if (typeof option === 'function') return option(campaign);
+  const sender = campaign.dispatchSender;
+  const account = await SenderAccount.findOne({ _id: sender.accountId, userId: campaign.userId });
+  if (!account) return null;
+  return createGmailCampaignEmailService({
+    userId: campaign.userId,
+    account: { id: account._id, email: account.email, displayName: account.displayName },
+  });
 };
 
 /**
@@ -410,13 +459,22 @@ export const processNextDelivery = async (
   message,
   emailService,
   logger = console,
-  fence = null
+  fence = null,
+  senderGuard = null
 ) => {
   // Lease check before EVERY claim (one indexed read): a worker that lost, or can no longer prove,
   // its lease claims nothing. `false` also tells the worker loop to stop. Every dispatch path
   // passes a fence; only direct calls without one (tests) skip the check.
   if (fence && !(await fence.canClaim())) {
     return false;
+  }
+
+  // The locked sender must still be that account, connected, with a usable token, BEFORE anything
+  // is claimed: a campaign whose sender went away claims (and so loses) nothing.
+  let ticket = null;
+  if (senderGuard) {
+    ticket = await senderGuard.beforeClaim();
+    if (!ticket) return false;
   }
 
   // ONE atomic update on the delivery: it only matches while the delivery is pending AND its fence
@@ -432,6 +490,7 @@ export const processNextDelivery = async (
   );
 
   if (!delivery) {
+    await ticket?.giveBack();
     // Nothing claimable. If deliveries are pending but fenced above our epoch, a newer owner took
     // over: this worker is fenced out and must stop (not merely "out of work").
     if (fence && (await Delivery.exists({ campaignId, status: 'pending', fence: { $gt: fence.epoch } }))) {
@@ -486,6 +545,7 @@ export const processNextDelivery = async (
   }
 
   if (ineligibleCode) {
+    await ticket?.giveBack();
     await Delivery.updateOne(
       ownClaim(delivery._id, fence),
       {
@@ -532,7 +592,10 @@ export const processNextDelivery = async (
 
   // 2b. Tag the message with our Delivery ID for configured ESPs, so bounce and complaint
   //     webhooks can be matched back to this exact delivery (and owner)
-  customHeaders = { ...customHeaders, ...getDeliveryTagHeaders(delivery._id) };
+  //     Gmail has no webhooks and ignores ESP tags, so a Gmail message carries none of them.
+  if (emailService.kind !== 'gmail') {
+    customHeaders = { ...customHeaders, ...getDeliveryTagHeaders(delivery._id) };
+  }
 
   // 3. Personalize merge tags for this recipient (before tracking/unsubscribe injection, so
   //    recipient values can never alter tracking links)
@@ -587,6 +650,18 @@ export const processNextDelivery = async (
     textToSend = withAddress.text;
   }
 
+  // 3c-2. The sender account is verified once more right before the hand-over (one read). If it
+  //       went away since the pre-claim check, the claimed delivery was provably not sent: it is
+  //       recorded failed SENDER_UNAVAILABLE (never returned to 'pending'), and this dispatch stops.
+  if (senderGuard && !(await senderGuard.verifyBeforeSend())) {
+    await Delivery.updateOne(
+      ownClaim(delivery._id, fence),
+      { $set: { status: 'failed', errorCode: 'SENDER_UNAVAILABLE', failedAt: new Date() } }
+    );
+    await incrementCampaignStat(campaignId, 'failed', logger, fence);
+    return false;
+  }
+
   // 3d. Last local check before the SMTP call (no database read). If the lease was lost while this
   //     message was being prepared, nothing is sent and the worker stops. As above, the claimed
   //     delivery stays 'processing' for recovery to record as INTERRUPTED; it is never returned
@@ -618,6 +693,21 @@ export const processNextDelivery = async (
       }
     );
     await incrementCampaignStat(campaignId, 'failed', logger, fence);
+    // A failure that concerns the SENDER stops this dispatch (no retry, no other account)
+    const stop = senderGuard ? senderStopForSendError(error) : null;
+    if (stop) {
+      senderGuard.stop(stop.reason);
+      const sender = senderGuard.sender;
+      try {
+        if (stop.markReauth) {
+          await markSenderReauthRequired({ userId: delivery.userId, senderAccountId: sender.accountId, reason: 'SCOPE_MISSING' });
+        } else if (stop.invalidateToken) {
+          await invalidateSenderAccessToken({ userId: delivery.userId, senderAccountId: sender.accountId });
+        }
+      } catch {
+        // best effort: the stop itself is what matters
+      }
+    }
     return true;
   }
 
@@ -672,10 +762,18 @@ export const processCampaignDeliveries = async (
   let session = leaseSession;
   try {
     const campaign = await Campaign.findOne({ _id: campaignId, status: 'sending' })
-      .select('userId subject subjectB textContent htmlContent')
+      .select('userId subject subjectB textContent htmlContent dispatchSender')
       .lean();
 
     if (!campaign) {
+      return;
+    }
+    // A campaign is only ever sent from the sender it was locked to. One without that snapshot
+    // (locked before senders existed) is never sent: no fallback sender is looked up.
+    if (!campaign.dispatchSender?.accountId) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} NOT dispatched: it has no locked sender account. Nothing was sent; it needs operator review.`
+      );
       return;
     }
 
@@ -715,14 +813,27 @@ export const processCampaignDeliveries = async (
 
     const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, MAX_SEND_CONCURRENCY));
 
+    const campaignEmailService = await resolveCampaignEmailService(emailService, campaign);
+    if (!campaignEmailService) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} NOT dispatched: its locked sender account no longer exists. Nothing was sent.`
+      );
+      return;
+    }
+    const senderGuard = createSenderGuard({
+      userId: campaign.userId,
+      sender: campaign.dispatchSender,
+      emailService: campaignEmailService,
+    });
+
     const throttle = getSharedSendThrottle();
 
     const worker = async () => {
-      while (!stopRequested && !session.isFenced()) {
+      while (!stopRequested && !session.isFenced() && !senderGuard.stopped) {
         // Reserve a send slot first (no-op when CAMPAIGN_SEND_RATE_PER_MINUTE is unset)
         await throttle.wait();
-        if (stopRequested || session.isFenced()) return;
-        const hadWork = await processNextDelivery(campaignId, message, emailService, logger, session);
+        if (stopRequested || session.isFenced() || senderGuard.stopped) return;
+        const hadWork = await processNextDelivery(campaignId, message, campaignEmailService, logger, session, senderGuard);
         if (!hadWork) {
           return;
         }
@@ -740,6 +851,13 @@ export const processCampaignDeliveries = async (
     if (failure) {
       logger.error(
         `[Dispatcher] Campaign ${String(campaignId)} dispatch halted: ${failure.reason?.name || 'Error'}. It will be recovered by the watchdog or on restart.`
+      );
+      return;
+    }
+
+    if (senderGuard.stopped) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} stopped sending: ${senderGuard.stopReason}. Unsent deliveries stay pending.`
       );
       return;
     }
@@ -848,6 +966,21 @@ export const startCampaignDispatch = async ({
     campaignDocumentBytes: measureBsonBytes(campaignDocument),
   });
 
+  // 0a. Another owner's campaign is never locked: same answer as "not found" (nothing changes)
+  if (String(campaignDocument?.userId) !== String(userId)) {
+    return null;
+  }
+
+  // 0b. The sender: the campaign's explicitly selected account must still be the owner's own,
+  //     connected and allowed to send. It is verified BEFORE anything is locked (a missing or
+  //     unusable sender throws and nothing changes), and its identity is snapshotted by the lock.
+  const senderAccount = await requireUsableSender(userId, campaignDocument.senderAccountId);
+  const senderSnapshot = {
+    accountId: senderAccount._id,
+    googleSub: senderAccount.providerAccountId,
+    email: senderAccount.email,
+  };
+
   // 1. Atomic scheduled -> sending transition on the exact evaluated version. The lease is taken in
   //    the SAME update (an update pipeline using MongoDB server time), so there is never a moment
   //    when the campaign is 'sending' without an owner that a peer's watchdog could grab. The
@@ -867,11 +1000,16 @@ export const startCampaignDispatch = async ({
       // A manifest is written exactly once. A campaign that already carries one was locked before
       // and can never be locked (and so never have its recipient list replaced) again.
       dispatchManifestVersion: { $exists: false },
+      // The sender chosen at evaluation time is the one that gets snapshotted, and a snapshot is
+      // written exactly once
+      senderAccountId: senderAccount._id,
+      dispatchSender: { $exists: false },
     },
     [
       {
         $set: {
           status: 'sending',
+          dispatchSender: { $literal: senderSnapshot },
           sendStartedAt: '$$NOW',
           sendCompletedAt: null,
           'stats.total': eligibleContacts.length,
@@ -976,6 +1114,16 @@ const recoverCampaignLocked = async (campaignId, { emailService, concurrency, lo
     // anything is touched (before the lease is even taken, so no delivery is fenced and no lease or
     // epoch changes): its recipient list cannot be proven complete, so nothing is swept,
     // generated or sent, and it is left in 'sending' for an operator.
+    // A campaign is recovered only for the sender it was locked to. Without that snapshot nothing
+    // is touched and no other sender is looked up.
+    const lockedSender = await Campaign.findOne({ _id: campaignId, status: 'sending' }).select('dispatchSender').lean();
+    if (lockedSender && !lockedSender.dispatchSender?.accountId) {
+      logger.error(
+        `[Dispatcher] Campaign ${String(campaignId)} NOT recovered: it has no locked sender account. Nothing was changed or sent; it needs operator review.`
+      );
+      return 'refused';
+    }
+
     const stored = await loadCampaignManifest(campaignId);
     const manifestKind = classifyStoredManifest(stored);
     if (!stored || manifestKind !== 'valid') {

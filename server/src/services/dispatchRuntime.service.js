@@ -1,4 +1,3 @@
-import { getDefaultEmailService } from './email.service.js';
 import {
   resumeInterruptedDispatches,
   startDispatchWatchdog,
@@ -33,11 +32,13 @@ let running = false;
  * Starts the dispatch runtime. Idempotent while running.
  *
  * @param {object} [options]
- * @param {{ sendEmail: Function }} [options.emailService] - Defaults to the configured service
+ * @param {{ sendEmail: Function }|Function} [options.emailService] - Test stand-in (or a factory
+ *   receiving the campaign). Absent in production: each campaign then sends through the Gmail API
+ *   as its locked sender account. The platform SMTP service is never used for campaign mail.
  * @param {object} [options.logger=console]
  * @returns {boolean} true if this call started it, false if it was already running
  */
-export const startDispatchRuntime = ({ emailService = getDefaultEmailService(), logger = console } = {}) => {
+export const startDispatchRuntime = ({ emailService, logger = console } = {}) => {
   if (running) return false;
   running = true;
 

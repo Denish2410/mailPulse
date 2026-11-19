@@ -35,7 +35,7 @@ import mongoose from 'mongoose';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
-import { installAutoSender } from './helpers/sender.js';
+import { installAutoSender, createTestSender } from './helpers/sender.js';
 installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
@@ -131,8 +131,10 @@ describe('API and worker run as separate processes', () => {
         email: `sep${i}-${new mongoose.Types.ObjectId().toString()}@example.com`,
       }))
     );
+    const sender = await createTestSender(owner._id);
     // Exactly what "send now" leaves behind: scheduled, due now
     const campaign = await Campaign.create({
+      senderAccountId: sender._id,
       userId: owner._id,
       name: 'Queued send',
       subject: 'Hello',
@@ -164,19 +166,24 @@ describe('API and worker run as separate processes', () => {
     await waitFor(async () => (await statusOf(health)) === 200, { timeoutMs: 20000, label: `worker health (${worker.output()})` });
     assert.equal(await statusOf(`http://127.0.0.1:${healthPort}/api/v1/health`), 404, 'the worker serves no API');
 
-    await waitFor(async () => ['sent', 'failed'].includes((await Campaign.findById(campaign._id).lean()).status), {
+    // The worker locks the campaign to its sender and generates the deliveries. Campaign mail goes
+    // through Gmail only; this sender has no stored credentials, so no token can be obtained and
+    // the worker sends nothing (no SMTP fallback, no delivery claimed).
+    await waitFor(async () => (await Delivery.countDocuments({ campaignId: campaign._id })) === 2, {
       timeoutMs: 20000,
       label: 'worker dispatch',
     });
+    await sleep(1500);
+    const locked = await Campaign.findById(campaign._id).lean();
+    assert.equal(locked.status, 'sending');
+    assert.equal(String(locked.dispatchSender.accountId), String(sender._id));
     const deliveries = await Delivery.find({ campaignId: campaign._id }).lean();
     assert.equal(deliveries.length, 2, 'the worker locked it and generated its deliveries');
     for (const delivery of deliveries) {
-      // Fail closed: no real transport exists in the test environment, so nothing was sent
-      assert.equal(delivery.status, 'failed');
-      assert.equal(delivery.errorCode, 'CONFIGURATION_ERROR');
-      assert.equal(delivery.attempts, 1);
+      assert.equal(delivery.status, 'pending');
+      assert.equal(delivery.errorCode, null);
+      assert.equal(delivery.attempts, 0);
     }
-    assert.equal((await Campaign.findById(campaign._id).lean()).status, 'failed');
 
     // 3. Clean shutdown: exit 0, health endpoint gone
     assert.deepEqual(await stopChild(worker), { code: 0, signal: null }, `worker exit (${worker.output()})`);

@@ -10,6 +10,8 @@ import mongoose from 'mongoose';
 
 import Contact from '../../src/models/Contact.js';
 import Campaign from '../../src/models/Campaign.js';
+import { installAutoSender } from './sender.js';
+installAutoSender(Campaign);
 import Delivery from '../../src/models/Delivery.js';
 import { manifestFieldsFor } from './manifest.js';
 

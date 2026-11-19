@@ -28,6 +28,8 @@ import {
 } from '../src/services/tracking.service.js';
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Suppression from '../src/models/Suppression.js';

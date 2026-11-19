@@ -41,7 +41,13 @@ export const installAutoSender = (Campaign) => {
     if (doc && !Array.isArray(doc) && typeof doc === 'object' && doc.userId && doc.senderAccountId === undefined) {
       let sender = await SenderAccount.findOne({ userId: doc.userId, status: 'active' });
       if (!sender) sender = await createTestSender(doc.userId);
-      return original({ ...doc, senderAccountId: sender._id }, ...rest);
+      const fields = { ...doc, senderAccountId: sender._id };
+      // A campaign created directly in 'sending' stands for one that was locked: it carries the
+      // sender snapshot the lock would have written
+      if (doc.status === 'sending' && doc.dispatchSender === undefined) {
+        fields.dispatchSender = { accountId: sender._id, googleSub: sender.providerAccountId, email: sender.email };
+      }
+      return original(fields, ...rest);
     }
     return original(doc, ...rest);
   };

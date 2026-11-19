@@ -61,6 +61,21 @@ const dispatchManifestEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * The sender a locked campaign is bound to: stable sender account ID, the Google account (`sub`)
+ * and the normalized address, captured by the same update that locks the recipient manifest. It is
+ * what dispatch and recovery use; the live account must still match it, and nothing ever looks up
+ * a different sender.
+ */
+const dispatchSenderSchema = new mongoose.Schema(
+  {
+    accountId: { type: mongoose.Schema.Types.ObjectId, required: true, immutable: true },
+    googleSub: { type: String, required: true, immutable: true },
+    email: { type: String, required: true, immutable: true },
+  },
+  { _id: false }
+);
+
 const campaignSchema = new mongoose.Schema(
   {
     userId: {
@@ -173,6 +188,12 @@ const campaignSchema = new mongoose.Schema(
       type: [dispatchManifestEntrySchema],
       default: undefined,
       select: false,
+      immutable: true,
+    },
+    // Sender snapshot (see dispatchSenderSchema): written ONLY by the lock update, immutable after.
+    dispatchSender: {
+      type: dispatchSenderSchema,
+      default: undefined,
       immutable: true,
     },
     sendStartedAt: {

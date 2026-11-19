@@ -14,7 +14,6 @@ import { validateShutdownConfig } from './config/shutdown.js';
 import { validateTokenEncryptionConfig } from './utils/tokenCrypto.js';
 import { validateGoogleOAuthConfig } from './config/googleOAuth.js';
 import { getErrorReporter } from './services/errorReporter.service.js';
-import { getDefaultEmailService } from './services/email.service.js';
 import {
   startDispatchRuntime,
   stopDispatchRuntime,
@@ -102,7 +101,7 @@ const handleHealthRequest = (req, res) => {
  * @param {Function} [options.connectDB] - Database connection function
  * @param {number} [options.port] - Health port (defaults to WORKER_HEALTH_PORT / 5001)
  * @param {string} [options.host] - Health host (defaults to WORKER_HEALTH_HOST / 127.0.0.1)
- * @param {{ sendEmail: Function }} [options.emailService] - Defaults to the configured service
+ * @param {{ sendEmail: Function }|Function} [options.emailService] - Test stand-in; by default campaigns send through Gmail
  * @param {object} [options.logger=console]
  * @param {boolean} [options.validateConfig=true]
  * @returns {Promise<import('node:http').Server>} The health server
@@ -124,7 +123,7 @@ export const startWorker = async (options = {}) => {
 
     await (options.connectDB || connectDB)();
     shuttingDown = false;
-    startDispatchRuntime({ emailService: options.emailService || getDefaultEmailService(), logger });
+    startDispatchRuntime({ emailService: options.emailService, logger });
 
     const server = http.createServer(handleHealthRequest);
     await new Promise((resolve, reject) => {

@@ -25,10 +25,11 @@ import { getSenderAccessToken } from './senderToken.service.js';
  */
 export const createGmailCampaignEmailService = ({ userId, account, fetchImpl, oauthFetchImpl, env = process.env }) => {
   const senderAccountId = String(account.id ?? account._id);
+  const readAccessToken = async () =>
+    (await getSenderAccessToken({ userId, senderAccountId, env, fetchImpl: oauthFetchImpl })).accessToken;
   const transport = createGmailTransport({
     account: { id: senderAccountId, email: account.email, displayName: account.displayName ?? '' },
-    getAccessToken: async () =>
-      (await getSenderAccessToken({ userId, senderAccountId, env, fetchImpl: oauthFetchImpl })).accessToken,
+    getAccessToken: readAccessToken,
     ...(fetchImpl ? { fetchImpl } : {}),
   });
   const service = createEmailService({
@@ -36,7 +37,18 @@ export const createGmailCampaignEmailService = ({ userId, account, fetchImpl, oa
     from: account.displayName ? { name: account.displayName, address: account.email } : account.email,
     env,
   });
-  return Object.assign(service, { kind: 'gmail', senderAccountId });
+  return Object.assign(service, {
+    kind: 'gmail',
+    senderAccountId,
+    /**
+     * Obtains (and caches) a valid access token WITHOUT sending anything. The dispatcher calls it
+     * before it claims a delivery, so a token refresh that fails can only ever happen while no
+     * message exists, never after a possible submission.
+     */
+    async ensureReady() {
+      await readAccessToken();
+    },
+  });
 };
 
 export default { createGmailCampaignEmailService };

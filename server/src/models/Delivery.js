@@ -44,6 +44,9 @@ export const DELIVERY_ERROR_CODES = [
   'CONTACT_REMOVED',
   // The contact's email address was changed after the campaign was locked
   'CONTACT_CHANGED',
+  // The locked sender account could not be used (disconnected, revoked, identity changed, no
+  // credentials): the message was provably NOT handed to Gmail
+  'SENDER_UNAVAILABLE',
   'UNKNOWN_ERROR',
 ];
 

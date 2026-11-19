@@ -14,6 +14,8 @@ import mongoose from 'mongoose';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { installAutoSender } from './helpers/sender.js';
+installAutoSender(Campaign);
 import TrackingEvent from '../src/models/TrackingEvent.js';
 import Suppression from '../src/models/Suppression.js';
 import { connectDB } from '../src/config/db.js';
