@@ -530,3 +530,63 @@ A Nodemailer-compatible transport (`sendMail`) that sends one message as one con
   - `uncertain` (it may have been sent): a timeout or connection loss once the request may have reached Gmail, any 5xx, and any answer not listed above. Uncertain sends must never be retried automatically.
 - A 2xx answer is a send, even if its body cannot be read.
 - Errors never contain the access token, the message or Google's free-text messages; only Google's short reason keyword is kept.
+
+## 16. Gmail Campaign Dispatch (Milestones 8-10)
+
+Campaign mail is sent through the Gmail API as one customer-owned sender account, and nothing else.
+The platform SMTP service stays transactional-only (password reset, email verification, public
+signup confirmation) behind `app.locals.emailService`; campaign code never reaches it.
+
+**Selecting a sender.** A campaign has `senderAccountId`, chosen explicitly by its owner on create/update.
+It must be the owner's own account (another tenant's ID behaves like a missing one), `active`, and
+granted `gmail.send`. Nothing is selected, defaulted or substituted automatically. Readiness, send and
+schedule refuse a campaign without a usable sender. Responses carry an allow-listed sender summary
+(`id`, `email`, `displayName`, `status`, `canSend`), never tokens. Campaign test emails go through
+the selected Gmail account.
+
+**Locking.** The update that locks the recipient manifest also writes `dispatchSender` =
+`{ accountId, googleSub, email }`, after verifying the sender again. It is immutable and is the only
+sender dispatch and recovery use: editing or re-pointing `senderAccountId` afterwards changes nothing. A
+locked campaign without a snapshot is refused (never sent, no other account looked up).
+
+**Before every claim** (`campaignSenderGuard.service.js`): the live account must still be that identity
+(same record, same Google `sub`, same address), connected and allowed to send; an access token must be
+obtainable (a refresh failure therefore happens while no message exists and is never mistaken for a
+submission); one slot of the sender's daily allowance is reserved; the sender's pacing is observed. Right
+after the claim the account is verified once more; if it vanished meanwhile the claimed delivery is
+recorded `SENDER_UNAVAILABLE` (provably not sent; never returned to `pending`).
+
+**Outcomes.** Gmail acceptance = `sent`. A definite refusal (400/404/413, and 401/403/429, which also stop the
+dispatch) = `TRANSPORT_ERROR`. A timeout, connection reset, any 5xx or unrecognised answer =
+`SEND_UNCERTAIN`: terminal, never retried by the dispatcher, recovery or resume, and it pauses the
+campaign so the owner can check the Sent folder. No token-refresh retry is ever applied to a submitted request.
+
+**Limits** (per sender account, `senderQuota.service.js`; Google's ceilings are not targets): daily cap
+`GMAIL_SENDER_DAILY_LIMIT` (default 150, clamped to 400), counted atomically per UTC day in MongoDB
+(`SenderUsage`) so it holds across workers; every attempt counts. Pacing `GMAIL_SENDER_RATE_PER_MINUTE`
+(default 10, max 60) per process, on top of `CAMPAIGN_SEND_RATE_PER_MINUTE`. A campaign is never moved to
+another account or spread over several.
+
+**Pause and resume.** When the sender cannot be used (disconnected, revoked, identity changed, daily cap, Gmail
+refusing, uncertain send) every worker stops claiming, and once they settle the campaign moves
+`sending -> paused` with a `pauseReason` (conditional on the worker's lease epoch). Sent and
+uncertain deliveries are kept, unsent ones stay `pending`, stats are recomputed. Reconnecting the account
+never resumes anything. `POST /campaigns/:id/resume` (owner only, `{ "confirm": true }`) works only when
+the LOCKED sender is usable again as the same Google account and address; otherwise it answers 409 with the
+reason. It flips `paused -> sending` with an ended lease; the worker's watchdog (every
+`CAMPAIGN_WATCHDOG_INTERVAL_MS`, default 5 minutes) takes it over under a new epoch and sends only what is
+still pending. Resume does not wake the worker, so continuation can take up to one watchdog interval.
+
+**Shared grants.** A Google grant belongs to (Google account, OAuth client), not to a MailPulse record.
+"Is another connection still using it?" plus the revocation, and saving a connection for the same Google
+account, are serialized by a MongoDB lock per Google account (`GrantLock`); a busy lock means the
+revocation is skipped. Residual window: a connection's token is minted by Google before it is saved, so a
+revocation that completes between those two moments can still kill it; the effect is fail-safe (its first
+use gets `invalid_grant` and the account becomes `reauth_required`), never a send from the wrong account.
+A token refresh can never restore credentials after a disconnect (conditional on status and
+`tokenGeneration`).
+
+**Known limits.** Gmail has no bounce webhooks, so bounces/complaints from Gmail sends are not ingested. The
+daily cap is per UTC day, so a burst across midnight UTC can reach twice the cap. At-most-once, not
+exactly-once: a message that Gmail accepted but whose response was lost is `SEND_UNCERTAIN`. No inbox
+placement is promised.
