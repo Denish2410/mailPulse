@@ -519,3 +519,14 @@ Configuration is all-or-nothing (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_
 - `getSenderAccessToken({ userId, senderAccountId })` is always scoped by owner and never chooses another account. It returns the cached access token while it is valid for at least 2 more minutes, otherwise refreshes it; concurrent callers in one process share one refresh.
 - Writes are conditional on the account still being `active` at the generation it was read with: a refresh racing a disconnect or reconnect never restores wiped or outdated tokens; it re-reads instead.
 - Google refusing the grant (`invalid_grant`, or `gmail.send` no longer granted) marks the account `reauth_required`. Network errors, timeouts, rate limits and 5xx answers change nothing and are reported as retryable. An unreadable stored token (for example a removed encryption key) is reported but does not mark the account, so a key mistake does not force every customer to reconnect.
+
+### Gmail API transport (`server/src/services/gmailTransport.service.js`)
+
+A Nodemailer-compatible transport (`sendMail`) that sends one message as one connected account through `users.messages.send`. It is not wired into campaign dispatch yet.
+
+- The message is composed with Nodemailer's MIME composer and posted with Node's fetch and a 30 s timeout. From is always the account's own address (a display name is allowed); Cc, Bcc, From, Sender, To, Reply-To and other identity or structure headers cannot be passed in, and only one recipient is accepted.
+- Outcome of a failed send, recorded on the error as `outcome`:
+  - `rejected` (Gmail provably did not accept it): invalid message, sender account unavailable, no access token, a connection failure before the request could reach Gmail (DNS, refused, connect timeout, TLS certificate), or a definite refusal (400, 401, 403, 404, 413, 429). 401 is flagged so the caller can drop the cached access token; 403 for a missing scope is flagged as needing reconnection; rate limits (429, or 403 with a rate-limit reason) carry `Retry-After` when Gmail sends it.
+  - `uncertain` (it may have been sent): a timeout or connection loss once the request may have reached Gmail, any 5xx, and any answer not listed above. Uncertain sends must never be retried automatically.
+- A 2xx answer is a send, even if its body cannot be read.
+- Errors never contain the access token, the message or Google's free-text messages; only Google's short reason keyword is kept.
