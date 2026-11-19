@@ -30,6 +30,7 @@ import { getDeliveryTagHeaders } from './webhookProviders.service.js';
 import SenderAccount from '../models/SenderAccount.js';
 import { requireUsableSender } from './campaignSender.service.js';
 import { createGmailCampaignEmailService } from './gmailCampaignMailer.service.js';
+import { cancelSenderPacers } from './senderQuota.service.js';
 import { createSenderGuard, pauseReasonForTokenError } from './campaignSenderGuard.service.js';
 import { invalidateSenderAccessToken, markSenderReauthRequired } from './senderToken.service.js';
 import { getSharedSendThrottle, cancelSharedSendThrottle } from './sendThrottle.service.js';
@@ -248,6 +249,7 @@ export const stopAllDispatches = async () => {
   stopRequested = true;
   stopDispatchWatchdog();
   cancelSharedSendThrottle();
+  cancelSenderPacers();
   for (;;) {
     const pending = [
       ...(activeSweep ? [activeSweep] : []),

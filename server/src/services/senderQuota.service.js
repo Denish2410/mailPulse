@@ -32,10 +32,13 @@ const readInteger = (raw, fallback, max) => {
   return Math.min(value, max);
 };
 
+/** The per-minute pacing: 0 switches the extra pacing off (automated tests); unset means the default. */
+const readRate = (raw) => (String(raw ?? '').trim() === '0' ? 0 : readInteger(raw, DEFAULT_RATE_PER_MINUTE, MAX_RATE_PER_MINUTE));
+
 /** @returns {{ dailyLimit: number, ratePerMinute: number }} */
 export const getSenderLimits = (env = process.env) => ({
   dailyLimit: readInteger(env.GMAIL_SENDER_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, MAX_DAILY_LIMIT),
-  ratePerMinute: readInteger(env.GMAIL_SENDER_RATE_PER_MINUTE, DEFAULT_RATE_PER_MINUTE, MAX_RATE_PER_MINUTE),
+  ratePerMinute: readRate(env.GMAIL_SENDER_RATE_PER_MINUTE),
 });
 
 export const utcDay = (date = new Date()) => date.toISOString().slice(0, 10);
@@ -50,18 +53,21 @@ const expiryFor = (date) => new Date(date.getTime() + 3 * 24 * 3600 * 1000);
 export const reserveDailySlot = async (senderAccountId, { now = new Date(), env = process.env } = {}) => {
   const { dailyLimit } = getSenderLimits(env);
   const day = utcDay(now);
+  const filter = { senderAccountId, day, count: { $lt: dailyLimit } };
   try {
     const doc = await SenderUsage.findOneAndUpdate(
-      { senderAccountId, day, count: { $lt: dailyLimit } },
+      filter,
       { $inc: { count: 1 }, $setOnInsert: { expiresAt: expiryFor(now) } },
       { upsert: true, new: true }
     );
     return { ok: true, used: doc.count, limit: dailyLimit, day };
   } catch (error) {
-    // The (account, day) document exists and is at the limit: the upsert tried to insert a twin
-    if (error?.code === 11000) return { ok: false, used: dailyLimit, limit: dailyLimit, day };
-    throw error;
+    if (error?.code !== 11000) throw error;
   }
+  // Duplicate key: the (account, day) document exists. Either a concurrent first reservation just
+  // created it (a slot may still be free) or it is at the limit. Decide with a plain update.
+  const doc = await SenderUsage.findOneAndUpdate(filter, { $inc: { count: 1 } }, { new: true });
+  return doc ? { ok: true, used: doc.count, limit: dailyLimit, day } : { ok: false, used: dailyLimit, limit: dailyLimit, day };
 };
 
 /** Gives a reserved slot back (nothing was attempted after all). Best effort. */

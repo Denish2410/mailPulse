@@ -1,5 +1,6 @@
 import SenderAccount from '../models/SenderAccount.js';
 import { getSenderUnusableReason } from './campaignSender.service.js';
+import { releaseDailySlot, reserveDailySlot, waitForSenderSlot } from './senderQuota.service.js';
 
 /**
  * Sender guard: what a dispatch must establish about its LOCKED sender before every delivery.
@@ -15,6 +16,8 @@ import { getSenderUnusableReason } from './campaignSender.service.js';
  *   2. an access token can be obtained (a cached one, or a refresh; this is the only place a
  *      token refresh can fail before a message exists, so it can never be mistaken for a message
  *      that was submitted),
+ *   3. one slot of the sender's conservative daily quota is reserved (senderQuota.service.js),
+ *   4. the sender's own pacing is observed.
  * Any failure sets `stopReason`; the dispatch then stops claiming and pauses the campaign with
  * that reason. Nothing is ever retried or sent from another account.
  */
@@ -29,6 +32,7 @@ export const PAUSE_REASON_MESSAGES = Object.freeze({
   SENDER_TOKEN_REFRESH_FAILED: 'Gmail access could not be renewed. Check the connection, then resume the campaign.',
   SENDER_AUTH_FAILED: 'Gmail did not accept the sender credentials. Resume the campaign to try again with fresh credentials.',
   GMAIL_RATE_LIMITED: 'Gmail is limiting sending for this account. Wait a while, then resume the campaign.',
+  DAILY_QUOTA_REACHED: "This sender account reached MailPulse's conservative daily sending limit. Resume the campaign tomorrow.",
 });
 export const PAUSE_REASONS = Object.freeze(Object.keys(PAUSE_REASON_MESSAGES));
 
@@ -99,7 +103,26 @@ export const createSenderGuard = ({ userId, sender, emailService = null, env = p
           return stop(pauseReasonForTokenError(error));
         }
       }
-      return { giveBack: async () => {} };
+      const slot = await reserveDailySlot(sender.accountId, { env });
+      if (!slot.ok) {
+        stop('DAILY_QUOTA_REACHED');
+        return false;
+      }
+      let open = true;
+      const ticket = {
+        giveBack: async () => {
+          if (!open) return;
+          open = false;
+          await releaseDailySlot(sender.accountId);
+        },
+      };
+      try {
+        await waitForSenderSlot(sender.accountId, { env });
+      } catch (error) {
+        await ticket.giveBack();
+        throw error;
+      }
+      return ticket;
     },
 
     /** Re-check right before the message is handed to Gmail (after the claim). */

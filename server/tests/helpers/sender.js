@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 import SenderAccount from '../../src/models/SenderAccount.js';
 import { GMAIL_SEND_SCOPE } from '../../src/config/googleOAuth.js';
 
+// Tests must not wait for the per-sender pacing (it is exercised in senderQuota.test.js)
+process.env.GMAIL_SENDER_RATE_PER_MINUTE ??= '0';
+
 /**
  * Test fixture: a connected Gmail sender account for `userId` (no real Google account, and no
  * tokens unless `withTokens` is given a function that seals them). Overrides win.
