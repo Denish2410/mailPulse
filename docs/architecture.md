@@ -561,9 +561,12 @@ dispatch) = `TRANSPORT_ERROR`. A timeout, connection reset, any 5xx or unrecogni
 `SEND_UNCERTAIN`: terminal, never retried by the dispatcher, recovery or resume, and it pauses the
 campaign so the owner can check the Sent folder. No token-refresh retry is ever applied to a submitted request.
 
-**Limits** (per sender account, `senderQuota.service.js`; Google's ceilings are not targets): daily cap
-`GMAIL_SENDER_DAILY_LIMIT` (default 150, clamped to 400), counted atomically per UTC day in MongoDB
-(`SenderUsage`) so it holds across workers; every attempt counts. Pacing `GMAIL_SENDER_RATE_PER_MINUTE`
+**Limits** (per sender account, `senderQuota.service.js`; Google's ceilings are not targets): cap on any
+rolling 24 hours, `GMAIL_SENDER_DAILY_LIMIT` (default 150, clamped to 400). The sender's attempts live in one
+document (`SenderSendWindow`) updated by a single atomic pipeline on the database clock (drop entries older
+than 24 hours, check the cap, append the reservation), so it holds across workers and processes, there is no
+midnight reset, and a burst can never add up to twice the cap; each reservation carries a token so an unused
+one is given back exactly. Every attempt counts. Pacing `GMAIL_SENDER_RATE_PER_MINUTE`
 (default 10, max 60) per process, on top of `CAMPAIGN_SEND_RATE_PER_MINUTE`. A campaign is never moved to
 another account or spread over several.
 
@@ -580,13 +583,35 @@ still pending. Resume does not wake the worker, so continuation can take up to o
 **Shared grants.** A Google grant belongs to (Google account, OAuth client), not to a MailPulse record.
 "Is another connection still using it?" plus the revocation, and saving a connection for the same Google
 account, are serialized by a MongoDB lock per Google account (`GrantLock`); a busy lock means the
-revocation is skipped. Residual window: a connection's token is minted by Google before it is saved, so a
-revocation that completes between those two moments can still kill it; the effect is fail-safe (its first
-use gets `invalid_grant` and the account becomes `reauth_required`), never a send from the wrong account.
+revocation is skipped. A connection's token is minted by Google before the lock can be taken
+(the Google account is only known from the minted ID token), so a revocation that completed in between would
+kill it. To close that, the connection asks Google for a fresh access token WHILE holding the lock: a revoked
+grant is refused (409 `GRANT_REVOKED_WHILE_CONNECTING`) and nothing is saved, and from then on the lock keeps
+revocations out until the connection is visible to them. Remaining window: if Google is unreachable at that
+check the connection is saved anyway; a dead grant is then caught by its first use (`invalid_grant`), the
+account becomes `reauth_required`, and the campaign pauses. Never a send from the wrong account.
 A token refresh can never restore credentials after a disconnect (conditional on status and
 `tokenGeneration`).
 
 **Known limits.** Gmail has no bounce webhooks, so bounces/complaints from Gmail sends are not ingested. The
-daily cap is per UTC day, so a burst across midnight UTC can reach twice the cap. At-most-once, not
+cap is a rolling 24-hour window per sender account (the per-account Gmail limits are Google's, not ours; other mail sent from the same mailbox counts against Google's limit but not against ours). At-most-once, not
 exactly-once: a message that Gmail accepted but whose response was lost is `SEND_UNCERTAIN`. No inbox
 placement is promised.
+
+## 17. Gmail Account Pages (Client)
+
+- `/settings/sender-accounts` (signed-in only): connect a Gmail account, list the user's accounts with a status
+  (Connected, Reconnect required with an explanation, Disconnected), reconnect (the same OAuth flow, which
+  updates the existing record for the same Google account) and disconnect after a confirmation that says
+  campaigns will pause. Tokens never reach the client.
+- `/settings/sender-accounts/callback` is the redirect target: set `GOOGLE_OAUTH_REDIRECT_URI` to
+  `https://<app>/settings/sender-accounts/callback`. It sits behind the sign-in guard (without a session the user is
+  sent to sign in and the code is dropped), reads `code`/`state` once, removes them from the address bar at once,
+  posts them in the request body (never a URL), and posts each `state` at most once per page lifetime. Google's
+  `error` parameter is never displayed (only "access not granted" or a generic message). A refresh or revisit
+  finds no code and says there is nothing in progress; a replayed, expired or foreign state is refused by the API.
+  CSRF (state bound to the user), PKCE and the single-use state are enforced by the API and unchanged.
+- The browser is only sent to an `https://accounts.google.com` consent URL; anything else returned by the API is refused.
+- The campaign form lists only accounts that can send (plus the campaign's current sender when editing, flagged),
+  has no default, and links to the accounts page when none is ready. The campaign list and details show the sender,
+  and a paused campaign says which account to reconnect (same Google account) and that resuming is a separate step.

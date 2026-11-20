@@ -9,7 +9,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
 - **Repository**: `https://github.com/Denish2410/mailPulse.git`
 - **Current Branch**: `master`
 - **Latest Commit**: see `git log`
-- **Testing Baseline**: **1367 automated tests** (1032 server, 335 client), 0 failures, 0 skipped.
+- **Testing Baseline**: **1412 automated tests** (1040 server, 372 client), 0 failures, 0 skipped.
 
 ---
 
@@ -41,7 +41,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
    - Never configure real SMTP credentials during test executions.
 7. **Campaign Mail = Gmail API only**:
    - A campaign names exactly one customer-owned `SenderAccount` (`senderAccountId`, chosen explicitly; no default, fallback or rotation). The lock snapshots `dispatchSender` `{ accountId, googleSub, email }`; dispatch and recovery use only that snapshot. Platform SMTP is transactional-only (`app.locals.emailService`); campaign tests inject `app.locals.campaignEmailService` or simulated Gmail via `setGmailHttpClient`/`setGoogleHttpClient`.
-   - Outcomes: Gmail acceptance = `sent`; definite refusal = `TRANSPORT_ERROR`; unusable sender = `SENDER_UNAVAILABLE`; timeout/reset/5xx/unknown = `SEND_UNCERTAIN` (never retried). Per-sender daily cap and pacing (`GMAIL_SENDER_*`). A sender problem pauses the campaign (`paused`); only `POST /campaigns/:id/resume` (same Google account) continues it. Details: `docs/architecture.md` section 16.
+   - Outcomes: Gmail acceptance = `sent`; definite refusal = `TRANSPORT_ERROR`; unusable sender = `SENDER_UNAVAILABLE`; timeout/reset/5xx/unknown = `SEND_UNCERTAIN` (never retried). Per-sender cap over a rolling 24 hours and pacing (`GMAIL_SENDER_*`). A sender problem pauses the campaign (`paused`); only `POST /campaigns/:id/resume` (same Google account) continues it. Details: `docs/architecture.md` section 16.
 
 ---
 
@@ -145,7 +145,7 @@ MailPulse is a full-stack email campaign management and analytics platform built
   - Privacy: tracking events store `ipHash` (HMAC), never the raw IP; `npm --prefix server run anonymize:tracking-ips` converts old rows. `getTrackingSecret` throws instead of using a built-in value; startup warns about a missing `TRACKING_SECRET` in production.
   - UI: `client/nginx.conf` sends a CSP, nosniff, frame denial and no-referrer; Caddy adds HSTS. If the API is on another origin, add it to `connect-src`.
   - Accepted risks: registering an existing email returns 409 (account enumeration, bounded by the auth rate limiter); the 5 remaining `npm audit` moderate findings are `minimatch` inside eslint/nodemon (dev tools only).
-- Test isolation note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
+- Test isolation note: every test file that runs the scheduler, watchdog or recovery uses its own database (`isolatedMongoUri`, dropped afterwards) and awaits `Model.init()` for the indexes it relies on; the whole server suite passes in ONE `node --test` process (`npm run test:server`). A hang with `Connection operation buffering timed out` means MongoDB died (a full disk makes mongod abort), not a test bug. Older note: test files share one MongoDB and run in parallel, and some suites recover campaigns left in `sending`; keep dispatches in tests short, and do not run the dev server (restart recovery, watchdog and scheduler) against the same database while testing.
 
 ---
 
