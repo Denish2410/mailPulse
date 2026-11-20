@@ -119,7 +119,7 @@ export const SenderAccountsPage = () => {
         </section>
 
         {notice && (
-          <p className="text-sm text-emerald-300 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3" role="status">
+          <p className="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3" role="status">
             {notice}
           </p>
         )}

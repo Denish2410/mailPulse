@@ -120,8 +120,8 @@ export const getSenderStatusInfo = (account) => {
 };
 
 export const STATUS_TONE_CLASSES = Object.freeze({
-  ok: 'bg-emerald-100 text-emerald-700 border-emerald-300',
-  warn: 'bg-amber-100 text-amber-700 border-amber-300',
+  ok: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  warn: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   muted: 'bg-slate-800 text-slate-300 border-slate-700',
 });
 

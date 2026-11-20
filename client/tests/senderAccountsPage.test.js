@@ -113,3 +113,15 @@ describe('Gmail accounts page', () => {
     assert.doesNotMatch(page, /console\./);
   });
 });
+
+describe('Status colours follow the light theme remap (index.css)', () => {
+  it('never use the 50/100/700 shades, which the theme darkens or lightens into unreadable pairs', () => {
+    // index.css darkens emerald/amber/rose 100 for use as TEXT on pale tints, so a "-100" background
+    // renders dark on dark. Tints with a /10 background and a 300/400 text are the app's pattern.
+    for (const classes of [...Object.values(STATUS_TONE_CLASSES), page]) {
+      assert.doesNotMatch(String(classes), /bg-(emerald|amber|rose)-(50|100)\b/);
+    }
+    assert.match(STATUS_TONE_CLASSES.ok, /bg-emerald-500\/10 text-emerald-400/);
+    assert.match(STATUS_TONE_CLASSES.warn, /bg-amber-500\/10 text-amber-400/);
+  });
+});
