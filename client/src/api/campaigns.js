@@ -90,6 +90,7 @@ export const getCampaignById = async (id, config = {}) => {
  * @param {string} [payload.textContent]
  * @param {string} [payload.htmlContent]
  * @param {string[]} [payload.recipientIds]
+ * @param {string|null} [payload.senderAccountId]
  * @param {import('axios').AxiosRequestConfig} [config={}]
  * @returns {Promise<object>} Safe campaign object
  */
@@ -110,6 +111,11 @@ export const createCampaign = async (payload = {}, config = {}) => {
       ? [...new Set(payload.recipientIds)]
       : payload.recipientIds;
   }
+  // The Gmail account the campaign is sent from. null means "not chosen yet" (a draft may exist
+  // without one; sending requires it). The server verifies ownership and that it is usable.
+  if (payload.senderAccountId !== undefined) {
+    body.senderAccountId = payload.senderAccountId;
+  }
 
   const response = await apiClient.post('/campaigns', body, config);
   return response.data?.data?.campaign;
@@ -128,6 +134,7 @@ export const createCampaign = async (payload = {}, config = {}) => {
  * @param {string} [payload.textContent]
  * @param {string} [payload.htmlContent]
  * @param {string[]} [payload.recipientIds]
+ * @param {string|null} [payload.senderAccountId]
  * @param {import('axios').AxiosRequestConfig} [config={}]
  * @returns {Promise<object>} Safe campaign object
  */
@@ -150,6 +157,10 @@ export const updateCampaign = async (id, payload = {}, config = {}) => {
     body.recipientIds = Array.isArray(payload.recipientIds)
       ? [...new Set(payload.recipientIds)]
       : payload.recipientIds;
+  }
+  // Preserved exactly: a string selects/changes the sender, null clears it, undefined leaves it alone.
+  if (payload.senderAccountId !== undefined) {
+    body.senderAccountId = payload.senderAccountId;
   }
 
   const response = await apiClient.patch(`/campaigns/${id}`, body, config);
