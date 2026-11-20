@@ -205,6 +205,63 @@ describe('Sender accounts API: complete a Gmail connection', () => {
     assert.equal(await OAuthState.countDocuments({ userId: owner._id }), 0, 'the pending connection is gone');
   });
 
+  /** Fake Google that answers the code exchange and the later refresh differently. */
+  const splitGoogle = ({ exchange, refresh }) => {
+    const calls = [];
+    setGoogleHttpClient(async (url, init) => {
+      const body = Object.fromEntries(new URLSearchParams(init.body));
+      calls.push({ url, body });
+      if (url === GOOGLE_ENDPOINTS.revoke) return new Response('{}', { status: 200 });
+      const answer = body.grant_type === 'authorization_code' ? exchange : refresh;
+      if (answer instanceof Error) throw answer;
+      const { status = 200, json } = answer.status ? answer : { json: answer };
+      return new Response(JSON.stringify(json), { status, headers: { 'Content-Type': 'application/json' } });
+    });
+    return { calls };
+  };
+
+  it('confirms the grant is alive under the account lock before saving, and stores the fresh access token', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const { state } = await start();
+    const minted = grant();
+    const refreshed = { access_token: 'ya29.fresh-after-lock', expires_in: 3599, token_type: 'Bearer' };
+    const google = splitGoogle({ exchange: minted, refresh: refreshed });
+    const res = await callback(state);
+    assert.equal(res.status, 201);
+    const verify = google.calls.find((c) => c.body.grant_type === 'refresh_token');
+    assert.equal(verify.body.refresh_token, minted.refresh_token, 'the minted refresh token was the one checked');
+    const stored = await withTokens({ userId: owner._id });
+    assert.equal(openAccessToken(stored._id, stored.encryptedAccessToken), 'ya29.fresh-after-lock');
+    assert.equal(openRefreshToken(stored._id, stored.encryptedRefreshToken), minted.refresh_token);
+  });
+
+  it('refuses to save a grant that was revoked between minting and saving (the revoke/mint race)', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const { state } = await start();
+    splitGoogle({
+      exchange: grant(),
+      refresh: { status: 400, json: { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' } },
+    });
+    const res = await callback(state);
+    assert.equal(res.status, 409);
+    const text = await res.text();
+    assert.match(JSON.parse(text).message, /removed while it was being connected/);
+    assert.ok(!text.includes('invalid_grant') && !text.includes('1//'), 'nothing from Google is echoed');
+    assert.equal(await SenderAccount.countDocuments({ userId: owner._id }), 0, 'no account with dead tokens was saved');
+    assert.equal(await OAuthState.countDocuments({ userId: owner._id }), 0, 'the state stays consumed');
+  });
+
+  it('a hiccup while confirming does not block the connection (a dead grant is caught by the first refresh)', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const { state } = await start();
+    const minted = grant();
+    splitGoogle({ exchange: minted, refresh: new Error('network down') });
+    const res = await callback(state);
+    assert.equal(res.status, 201);
+    const stored = await withTokens({ userId: owner._id });
+    assert.equal(openAccessToken(stored._id, stored.encryptedAccessToken), minted.access_token, 'the minted tokens were kept');
+  });
+
   it('a state works once: a replayed callback is refused without calling Google again', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const { state } = await start();
@@ -213,7 +270,8 @@ describe('Sender accounts API: complete a Gmail connection', () => {
     const replay = await callback(state);
     assert.equal(replay.status, 400);
     assert.match((await replay.json()).message, /invalid or has expired/);
-    assert.equal(google.tokenCalls().length, 1);
+    const grantTypes = google.tokenCalls().map((c) => c.body.grant_type);
+    assert.deepEqual(grantTypes, ['authorization_code', 'refresh_token'], 'the code was exchanged once; the replay called nothing');
   });
 
   it('a state belongs to the user who started it', async (t) => {

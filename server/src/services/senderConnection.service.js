@@ -11,6 +11,7 @@ import {
   createPkcePair,
   buildAuthorizationUrl,
   exchangeAuthorizationCode,
+  refreshAccessToken,
   hasGmailSendScope,
   readIdTokenClaims,
   revokeToken,
@@ -221,6 +222,36 @@ const saveGoogleSenderAccount = async ({ userId, identity, tokens, now }) => {
 };
 
 /**
+ * The last check before a connection is saved, run while holding the Google account's lock.
+ *
+ * The tokens were minted BEFORE the lock was taken, and a disconnect of the same Google account
+ * that holds the lock first (and saw no other connection) revokes the whole grant, including the
+ * tokens just minted. Saving them would then show an "active" account whose first send fails.
+ * Asking Google for a fresh access token now tells the two cases apart: a revoked grant is
+ * refused here, with a clear "connect again", and nothing is saved. From this point the lock
+ * keeps any further revocation out until the connection is visible to it. Any OTHER failure
+ * (Google unreachable, a bad answer) does not block the connection: the tokens as minted are
+ * saved, and a revoked grant is then caught by the first token refresh, which marks the account
+ * reconnect-required (fail-safe, never a send with a dead grant).
+ */
+const confirmGrantStillAlive = async ({ config, tokens, fetchImpl }) => {
+  try {
+    const fresh = await refreshAccessToken(config, tokens.refreshToken, { fetchImpl });
+    const rotated = fresh.refreshToken || tokens.refreshToken;
+    return { ...tokens, accessToken: fresh.accessToken, expiresIn: fresh.expiresIn, refreshToken: rotated };
+  } catch (error) {
+    if (error instanceof GoogleOAuthError && error.code === 'GOOGLE_INVALID_GRANT') {
+      throw new SenderConnectionError(
+        'GRANT_REVOKED_WHILE_CONNECTING',
+        409,
+        'Google access for this account was removed while it was being connected. Please connect your Gmail account again.'
+      );
+    }
+    return tokens;
+  }
+};
+
+/**
  * Completes a connection: consumes the state, exchanges the code (with the PKCE verifier),
  * checks the grant and the identity, and stores the encrypted tokens.
  *
@@ -269,7 +300,10 @@ export const completeGoogleConnection = async ({ userId, state, code, now = new 
   try {
     // Under the Google account's lock, so a revocation of the same grant by another connection
     // is either finished before this saves, or sees this connection and does not revoke
-    return await withGrantLock(grantLockKey(identity.sub), () => saveGoogleSenderAccount({ userId, identity, tokens, now }));
+    return await withGrantLock(grantLockKey(identity.sub), async () => {
+      const confirmed = await confirmGrantStillAlive({ config, tokens, fetchImpl });
+      return saveGoogleSenderAccount({ userId, identity, tokens: confirmed, now });
+    });
   } catch (error) {
     if (error instanceof GrantLockBusyError) {
       throw new SenderConnectionError('CONNECTION_CONFLICT', 409, 'The account is being updated. Please try again.');
