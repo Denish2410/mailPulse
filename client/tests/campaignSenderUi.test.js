@@ -87,3 +87,25 @@ describe('Paused campaign guidance', () => {
     assert.match(preview, /Open Gmail accounts/);
   });
 });
+
+describe('Paused-campaign panel is readable and accurate (light theme)', () => {
+  const dialog = read('components/campaigns/CampaignPreviewDialog.jsx');
+  const panel = dialog.slice(dialog.indexOf('Sending is paused') - 700, dialog.indexOf('Resume sending') + 400);
+
+  it('uses amber shades the theme darkens; orange text shades are not remapped and vanish on the pale tint', () => {
+    assert.doesNotMatch(panel, /text-orange-(100|200|300)/);
+    assert.match(panel, /text-amber-200/);
+    assert.match(panel, /text-amber-300/);
+  });
+
+  it('does not tell the owner a paused campaign "has been sent"', () => {
+    assert.match(dialog, /effectiveStatus === 'paused'[\s\S]{0,120}paused/);
+  });
+});
+
+describe('After "Resume sending" the dialog stops showing Paused', () => {
+  it('derives the status badge from the same resumed-aware status as the panel', () => {
+    const dialog = read('components/campaigns/CampaignPreviewDialog.jsx');
+    assert.match(dialog, /getCampaignStatusBadge\([^)]*resumed \? 'sending' : campaign\.status/);
+  });
+});

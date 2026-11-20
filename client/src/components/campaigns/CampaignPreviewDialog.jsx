@@ -338,7 +338,7 @@ export const CampaignPreviewDialog = ({
   if (!isOpen || !campaign) return null;
 
   // Presentation summaries
-  const statusBadge = getCampaignStatusBadge(sentStatus || scheduleOverride?.status || campaign.status, {
+  const statusBadge = getCampaignStatusBadge(sentStatus || scheduleOverride?.status || (resumed ? 'sending' : campaign.status), {
     scheduledAt: scheduleOverride ? scheduleOverride.scheduledAt : campaign.scheduledAt,
   });
   const summary = formatReadinessSummary(readinessData?.summary || {});
@@ -455,22 +455,22 @@ export const CampaignPreviewDialog = ({
 
           {/* Paused: the sending Gmail account stopped working; sending continues only on request */}
           {effectiveStatus === 'paused' && (
-            <div role="alert" className="p-4 sm:p-5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-200 text-sm flex flex-col gap-3">
+            <div role="alert" className="p-4 sm:p-5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-sm flex flex-col gap-3">
               <div>
                 <p className="font-semibold">Sending is paused</p>
-                <p className="text-xs text-orange-300/90 mt-1">
+                <p className="text-xs text-amber-300 mt-1">
                   {campaign.pause?.message || 'This campaign was paused. Check its sender account, then resume it.'}
                 </p>
-                <p className="text-xs text-orange-300/80 mt-1">
+                <p className="text-xs text-amber-300 mt-1">
                   Messages already sent are kept; the rest wait.
                 </p>
-                <ul className="text-xs text-orange-300/90 mt-2 list-disc pl-4 space-y-1">
+                <ul className="text-xs text-amber-300 mt-2 list-disc pl-4 space-y-1">
                   {getPausedGuidance(campaign).steps.map((step) => (
                     <li key={step}>{step}</li>
                   ))}
                 </ul>
                 {getPausedGuidance(campaign).showAccountsLink && (
-                  <Link to="/settings/sender-accounts" className="inline-block mt-2 text-xs underline text-orange-100 hover:text-white">
+                  <Link to="/settings/sender-accounts" className="inline-block mt-2 text-xs underline text-amber-200 hover:text-amber-300">
                     Open Gmail accounts
                   </Link>
                 )}
@@ -1011,6 +1011,8 @@ export const CampaignPreviewDialog = ({
             <span>
               {isScheduled
                 ? 'This campaign is scheduled and locked until the schedule is canceled.'
+                : effectiveStatus === 'paused'
+                ? 'This campaign is paused. It can be resumed, but not edited.'
                 : !isDraft
                 ? 'This campaign has been sent and can no longer be edited.'
                 : testEmailAvailability.canSend || isSendingTestEmail
