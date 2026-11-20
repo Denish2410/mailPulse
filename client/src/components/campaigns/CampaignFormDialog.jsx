@@ -6,6 +6,8 @@ import TemplatePicker from '../templates/TemplatePicker.jsx';
 import MergeTagToolbar from '../templates/MergeTagToolbar.jsx';
 import AudiencePicker from '../segments/AudiencePicker.jsx';
 import { getSenderAccounts } from '../../api/senderAccounts.js';
+import { getSelectableSenders } from '../../utils/senderAccountHelpers.js';
+import { Link } from 'react-router-dom';
 import { insertAtSelection, templateToCampaignFields } from '../../utils/templateHelpers.js';
 
 /**
@@ -368,7 +370,7 @@ export const CampaignFormDialog = ({
                 {/* Sender: exactly one connected Gmail account, chosen explicitly */}
                 <div>
                   <label htmlFor="campaign-form-sender" className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Send from (Gmail account) <span className="text-rose-400">*</span>
+                    Send from (Gmail account) <span className="text-slate-500 font-normal">— required before sending</span>
                   </label>
                   <select
                     id="campaign-form-sender"
@@ -382,16 +384,27 @@ export const CampaignFormDialog = ({
                     className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors disabled:opacity-60"
                   >
                     <option value="">Select a Gmail account…</option>
-                    {senderAccounts.map((account) => (
-                      <option key={account.id} value={account.id} disabled={!account.canSend && account.id !== senderAccountId}>
+                    {getSelectableSenders(senderAccounts, campaign?.senderAccountId || '').map((account) => (
+                      <option key={account.id} value={account.id} disabled={!account.canSend}>
                         {account.email}
                         {account.canSend ? '' : ' (reconnect required)'}
                       </option>
                     ))}
                   </select>
-                  {sendersLoaded && senderAccounts.length === 0 && (
+                  {sendersLoaded && getSelectableSenders(senderAccounts, campaign?.senderAccountId || '').length === 0 && (
                     <p className="mt-1 text-xs text-amber-400 font-medium">
-                      No Gmail account is connected yet. A campaign can only be sent from a connected Gmail account.
+                      No Gmail account is ready to send. A campaign can only be sent from a connected Gmail account.{' '}
+                      <Link to="/settings/sender-accounts" className="underline text-indigo-300 hover:text-indigo-200">
+                        Connect a Gmail account
+                      </Link>
+                    </p>
+                  )}
+                  {sendersLoaded && senderAccounts.some((a) => !a.canSend) && senderAccounts.some((a) => a.canSend) && (
+                    <p className="mt-1 text-xs text-slate-400">
+                      Accounts that need reconnecting are not listed.{' '}
+                      <Link to="/settings/sender-accounts" className="underline text-indigo-300 hover:text-indigo-200">
+                        Manage Gmail accounts
+                      </Link>
                     </p>
                   )}
                   {errors.senderAccountId && (

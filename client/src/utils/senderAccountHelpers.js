@@ -140,3 +140,46 @@ export const getDisconnectErrorMessage = (error) => {
 
 /** Accounts a campaign could be sent from right now. */
 export const countUsableSenders = (accounts) => (Array.isArray(accounts) ? accounts.filter((a) => a?.canSend).length : 0);
+
+/**
+ * Accounts offered in the campaign form: only those that can send now, plus the campaign's
+ * current sender (flagged) so editing never silently drops or swaps it.
+ */
+export const getSelectableSenders = (accounts, currentId = '') => {
+  if (!Array.isArray(accounts)) return [];
+  return accounts.filter((account) => account?.canSend || (currentId && account?.id === currentId));
+};
+
+/** Short "email (status)" label for a sender summary; empty when the campaign has none. */
+export const getSenderLabel = (sender) => {
+  if (!sender?.email) return '';
+  return sender.canSend ? sender.email : `${sender.email} (${getSenderStatusInfo(sender).label.toLowerCase()})`;
+};
+
+/**
+ * What a paused campaign's owner must do, from the campaign's sender summary.
+ *
+ * @returns {{ steps: string[], showAccountsLink: boolean }}
+ */
+export const getPausedGuidance = (campaign) => {
+  const sender = campaign?.sender ?? null;
+  if (sender && !sender.canSend) {
+    return {
+      steps: [
+        `Reconnect ${sender.email} on the Gmail accounts page (use the same Google account).`,
+        'Then come back here and choose Resume sending. Reconnecting does not resume the campaign by itself.',
+      ],
+      showAccountsLink: true,
+    };
+  }
+  if (!sender) {
+    return {
+      steps: ['This campaign’s sender account is no longer available. It cannot be moved to another account; create a new campaign instead.'],
+      showAccountsLink: true,
+    };
+  }
+  return {
+    steps: ['The sender account is connected. Choose Resume sending to continue; messages already sent are kept and the rest wait.'],
+    showAccountsLink: false,
+  };
+};

@@ -8,6 +8,8 @@ import {
   resumeCampaign,
   getErrorMessage,
 } from '../../api/campaigns.js';
+import { Link } from 'react-router-dom';
+import { getSenderLabel, getPausedGuidance } from '../../utils/senderAccountHelpers.js';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 import ScheduleTimeZone from './ScheduleTimeZone.jsx';
 import { getBrowserTimeZone, isValidTimeZone, zonedInputToFutureIso } from '../../utils/timezone.js';
@@ -435,6 +437,10 @@ export const CampaignPreviewDialog = ({
             <div className="min-w-0 flex-1">
               <span className="text-slate-400 font-medium block mb-0.5">Email Subject</span>
               <span className="text-slate-50 font-semibold text-sm break-words">{campaign.subject}</span>
+              <span className="text-slate-400 font-medium block mt-2 mb-0.5">Sending from</span>
+              <span className="text-slate-100 text-sm break-all" data-testid="campaign-sender">
+                {getSenderLabel(campaign.sender) || 'No sender selected'}
+              </span>
             </div>
 
             <div className="flex items-center gap-4 text-slate-400 shrink-0">
@@ -456,8 +462,18 @@ export const CampaignPreviewDialog = ({
                   {campaign.pause?.message || 'This campaign was paused. Check its sender account, then resume it.'}
                 </p>
                 <p className="text-xs text-orange-300/80 mt-1">
-                  Messages already sent are kept; the rest wait. Reconnecting the account does not resume the campaign by itself.
+                  Messages already sent are kept; the rest wait.
                 </p>
+                <ul className="text-xs text-orange-300/90 mt-2 list-disc pl-4 space-y-1">
+                  {getPausedGuidance(campaign).steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ul>
+                {getPausedGuidance(campaign).showAccountsLink && (
+                  <Link to="/settings/sender-accounts" className="inline-block mt-2 text-xs underline text-orange-100 hover:text-white">
+                    Open Gmail accounts
+                  </Link>
+                )}
               </div>
               {resumeState.status === 'error' && (
                 <p className="text-xs text-rose-300 font-medium" role="alert">{resumeState.message}</p>

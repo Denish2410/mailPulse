@@ -1,3 +1,4 @@
+import { getSenderLabel } from '../../utils/senderAccountHelpers.js';
 import { formatCampaignDate, formatScheduledAt, getCampaignStatusBadge, isCampaignEditable } from '../../utils/campaignHelpers.js';
 
 /**
@@ -140,6 +141,9 @@ export const CampaignsTable = ({
                       </div>
                       <div className="md:hidden text-xs text-slate-400 truncate max-w-xs mt-0.5">
                         {campaign.subject}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-sm mt-0.5">
+                        From: {getSenderLabel(campaign.sender) || 'no sender selected'}
                       </div>
                     </div>
                   </div>
