@@ -33,7 +33,7 @@ export const PAUSE_REASON_MESSAGES = Object.freeze({
   SENDER_AUTH_FAILED: 'Gmail did not accept the sender credentials. Resume the campaign to try again with fresh credentials.',
   SEND_UNCERTAIN: "Gmail did not confirm the last message, so it may or may not have been sent. Check the sender's Sent folder, then resume the campaign.",
   GMAIL_RATE_LIMITED: 'Gmail is limiting sending for this account. Wait a while, then resume the campaign.',
-  DAILY_QUOTA_REACHED: "This sender account reached MailPulse's conservative daily sending limit. Resume the campaign tomorrow.",
+  DAILY_QUOTA_REACHED: "This sender account reached MailPulse's conservative sending limit for the last 24 hours. Allowance returns gradually; resume the campaign later.",
 });
 export const PAUSE_REASONS = Object.freeze(Object.keys(PAUSE_REASON_MESSAGES));
 
@@ -114,7 +114,7 @@ export const createSenderGuard = ({ userId, sender, emailService = null, env = p
         giveBack: async () => {
           if (!open) return;
           open = false;
-          await releaseDailySlot(sender.accountId);
+          await releaseDailySlot(sender.accountId, slot.token);
         },
       };
       try {

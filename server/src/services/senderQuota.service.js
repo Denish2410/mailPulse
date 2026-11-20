@@ -1,4 +1,5 @@
-import SenderUsage from '../models/SenderUsage.js';
+import crypto from 'node:crypto';
+import SenderSendWindow from '../models/SenderSendWindow.js';
 import { createSendThrottle } from './sendThrottle.service.js';
 
 /**
@@ -8,9 +9,11 @@ import { createSendThrottle } from './sendThrottle.service.js';
  * mailbox that sends near them is far more likely to be throttled or flagged. MailPulse therefore
  * applies much lower limits of its own, per sender account:
  *
- *   - a daily cap (GMAIL_SENDER_DAILY_LIMIT, default 150, never above 400), counted per UTC day
- *     in MongoDB so it holds across worker processes. Every send ATTEMPT counts, including ones
- *     that ended uncertain or rejected, because Gmail may have counted them too;
+ *   - a cap on the sends of any rolling 24 hours (GMAIL_SENDER_DAILY_LIMIT, default 150, never
+ *     above 400), counted in MongoDB so it holds across worker processes. It is a sliding window,
+ *     not a calendar day: there is no midnight at which the allowance resets, so a burst can never
+ *     add up to twice the cap. Every send ATTEMPT counts, including ones that ended uncertain or
+ *     rejected, because Gmail may have counted them too;
  *   - an even pacing (GMAIL_SENDER_RATE_PER_MINUTE, default 10, never above 60) inside one
  *     process, on top of the global CAMPAIGN_SEND_RATE_PER_MINUTE.
  *
@@ -41,39 +44,69 @@ export const getSenderLimits = (env = process.env) => ({
   ratePerMinute: readRate(env.GMAIL_SENDER_RATE_PER_MINUTE),
 });
 
-export const utcDay = (date = new Date()) => date.toISOString().slice(0, 10);
+export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
-const expiryFor = (date) => new Date(date.getTime() + 3 * 24 * 3600 * 1000);
+/** The reference time of the update: the database's own clock, or a fixed instant in tests. */
+const nowExpr = (now) => (now ? { $literal: now } : '$$NOW');
+
+const pruneStage = (now) => ({
+  $set: {
+    sends: {
+      $filter: {
+        input: { $ifNull: ['$sends', []] },
+        as: 'entry',
+        cond: { $gt: ['$$entry.at', { $subtract: [nowExpr(now), WINDOW_MS] }] },
+      },
+    },
+  },
+});
 
 /**
- * Reserves one send slot for today. Atomic: concurrent callers can never take more than `limit`.
+ * Reserves one send slot in the rolling 24 hours. One atomic update on the sender's single window
+ * document (server time): it drops entries older than 24 hours, then appends this reservation only
+ * if fewer than `limit` remain. Concurrent callers, in any process, can never take more than the
+ * limit, and a caller learns whether it won by its own token.
  *
- * @returns {Promise<{ ok: boolean, used: number, limit: number, day: string }>}
+ * @returns {Promise<{ ok: boolean, used: number, limit: number, token: string|null }>}
  */
-export const reserveDailySlot = async (senderAccountId, { now = new Date(), env = process.env } = {}) => {
+export const reserveDailySlot = async (senderAccountId, { now = null, env = process.env } = {}) => {
   const { dailyLimit } = getSenderLimits(env);
-  const day = utcDay(now);
-  const filter = { senderAccountId, day, count: { $lt: dailyLimit } };
+  const token = crypto.randomBytes(12).toString('hex');
+  const pipeline = [
+    pruneStage(now),
+    {
+      $set: {
+        lastToken: { $cond: [{ $lt: [{ $size: '$sends' }, dailyLimit] }, token, '$lastToken'] },
+        sends: {
+          $cond: [
+            { $lt: [{ $size: '$sends' }, dailyLimit] },
+            { $concatArrays: ['$sends', [{ at: nowExpr(now), k: token }]] },
+            '$sends',
+          ],
+        },
+      },
+    },
+  ];
+  const run = () => SenderSendWindow.findOneAndUpdate({ senderAccountId }, pipeline, { upsert: true, new: true });
+  let doc;
   try {
-    const doc = await SenderUsage.findOneAndUpdate(
-      filter,
-      { $inc: { count: 1 }, $setOnInsert: { expiresAt: expiryFor(now) } },
-      { upsert: true, new: true }
-    );
-    return { ok: true, used: doc.count, limit: dailyLimit, day };
+    doc = await run();
   } catch (error) {
     if (error?.code !== 11000) throw error;
+    // Two first reservations raced to create the document; the loser simply updates it
+    doc = await run();
   }
-  // Duplicate key: the (account, day) document exists. Either a concurrent first reservation just
-  // created it (a slot may still be free) or it is at the limit. Decide with a plain update.
-  const doc = await SenderUsage.findOneAndUpdate(filter, { $inc: { count: 1 } }, { new: true });
-  return doc ? { ok: true, used: doc.count, limit: dailyLimit, day } : { ok: false, used: dailyLimit, limit: dailyLimit, day };
+  const won = doc.lastToken === token;
+  return { ok: won, used: doc.sends.length, limit: dailyLimit, token: won ? token : null };
 };
 
-/** Gives a reserved slot back (nothing was attempted after all). Best effort. */
-export const releaseDailySlot = async (senderAccountId, { now = new Date() } = {}) => {
+/** Gives a reservation back (no delivery was claimed after all). Best effort. */
+export const releaseDailySlot = async (senderAccountId, token) => {
+  if (!token) return;
   try {
-    await SenderUsage.updateOne({ senderAccountId, day: utcDay(now), count: { $gt: 0 } }, { $inc: { count: -1 } });
+    await SenderSendWindow.updateOne({ senderAccountId }, [
+      { $set: { sends: { $filter: { input: { $ifNull: ['$sends', []] }, as: 'entry', cond: { $ne: ['$$entry.k', token] } } } } },
+    ]);
   } catch {
     // A slot that is not given back only makes the cap more conservative
   }
@@ -108,7 +141,7 @@ export default {
   DEFAULT_RATE_PER_MINUTE,
   MAX_RATE_PER_MINUTE,
   getSenderLimits,
-  utcDay,
+  WINDOW_MS,
   reserveDailySlot,
   releaseDailySlot,
   waitForSenderSlot,
