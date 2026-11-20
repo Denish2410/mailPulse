@@ -25,6 +25,7 @@ import mongoose from 'mongoose';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import SenderAccount from '../src/models/SenderAccount.js';
 import { installAutoSender } from './helpers/sender.js';
 installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
@@ -55,6 +56,23 @@ import {
 } from '../src/services/dispatchLease.service.js';
 
 const quietLogger = { log() {}, warn() {}, error() {} };
+
+/**
+ * Seeds a 'sending' campaign WITHOUT a window in which a sweep could recover it half-built: it is
+ * created as a draft, its deliveries are inserted, and only then does it become 'sending' (with the
+ * sender snapshot a real lock would have written). Any recovery sweep running in this process
+ * (a watchdog left over from an earlier test, for example) would otherwise find a 'sending'
+ * campaign with no lease and no deliveries yet, generate them from the manifest and collide with
+ * the test's own inserts (MEMBERSHIP_MISMATCH), a failure that showed up under CPU load.
+ */
+const becomeSending = async (campaign) => {
+  const sender = await SenderAccount.findById(campaign.senderAccountId);
+  await Campaign.collection.updateOne(
+    { _id: campaign._id },
+    { $set: { status: 'sending', dispatchSender: { accountId: sender._id, googleSub: sender.providerAccountId, email: sender.email } } }
+  );
+};
+
 
 describe('Lease configuration and fencing logic (no DB)', () => {
   it('uses a sane default and rejects tiny or invalid values', () => {
@@ -111,6 +129,8 @@ describe('Lease acquisition, renewal and epochs', () => {
     try {
       await connectDB();
       isDbConnected = true;
+      // Unique indexes must exist before the first test: delivery generation relies on them
+      await Promise.all([User.init(), Contact.init(), Campaign.init(), Delivery.init()]);
       user = await User.create({ name: 'Lease User', email: `lease-${Date.now()}@example.com`, passwordHash: 'x'.repeat(20) });
     } catch (err) {
       console.warn(`[Lease Tests] MongoDB unavailable: ${err.message}`);
@@ -285,7 +305,7 @@ describe('Fenced dispatch work', () => {
       subject: 'Hello',
       textContent: 'Body',
       htmlContent: '<p>Body</p>',
-      status: 'sending',
+      status: 'draft',
       sendStartedAt: new Date(),
       recipientIds: contacts.map((c) => c._id),
       stats: { total: n, sent: 0, failed: 0 },
@@ -293,6 +313,7 @@ describe('Fenced dispatch work', () => {
       ...overrides,
     });
     await Delivery.insertMany(contacts.map((c) => ({ campaignId: campaign._id, userId: user._id, contactId: c._id, email: c.email, status: 'pending' })));
+    if (overrides.status === undefined) await becomeSending(campaign);
     return campaign;
   };
 
@@ -300,6 +321,8 @@ describe('Fenced dispatch work', () => {
     try {
       await connectDB();
       isDbConnected = true;
+      // Unique indexes must exist before the first test: delivery generation relies on them
+      await Promise.all([User.init(), Contact.init(), Campaign.init(), Delivery.init()]);
       user = await User.create({ name: 'Fence User', email: `fence-${Date.now()}@example.com`, passwordHash: 'x'.repeat(20) });
     } catch (err) {
       console.warn(`[Lease Tests] MongoDB unavailable: ${err.message}`);
@@ -549,6 +572,8 @@ describe('Strict lease renewal', () => {
     try {
       await connectDB();
       isDbConnected = true;
+      // Unique indexes must exist before the first test: delivery generation relies on them
+      await Promise.all([User.init(), Contact.init(), Campaign.init(), Delivery.init()]);
       user = await User.create({ name: 'Renew User', email: `renew-${Date.now()}@example.com`, passwordHash: 'x'.repeat(20) });
     } catch (err) {
       console.warn(`[Lease Tests] MongoDB unavailable: ${err.message}`);
@@ -651,7 +676,7 @@ describe('Takeover fencing hook and the atomic claim', () => {
       subject: 'Hello',
       textContent: 'Body',
       htmlContent: '<p>Body</p>',
-      status: 'sending',
+      status: 'draft',
       sendStartedAt: new Date(),
       recipientIds: contacts.map((c) => c._id),
       stats: { total: n, sent: 0, failed: 0 },
@@ -673,6 +698,7 @@ describe('Takeover fencing hook and the atomic claim', () => {
         ...(deliveryFields[i] || {}),
       }))
     );
+    if (overrides.status === undefined) await becomeSending(campaign);
     return campaign;
   };
   const fencesOf = async (id) => (await Delivery.find({ campaignId: id }).sort({ _id: 1 }).lean()).map((d) => d.fence);
@@ -682,6 +708,8 @@ describe('Takeover fencing hook and the atomic claim', () => {
     try {
       await connectDB();
       isDbConnected = true;
+      // Unique indexes must exist before the first test: delivery generation relies on them
+      await Promise.all([User.init(), Contact.init(), Campaign.init(), Delivery.init()]);
       user = await User.create({ name: 'Hook User', email: `hook-${Date.now()}@example.com`, passwordHash: 'x'.repeat(20) });
     } catch (err) {
       console.warn(`[Lease Tests] MongoDB unavailable: ${err.message}`);

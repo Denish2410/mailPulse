@@ -7,6 +7,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config();
 
 process.env.NODE_ENV = 'test';
+process.env.MONGODB_URI = isolatedMongoUri('accountprivacy');
 process.env.JWT_SECRET =
   process.env.JWT_SECRET || 'deterministic_test_jwt_secret_min_32_characters!';
 process.env.JWT_EXPIRES_IN = '15m';
@@ -22,6 +23,7 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
+import { isolatedMongoUri } from './helpers/isolatedDb.js';
 import { installAutoSender } from './helpers/sender.js';
 installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
@@ -190,6 +192,7 @@ describe('Account settings, export and deletion', () => {
     if (server) await new Promise((resolve) => server.close(resolve));
     if (isDbConnected) {
       await wipe();
+      await mongoose.connection.dropDatabase();
       await mongoose.disconnect();
     }
   });
