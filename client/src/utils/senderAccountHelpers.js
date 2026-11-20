@@ -77,3 +77,66 @@ export const CALLBACK_MESSAGES = Object.freeze({
   invalid: 'This connection link is invalid. Please start connecting your Gmail account again.',
   empty: 'There is no connection in progress. Start from the Gmail accounts page.',
 });
+
+/**
+ * Badge, explanation and available actions for an account, from the safe API fields only.
+ *
+ * @param {{ status?: string, statusReason?: string|null, canSend?: boolean }} account
+ * @returns {{ label: string, tone: 'ok'|'warn'|'muted', explanation: string, needsReconnect: boolean, canDisconnect: boolean }}
+ */
+export const getSenderStatusInfo = (account) => {
+  switch (account?.status) {
+    case 'active':
+      return {
+        label: 'Connected',
+        tone: 'ok',
+        explanation: 'Ready to send campaigns.',
+        needsReconnect: false,
+        canDisconnect: true,
+      };
+    case 'reauth_required': {
+      const revoked = account.statusReason === 'TOKEN_REVOKED';
+      return {
+        label: 'Reconnect required',
+        tone: 'warn',
+        explanation: revoked
+          ? 'Google access was removed or expired. Campaigns from this account are paused until you reconnect it with the same Google account.'
+          : 'Google needs you to sign in again. Reconnect with the same Google account; campaigns from this account stay paused until you do and then resume them yourself.',
+        needsReconnect: true,
+        canDisconnect: true,
+      };
+    }
+    case 'disconnected':
+      return {
+        label: 'Disconnected',
+        tone: 'muted',
+        explanation: 'MailPulse no longer has access to this account. Connect it again to use it as a sender.',
+        needsReconnect: true,
+        canDisconnect: false,
+      };
+    default:
+      return { label: 'Unknown', tone: 'muted', explanation: 'The status of this account is unknown.', needsReconnect: false, canDisconnect: false };
+  }
+};
+
+export const STATUS_TONE_CLASSES = Object.freeze({
+  ok: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+  warn: 'bg-amber-100 text-amber-700 border-amber-300',
+  muted: 'bg-slate-800 text-slate-300 border-slate-700',
+});
+
+export const DISCONNECT_WARNING =
+  'MailPulse will delete its access to this Gmail account. Campaigns that send from it will pause, and you will need to reconnect the same account before resuming them. Emails already sent are not affected.';
+
+export const getDisconnectSuccessMessage = (email, revoked) =>
+  `${email || 'The account'} was disconnected.${revoked ? '' : ' Google access may still be listed in your Google account permissions.'}`;
+
+export const getDisconnectErrorMessage = (error) => {
+  if (error?.response?.status === 404) return 'This account no longer exists. The list has been refreshed.';
+  const message = error?.response?.data?.message;
+  if (typeof message === 'string' && message) return message;
+  return 'Could not disconnect this account. Please try again.';
+};
+
+/** Accounts a campaign could be sent from right now. */
+export const countUsableSenders = (accounts) => (Array.isArray(accounts) ? accounts.filter((a) => a?.canSend).length : 0);
