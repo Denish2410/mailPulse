@@ -15,6 +15,8 @@ import TemplatesPage from './pages/templates/TemplatesPage.jsx';
 import SegmentsPage from './pages/segments/SegmentsPage.jsx';
 import SuppressionsPage from './pages/suppressions/SuppressionsPage.jsx';
 import SettingsPage from './pages/settings/SettingsPage.jsx';
+import SenderAccountsPage from './pages/settings/SenderAccountsPage.jsx';
+import SenderAccountCallbackPage from './pages/settings/SenderAccountCallbackPage.jsx';
 import SignupFormsPage from './pages/signupForms/SignupFormsPage.jsx';
 import SubscribePage from './pages/public/SubscribePage.jsx';
 import ConfirmSubscriptionPage from './pages/public/ConfirmSubscriptionPage.jsx';
@@ -48,6 +50,8 @@ export function App() {
             <Route path="/suppressions" element={<SuppressionsPage />} />
             <Route path="/signup-forms" element={<SignupFormsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/sender-accounts" element={<SenderAccountsPage />} />
+            <Route path="/settings/sender-accounts/callback" element={<SenderAccountCallbackPage />} />
           </Route>
 
           {/* Default redirect: / leads to /dashboard (which guards or displays) */}
