@@ -1,16 +1,18 @@
 /**
  * CampaignFilters Component
  *
- * Provides responsive search control for campaigns by name or subject
+ * Provides responsive search and status filter controls for campaigns
  * with clear/reset capability.
  */
 export const CampaignFilters = ({
   search = '',
   onSearchChange,
+  status = '',
+  onStatusChange,
   onReset,
   disabled = false,
 }) => {
-  const hasActiveFilters = Boolean(search.trim());
+  const hasActiveFilters = Boolean(search.trim() || status);
 
   return (
     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
@@ -45,6 +47,30 @@ export const CampaignFilters = ({
           className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors disabled:opacity-60"
         />
       </div>
+
+      {/* Status Filter */}
+      {onStatusChange && (
+        <div className="sm:w-44">
+          <label htmlFor="campaign-status-select" className="sr-only">
+            Filter by status
+          </label>
+          <select
+            id="campaign-status-select"
+            value={status}
+            onChange={(e) => onStatusChange(e.target.value)}
+            disabled={disabled}
+            className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 cursor-pointer"
+          >
+            <option value="">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="sending">Sending</option>
+            <option value="paused">Paused</option>
+            <option value="sent">Sent</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+      )}
 
       {/* Reset Action */}
       {hasActiveFilters && (

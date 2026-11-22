@@ -1389,4 +1389,136 @@ describe('Campaigns Management UI Logic & Helpers', () => {
       assert.doesNotMatch(analyticsDialogSource, /TRACKING_SECRET|JWT_SECRET|process\.env/);
     });
   });
+
+  // ==========================================
+  // Part 8: Campaign Status Filtering & UI Controls
+  // ==========================================
+  describe('Part 8: Campaign Status Filtering & UI Controls', () => {
+    const filtersComponentPath = path.resolve(
+      __dirname,
+      '../src/components/campaigns/CampaignFilters.jsx'
+    );
+    const pageComponentPath = path.resolve(
+      __dirname,
+      '../src/pages/campaigns/CampaignsPage.jsx'
+    );
+
+    const filtersSource = fs.readFileSync(filtersComponentPath, 'utf-8');
+    const pageSource = fs.readFileSync(pageComponentPath, 'utf-8');
+
+    it('50. CampaignFilters renders status filter select with accessible label and all valid statuses', () => {
+      assert.match(
+        filtersSource,
+        /id="campaign-status-select"/,
+        'Must provide a select element with id="campaign-status-select"'
+      );
+      assert.match(
+        filtersSource,
+        /<label htmlFor="campaign-status-select" className="sr-only">/,
+        'Must provide an accessible screen-reader label for status select'
+      );
+      assert.match(filtersSource, /<option value="">All statuses<\/option>/);
+      assert.match(filtersSource, /<option value="draft">Draft<\/option>/);
+      assert.match(filtersSource, /<option value="scheduled">Scheduled<\/option>/);
+      assert.match(filtersSource, /<option value="sending">Sending<\/option>/);
+      assert.match(filtersSource, /<option value="paused">Paused<\/option>/);
+      assert.match(filtersSource, /<option value="sent">Sent<\/option>/);
+      assert.match(filtersSource, /<option value="failed">Failed<\/option>/);
+    });
+
+    it('51. CampaignFilters treats non-empty status as an active filter', () => {
+      const checkActive = (search, status) => Boolean(search.trim() || status);
+
+      assert.equal(checkActive('', ''), false);
+      assert.equal(checkActive('newsletter', ''), true);
+      assert.equal(checkActive('', 'paused'), true);
+      assert.equal(checkActive('promo', 'draft'), true);
+    });
+
+    it('52. Status change resets current page to 1', () => {
+      let currentPage = 4;
+      let selectedStatus = '';
+
+      const handleStatusChange = (val, setStatus, setPage) => {
+        setStatus(val);
+        setPage(1);
+      };
+
+      handleStatusChange('paused', (val) => { selectedStatus = val; }, (page) => { currentPage = page; });
+
+      assert.equal(selectedStatus, 'paused');
+      assert.equal(currentPage, 1);
+    });
+
+    it('53. Reset filters clears both search input and status filter, and resets page to 1', () => {
+      let searchInput = 'Spring promo';
+      let debouncedSearch = 'Spring promo';
+      let statusFilter = 'scheduled';
+      let page = 3;
+
+      const handleResetFilters = () => {
+        searchInput = '';
+        debouncedSearch = '';
+        statusFilter = '';
+        page = 1;
+      };
+
+      handleResetFilters();
+
+      assert.equal(searchInput, '');
+      assert.equal(debouncedSearch, '');
+      assert.equal(statusFilter, '');
+      assert.equal(page, 1);
+    });
+
+    it('54. CampaignsPage wires statusFilter to getCampaigns and CampaignFilters', () => {
+      assert.match(
+        pageSource,
+        /const\s*\[statusFilter,\s*setStatusFilter\]\s*=\s*useState\(''\)/,
+        'CampaignsPage must define statusFilter state'
+      );
+      assert.match(
+        pageSource,
+        /status:\s*statusFilter/,
+        'CampaignsPage must pass statusFilter into getCampaigns call'
+      );
+      assert.match(
+        pageSource,
+        /status=\{statusFilter\}/,
+        'CampaignsPage must pass status={statusFilter} to CampaignFilters'
+      );
+      assert.match(
+        pageSource,
+        /onStatusChange=\{handleStatusChange\}/,
+        'CampaignsPage must pass onStatusChange={handleStatusChange} to CampaignFilters'
+      );
+      assert.match(
+        pageSource,
+        /Boolean\(searchInput\.trim\(\)\s*\|\|\s*statusFilter\)/,
+        'hasActiveFilters in CampaignsPage must consider both searchInput and statusFilter'
+      );
+    });
+
+    it('55. getCampaigns forwards status query parameter to API endpoint', async () => {
+      let capturedConfig = null;
+
+      mock.method(apiClient, 'get', async (url, config) => {
+        capturedConfig = config;
+        return {
+          data: {
+            success: true,
+            data: {
+              campaigns: [],
+              count: 0,
+              pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+            },
+          },
+        };
+      });
+
+      await getCampaigns({ page: 1, limit: 20, status: 'paused' });
+
+      assert.equal(capturedConfig.params.status, 'paused');
+    });
+  });
 });

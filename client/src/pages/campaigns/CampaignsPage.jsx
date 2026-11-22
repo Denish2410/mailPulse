@@ -31,6 +31,7 @@ export const CampaignsPage = () => {
   const [limit, setLimit] = useState(20);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
   // Server data state
   const [campaigns, setCampaigns] = useState([]);
@@ -87,6 +88,7 @@ export const CampaignsPage = () => {
         page,
         limit,
         search: debouncedSearch,
+        status: statusFilter,
       },
       { signal: controller.signal }
     )
@@ -121,7 +123,7 @@ export const CampaignsPage = () => {
       isMounted = false;
       controller.abort();
     };
-  }, [page, limit, debouncedSearch, refreshTrigger]);
+  }, [page, limit, debouncedSearch, statusFilter, refreshTrigger]);
 
   // Clear notification banner after 4 seconds
   useEffect(() => {
@@ -138,9 +140,15 @@ export const CampaignsPage = () => {
     setPage(1);
   };
 
+  const handleStatusChange = (val) => {
+    setStatusFilter(val);
+    setPage(1);
+  };
+
   const handleResetFilters = () => {
     setSearchInput('');
     setDebouncedSearch('');
+    setStatusFilter('');
     setPage(1);
   };
 
@@ -282,7 +290,7 @@ export const CampaignsPage = () => {
     setActiveCampaignForAnalytics(null);
   };
 
-  const hasActiveFilters = Boolean(searchInput.trim());
+  const hasActiveFilters = Boolean(searchInput.trim() || statusFilter);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
@@ -396,6 +404,8 @@ export const CampaignsPage = () => {
             <CampaignFilters
               search={searchInput}
               onSearchChange={handleSearchChange}
+              status={statusFilter}
+              onStatusChange={handleStatusChange}
               onReset={handleResetFilters}
               disabled={isLoading && campaigns.length === 0}
             />
