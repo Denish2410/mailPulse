@@ -607,6 +607,42 @@ describe('Campaign CRUD APIs (/api/v1/campaigns)', () => {
       });
       assert.equal(resStringPage.status, 400);
     });
+
+    it('Filters campaigns by status, including paused campaigns', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      await Campaign.create({
+        userId: userOne._id,
+        name: 'User One Paused Campaign',
+        subject: 'Paused Subject',
+        status: 'paused',
+        pauseReason: 'SENDER_DISCONNECTED',
+      });
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns?status=paused`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.ok(data.data.campaigns.length >= 1);
+      assert.ok(data.data.campaigns.every((c) => c.status === 'paused'));
+    });
+
+    it('Rejects an invalid status query parameter with HTTP 400 and accurate error message', async (t) => {
+      if (!isDbConnected) return t.skip('MongoDB required');
+
+      const res = await fetch(`${baseUrl}/api/v1/campaigns?status=invalid_status`, {
+        headers: { Authorization: `Bearer ${tokenOne}` },
+      });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(
+        data.errors[0].message,
+        /Status must be one of draft, scheduled, sending, paused, sent, or failed/i
+      );
+    });
   });
 
   describe('4. GET /api/v1/campaigns/:id (Get Single Campaign)', () => {

@@ -229,8 +229,8 @@ export const getCampaignsQuerySchema = z.object({
         .max(100, 'Search query cannot exceed 100 characters')
         .optional(),
       status: z
-        .enum(['draft', 'scheduled', 'sending', 'sent', 'failed'], {
-          errorMap: () => ({ message: 'Status must be one of draft, scheduled, sending, sent, or failed' }),
+        .enum(['draft', 'scheduled', 'sending', 'paused', 'sent', 'failed'], {
+          error: 'Status must be one of draft, scheduled, sending, paused, sent, or failed',
         })
         .optional(),
     })
