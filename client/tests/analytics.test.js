@@ -118,6 +118,19 @@ describe('Analytics (Phase 6)', () => {
       assert.doesNotMatch(dashboard, /Ready for Step 6/);
     });
 
+    it('dashboard highlights paused and scheduled campaigns when present', () => {
+      const dashboard = readSource('../src/pages/dashboard/DashboardPage.jsx');
+      assert.match(dashboard, /data\?\.campaigns\?\.byStatus\?\.paused\s*>\s*0/);
+      assert.match(dashboard, /to="\/campaigns\?status=paused"/);
+      assert.match(dashboard, /data\?\.campaigns\?\.byStatus\?\.scheduled\s*>\s*0/);
+    });
+
+    it('campaigns page supports url search param status filtering', () => {
+      const campaignsPage = readSource('../src/pages/campaigns/CampaignsPage.jsx');
+      assert.match(campaignsPage, /useSearchParams/);
+      assert.match(campaignsPage, /searchParams\.get\(['"]status['"]\)/);
+    });
+
     it('page discloses that opens/clicks are not tracked', () => {
       assert.match(readSource('../src/pages/analytics/AnalyticsPage.jsx'), /not tracked yet/);
     });

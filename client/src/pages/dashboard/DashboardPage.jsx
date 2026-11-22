@@ -48,6 +48,29 @@ export const DashboardPage = () => {
           </div>
         </div>
 
+        {/* Paused Campaigns Attention Banner */}
+        {data?.campaigns?.byStatus?.paused > 0 && (
+          <div
+            className="mb-8 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm flex items-center justify-between shadow-lg"
+            role="alert"
+          >
+            <div className="flex items-center gap-2.5">
+              <svg className="w-5 h-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>
+                You have {data.campaigns.byStatus.paused} paused {data.campaigns.byStatus.paused === 1 ? 'campaign' : 'campaigns'} requiring attention.
+              </span>
+            </div>
+            <Link
+              to="/campaigns?status=paused"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 transition-colors cursor-pointer"
+            >
+              <span>Review Paused Campaigns →</span>
+            </Link>
+          </div>
+        )}
+
         {/* Workspace Diagnostics & Status */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <div className="lg:col-span-1 bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
@@ -63,6 +86,18 @@ export const DashboardPage = () => {
             <div className="space-y-2 text-xs text-slate-400">
               <SummaryRow label="Contacts" value={show((d) => formatCount(d.contacts.total))} />
               <SummaryRow label="Draft campaigns" value={show((d) => formatCount(d.campaigns.byStatus.draft))} />
+              {data?.campaigns?.byStatus?.scheduled > 0 && (
+                <SummaryRow label="Scheduled campaigns" value={formatCount(data.campaigns.byStatus.scheduled)} />
+              )}
+              {data?.campaigns?.byStatus?.paused > 0 && (
+                <div className="flex items-center justify-between py-1.5 border-b border-slate-800 text-amber-400 font-medium">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    Paused campaigns
+                  </span>
+                  <span className="tabular-nums">{formatCount(data.campaigns.byStatus.paused)}</span>
+                </div>
+              )}
               <SummaryRow label="Sent campaigns" value={show((d) => formatCount(d.campaigns.byStatus.sent))} />
               <SummaryRow label="Emails accepted" value={show((d) => formatCount(d.period.sent))} />
               <SummaryRow label="Acceptance rate" value={show((d) => formatRate(d.period.acceptanceRate))} last />

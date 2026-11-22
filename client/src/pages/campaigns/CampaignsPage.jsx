@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Navbar from '../../components/layout/Navbar.jsx';
 import CampaignFilters from '../../components/campaigns/CampaignFilters.jsx';
 import CampaignsTable from '../../components/campaigns/CampaignsTable.jsx';
@@ -27,11 +28,20 @@ import { computePageAfterDeletion } from '../../utils/campaignHelpers.js';
  */
 export const CampaignsPage = () => {
   // Query parameters state
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Sync initial status filter from URL if present (e.g. /campaigns?status=paused)
+  useEffect(() => {
+    const statusParam = searchParams.get('status');
+    if (statusParam && ['draft', 'scheduled', 'sending', 'paused', 'sent', 'failed'].includes(statusParam)) {
+      setStatusFilter(statusParam);
+    }
+  }, [searchParams]);
 
   // Server data state
   const [campaigns, setCampaigns] = useState([]);
