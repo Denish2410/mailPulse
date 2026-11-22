@@ -19,7 +19,8 @@ import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Campaign from '../src/models/Campaign.js';
-import { installAutoSender } from './helpers/sender.js';
+import SenderAccount from '../src/models/SenderAccount.js';
+import { installAutoSender, createTestSender } from './helpers/sender.js';
 installAutoSender(Campaign);
 import Delivery from '../src/models/Delivery.js';
 import { connectDB } from '../src/config/db.js';
@@ -132,6 +133,43 @@ describe('Campaign duplicate API', () => {
     assert.equal(copy.scheduledAt, null);
     assert.equal(copy.name.length, 120);
     assert.ok(copy.name.startsWith('Copy of '));
+  });
+
+  it('preserves usable senderAccountId on the duplicate draft', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const sender = await createTestSender(userOne._id, { email: 'active-sender@example.com' });
+    const original = await Campaign.create({
+      userId: userOne._id,
+      name: 'Sender Test Campaign',
+      subject: 'Subject',
+      senderAccountId: sender._id,
+    });
+
+    const res = await duplicate(original._id);
+    assert.equal(res.status, 201);
+    const copy = (await res.json()).data.campaign;
+    assert.equal(copy.senderAccountId, String(sender._id));
+    assert.equal(copy.sender?.email, 'active-sender@example.com');
+  });
+
+  it('falls back to null senderAccountId if the sender is disconnected or deleted', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    const disconnectedSender = await createTestSender(userOne._id, {
+      email: 'disc-sender@example.com',
+      status: 'disconnected',
+    });
+    const original = await Campaign.create({
+      userId: userOne._id,
+      name: 'Disconnected Sender Campaign',
+      subject: 'Subject',
+      senderAccountId: disconnectedSender._id,
+    });
+
+    const res = await duplicate(original._id);
+    assert.equal(res.status, 201);
+    const copy = (await res.json()).data.campaign;
+    assert.equal(copy.senderAccountId, null);
+    assert.equal(copy.sender, null);
   });
 
   it('enforces authentication, id validation and ownership', async (t) => {

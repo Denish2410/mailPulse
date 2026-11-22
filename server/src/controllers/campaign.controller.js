@@ -1086,6 +1086,15 @@ export const duplicateCampaign = asyncHandler(async (req, res) => {
   const prefix = 'Copy of ';
   const name = `${prefix}${source.name}`.slice(0, 120).trim();
 
+  let verifiedSenderId = null;
+  if (source.senderAccountId) {
+    try {
+      verifiedSenderId = await verifySelectedSender(userId, source.senderAccountId);
+    } catch {
+      verifiedSenderId = null;
+    }
+  }
+
   const copy = await Campaign.create({
     userId,
     name,
@@ -1094,6 +1103,7 @@ export const duplicateCampaign = asyncHandler(async (req, res) => {
     textContent: source.textContent ?? '',
     htmlContent: source.htmlContent ?? '',
     recipientIds: (source.recipientIds || []).slice(0, MAX_CAMPAIGN_RECIPIENTS),
+    senderAccountId: verifiedSenderId,
     status: 'draft',
   });
 
