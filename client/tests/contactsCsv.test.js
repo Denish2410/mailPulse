@@ -1,5 +1,11 @@
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import { apiClient } from '../src/lib/api.js';
 import { importContacts, exportContacts } from '../src/api/contacts.js';
@@ -70,5 +76,13 @@ describe('CSV helpers', () => {
   it('ships a valid template and degrades outside the browser', () => {
     assert.ok(CSV_TEMPLATE.startsWith('name,email,tags'));
     assert.equal(downloadTextFile('x.csv', 'a'), false);
+  });
+
+  it('ImportContactsDialog implements accessible dialog role, aria-modal, and Escape key dismissal', () => {
+    const dialogPath = path.resolve(__dirname, '../src/components/contacts/ImportContactsDialog.jsx');
+    const source = fs.readFileSync(dialogPath, 'utf8');
+    assert.match(source, /role="dialog"/);
+    assert.match(source, /aria-modal="true"/);
+    assert.match(source, /e\.key === 'Escape'/);
   });
 });

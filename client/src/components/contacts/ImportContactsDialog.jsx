@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { importContacts } from '../../api/contacts.js';
 import {
   CSV_TEMPLATE,
@@ -21,6 +21,17 @@ export const ImportContactsDialog = ({ onClose, onImported }) => {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  // Dismiss dialog on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !isImporting) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isImporting, onClose]);
 
   const handleFile = (e) => {
     const selected = e.target.files?.[0] ?? null;
