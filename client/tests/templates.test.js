@@ -14,9 +14,16 @@ import {
   insertAtSelection,
   validateTemplateForm,
   templateToCampaignFields,
+  formatTemplateOptionLabel,
   getTemplateErrorMessage,
   MERGE_TAG_OPTIONS,
 } from '../src/utils/templateHelpers.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 describe('Templates API client', () => {
   afterEach(() => mock.restoreAll());
@@ -86,5 +93,23 @@ describe('Template helpers', () => {
     assert.match(getTemplateErrorMessage({ response: { status: 409, data: {} } }), /already exists/);
     assert.match(getTemplateErrorMessage({ response: { status: 404 } }), /no longer exists/);
     assert.match(getTemplateErrorMessage({}), /Something went wrong/);
+  });
+
+  it('formats template option labels with name and subject', () => {
+    assert.equal(
+      formatTemplateOptionLabel({ name: 'Welcome', subject: 'Glad to have you' }),
+      'Welcome — "Glad to have you"'
+    );
+    assert.equal(formatTemplateOptionLabel({ name: 'Newsletter', subject: '' }), 'Newsletter');
+    assert.equal(formatTemplateOptionLabel({ name: 'Plain' }), 'Plain');
+    assert.equal(formatTemplateOptionLabel(null), '');
+  });
+
+  it('TemplateFormDialog implements accessible dialog role, aria-modal, and Escape key dismissal', () => {
+    const dialogPath = path.resolve(__dirname, '../src/components/templates/TemplateFormDialog.jsx');
+    const source = fs.readFileSync(dialogPath, 'utf8');
+    assert.match(source, /role="dialog"/);
+    assert.match(source, /aria-modal="true"/);
+    assert.match(source, /e\.key === 'Escape'/);
   });
 });

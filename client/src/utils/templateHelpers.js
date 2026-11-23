@@ -80,6 +80,19 @@ export const templateToCampaignFields = (template) => ({
 });
 
 /**
+ * Formats a template for display in dropdown options (e.g. TemplatePicker).
+ *
+ * @param {{ name?: string, subject?: string }|null} template
+ * @returns {string}
+ */
+export const formatTemplateOptionLabel = (template) => {
+  if (!template) return '';
+  const name = template.name || 'Untitled';
+  const subject = template.subject ? template.subject.trim() : '';
+  return subject ? `${name} — "${subject}"` : name;
+};
+
+/**
  * Friendly message for template API failures.
  */
 export const getTemplateErrorMessage = (error) => {

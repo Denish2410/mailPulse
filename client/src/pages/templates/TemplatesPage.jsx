@@ -83,6 +83,18 @@ export const TemplatesPage = () => {
     }
   };
 
+  // Dismiss delete dialog on Escape key
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !isDeleting) {
+        setPendingDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingDelete, isDeleting]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <Navbar />
@@ -204,7 +216,7 @@ export const TemplatesPage = () => {
 
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="alertdialog" aria-modal="true" aria-label="Confirm template deletion">
-          <div className="fixed inset-0 bg-slate-950/80" aria-hidden="true" />
+          <div className="fixed inset-0 bg-slate-950/80" aria-hidden="true" onClick={() => !isDeleting && setPendingDelete(null)} />
           <div className="relative z-10 w-full max-w-sm p-6 rounded-2xl bg-slate-900 border border-slate-800">
             <p className="text-sm text-slate-200">
               Delete template <strong>{pendingDelete.name}</strong>? Campaigns already created from it are not affected.

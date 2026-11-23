@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getTemplates } from '../../api/templates.js';
+import { formatTemplateOptionLabel } from '../../utils/templateHelpers.js';
 
 /**
  * "Start from template" selector. Loads the user's templates once and reports the chosen one.
@@ -41,7 +42,7 @@ export const TemplatePicker = ({ onApply, disabled = false }) => {
           <option value="">Choose a template…</option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.name}
+              {formatTemplateOptionLabel(t)}
             </option>
           ))}
         </select>

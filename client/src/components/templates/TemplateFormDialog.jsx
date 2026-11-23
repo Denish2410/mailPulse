@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import MergeTagToolbar from './MergeTagToolbar.jsx';
 import {
   insertAtSelection,
@@ -30,6 +30,17 @@ export const TemplateFormDialog = ({ template = null, onClose, onSubmit }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const lastFieldRef = useRef('htmlContent');
   const fieldRefs = useRef({});
+
+  // Dismiss dialog on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSubmitting, onClose]);
 
   const setField = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
