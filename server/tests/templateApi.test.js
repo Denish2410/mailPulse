@@ -137,6 +137,35 @@ describe('Template API (/api/v1/templates)', () => {
     assert.equal(res.status, 404);
   });
 
+  it('searches templates across both name and subject with owner isolation', async (t) => {
+    if (!isDbConnected) return t.skip('MongoDB required');
+    await request('POST', '/api/v1/templates', { body: { name: 'Alpha Newsletter', subject: 'Weekly digest' } });
+    await request('POST', '/api/v1/templates', { body: { name: 'Beta Launch', subject: 'Special discount inside' } });
+
+    // Search by name
+    let res = await request('GET', '/api/v1/templates?search=alpha');
+    let data = (await res.json()).data;
+    assert.equal(data.count, 1);
+    assert.equal(data.templates[0].name, 'Alpha Newsletter');
+
+    // Search by subject
+    res = await request('GET', '/api/v1/templates?search=discount');
+    data = (await res.json()).data;
+    assert.equal(data.count, 1);
+    assert.equal(data.templates[0].name, 'Beta Launch');
+
+    // Case-insensitivity
+    res = await request('GET', '/api/v1/templates?search=WEEKLY');
+    data = (await res.json()).data;
+    assert.equal(data.count, 1);
+    assert.equal(data.templates[0].name, 'Alpha Newsletter');
+
+    // Tenant isolation on search: userTwo searching 'discount' should see 0
+    res = await request('GET', '/api/v1/templates?search=discount', { token: tokenTwo });
+    data = (await res.json()).data;
+    assert.equal(data.count, 0);
+  });
+
   it('rejects duplicate names per user with 409 but allows them across users', async (t) => {
     if (!isDbConnected) return t.skip('MongoDB required');
     const body = { name: 'Newsletter' };

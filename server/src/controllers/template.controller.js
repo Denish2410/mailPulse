@@ -60,7 +60,10 @@ export const getTemplates = asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, search } = req.query;
 
   const filter = { userId };
-  if (search) filter.name = new RegExp(escapeRegex(search), 'i');
+  if (search && typeof search === 'string' && search.trim().length > 0) {
+    const searchRegex = new RegExp(escapeRegex(search.trim()), 'i');
+    filter.$or = [{ name: searchRegex }, { subject: searchRegex }];
+  }
 
   const [templates, total] = await Promise.all([
     Template.find(filter)
